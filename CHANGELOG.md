@@ -16,8 +16,9 @@ First release.
 - Single window: starting NeonNet again with a URL adds a tab to the running window.
 - Window position and the scanline setting are remembered.
 - Per-user installer without admin rights, Start menu and desktop shortcuts, and uninstall from Settings > Apps (browsing data optionally removed too).
+- Automatic updates from GitHub releases: background download, SHA-256 check, silent install when NeonNet closes, "Restart to update" in the menu, and an on/off switch.
 
 ### Known limitations
-- No Widevine DRM, no extensions, no find-in-page.
+- No Widevine DRM, no extensions (extensions registered by other software are blocked), no find-in-page.
 - Session cookies are not kept after the browser closes.
 - Chromium processes take a few seconds to exit after the window closes.

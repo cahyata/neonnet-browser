@@ -377,6 +377,8 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int show) {
     gInstallDir = Known(FOLDERID_LocalAppData) + L"\\Programs\\NeonNet";
     gExe = gInstallDir + L"\\NeonNet.exe";
 
+    bool silent = false, relaunch = false;
+    DWORD waitPid = 0;
     int argc = 0;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     for (int i = 1; argv && i < argc; i++) {
@@ -385,10 +387,32 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int show) {
             gInstallDir = argv[i] + 13;
             gExe = gInstallDir + L"\\NeonNet.exe";
         }
+        else if (_wcsicmp(argv[i], L"--silent") == 0) silent = true;
+        else if (_wcsicmp(argv[i], L"--relaunch") == 0) relaunch = true;
+        else if (wcsncmp(argv[i], L"--wait-pid=", 11) == 0) waitPid = wcstoul(argv[i] + 11, nullptr, 10);
     }
     if (argv) LocalFree(argv);
     if (gExtractOnly) {
         bool ok = Install();
+        CoUninitialize();
+        return ok ? 0 : 1;
+    }
+    if (silent) {
+        // Started by NeonNet's auto-updater: no UI. Wait for the browser to exit first.
+        if (waitPid) {
+            if (HANDLE p = OpenProcess(SYNCHRONIZE, FALSE, waitPid)) { WaitForSingleObject(p, 60000); CloseHandle(p); }
+        }
+        for (int i = 0; i < 60 && AppRunning(); i++) Sleep(500);   // Chromium helper processes
+        // keep the user's earlier choice for the desktop shortcut
+        gDesktop = GetFileAttributesW((Known(FOLDERID_Desktop) + L"\\" + SHORTCUT).c_str()) != INVALID_FILE_ATTRIBUTES;
+        bool ok = Install();
+        HKEY k;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\NeonNet", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &k, nullptr) == ERROR_SUCCESS) {
+            if (ok) RegDeleteValueW(k, L"UpdateResult");
+            else SetStr(k, L"UpdateResult", gMsg);
+            RegCloseKey(k);
+        }
+        if (ok && relaunch) ShellExecuteW(nullptr, L"open", gExe.c_str(), nullptr, gInstallDir.c_str(), SW_SHOWNORMAL);
         CoUninitialize();
         return ok ? 0 : 1;
     }

@@ -13,7 +13,7 @@ Good to know:
 - NeonNet is installed for the current Windows account only, so no admin rights are needed.
 - It needs about 450 MB of disk space.
 - If NeonNet is running, the installer asks you to close it first.
-- To upgrade, run the installer of the newer version. Files are replaced and your browsing data is kept.
+- Later versions install themselves (see [Updates](#updates)). You can also run a newer installer by hand; files are replaced and your browsing data is kept.
 
 Windows SmartScreen may warn that the app is unrecognized, because the installer is not signed with a code signing certificate. Click **More info**, then **Run anyway**, if you trust where the file came from.
 
@@ -63,7 +63,7 @@ Press Esc to cancel typing and restore the current page's address.
 
 ## The `≡` menu
 
-New tab, close tab, zoom, print, scanlines on/off, fullscreen, developer tools, and **About NeonNet** (Chromium version and the shortcut list).
+New tab, close tab, zoom, print, scanlines on/off, fullscreen, developer tools, the update options (see [Updates](#updates)), and **About NeonNet** (Chromium version and the shortcut list).
 
 ## Right-click on a page
 
@@ -79,13 +79,38 @@ The `SCAN` button turns a thin CRT line effect over every page on or off. It is 
 
 NeonNet asks where to save each download. Progress appears in the status bar ("DOWNLOADING file-name 42%").
 
+## Updates
+
+NeonNet updates itself:
+
+1. About 10 seconds after it starts, and then once a day while it runs, NeonNet asks GitHub for the latest release.
+2. If there is a newer version, it downloads the installer in the background. The status bar shows "DOWNLOADING UPDATE v1.0.1 42%".
+3. The download is checked against the SHA-256 checksum published with the release. A file that does not match is deleted.
+4. When it is ready, the status bar shows "UPDATE v1.0.1 READY - INSTALLS WHEN NEONNET CLOSES". The update is installed after you close NeonNet, and takes about 10–30 seconds.
+5. The next time you open NeonNet, the status bar briefly shows "UPDATED TO NEONNET 1.0.1".
+
+Options in the `≡` menu:
+
+| Item | What it does |
+|---|---|
+| Restart to update to v… | Shown when an update is ready. Closes NeonNet, installs the update and opens NeonNet again. |
+| Check for updates | Checks right away and shows the result in the status bar |
+| Automatic updates | Turns the daily check on or off |
+
+If an update fails, the status bar says so on the next start, and NeonNet tries again later.
+
+Privacy: each check sends one request to `api.github.com`, and downloads come from GitHub. GitHub sees your IP address, like for any website. No other data is sent. Turn off **Automatic updates** to stop the checks.
+
+Automatic updates only work for the installed copy (in `%LOCALAPPDATA%\Programs\NeonNet`). A copy started from anywhere else only tells you that a new version exists.
+
 ## Where things are stored
 
 | What | Location |
 |---|---|
 | Application | `%LOCALAPPDATA%\Programs\NeonNet` |
 | Profile (history, cookies, cache, sign-ins) | `%LOCALAPPDATA%\NeonNet\Profile` |
-| Settings (scanlines, window position) | Registry `HKEY_CURRENT_USER\Software\NeonNet` |
+| Downloaded updates (deleted after installing) | `%LOCALAPPDATA%\NeonNet\Updates` |
+| Settings (scanlines, window position, automatic updates) | Registry `HKEY_CURRENT_USER\Software\NeonNet` |
 | Shortcuts | Start menu `NeonNet`, and the desktop if chosen |
 
 Session cookies (cookies without an expiry date) are cleared when NeonNet closes, as in Chrome's default setup. Normal sign-in cookies are kept.
@@ -105,10 +130,10 @@ NeonNet carries a complete Chromium, so it does not depend on any other browser 
 Paid streaming services need the Widevine DRM module, which requires a separate license from Google. It is not included.
 
 **Does NeonNet update itself?**
-No. Install a newer version by running its installer.
+Yes, unless you turn off **Automatic updates** in the `≡` menu. See [Updates](#updates).
 
 **Is it safe?**
-NeonNet uses the same Chromium sandbox as Chrome. Its security depends on how recent the bundled Chromium is, so keep NeonNet up to date.
+NeonNet uses the same Chromium sandbox as Chrome. Its security depends on how recent the bundled Chromium is, so leave automatic updates on.
 
 **I have an older NeonNet installed. What happens when I install this one?**
 The installer uses the same folder and replaces the older version. Close the old NeonNet before installing.

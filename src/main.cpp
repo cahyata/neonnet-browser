@@ -30,6 +30,7 @@
 #include "include/cef_sandbox_win.h"
 #include "include/cef_scheme.h"
 #include "resource.h"
+#include "updater.h"
 #include <windowsx.h>   // after CEF headers: its macros (GetFirstChild...) clash with cef_dom.h
 
 // ---------------------------------------------------------------------------
@@ -57,11 +58,25 @@ static const wchar_t* SHORTCUT_NAME = L"NeonNet.lnk";
 
 static const UINT WM_APP_CMD = WM_APP + 1;      // lParam = new std::wstring (chrome UI command)
 static const UINT WM_APP_OPEN = WM_APP + 2;     // lParam = new std::wstring (url from a 2nd instance)
+static const UINT WM_APP_UPDATE = WM_APP + 3;   // lParam = new UpdateMsg (from the updater thread)
+
+static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4;
+static const ULONGLONG UPDATE_INTERVAL_MS = 24ull * 60 * 60 * 1000;   // check at most once a day
 
 enum Cmd {
     CMD_NEWTAB = 1, CMD_CLOSETAB, CMD_ZOOMIN, CMD_ZOOMOUT, CMD_ZOOMRESET, CMD_SCAN,
     CMD_FULLSCREEN, CMD_DEVTOOLS, CMD_ABOUT, CMD_RELOAD, CMD_STOP, CMD_BACK, CMD_FWD,
-    CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT
+    CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
+    CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE
+};
+
+// Updater states (see "Auto update" below)
+enum UpdState { U_IDLE, U_CHECKING, U_DOWNLOADING, U_READY, U_AVAILABLE, U_UPTODATE, U_FAILED };
+struct UpdateMsg {
+    UpdState state = U_IDLE;
+    int percent = 0;
+    bool manual = false;
+    std::wstring version, path, page, error;
 };
 enum { MENU_OPEN_LINK_TAB = MENU_ID_USER_FIRST, MENU_INSPECT };
 
@@ -95,6 +110,13 @@ struct App {
     std::wstring startUrl;
     bool closing = false;
     int devtools = 0;
+    // auto update
+    UpdState upd = U_IDLE;
+    int updPercent = 0;
+    std::wstring updVersion, updPath, updPage, notice;
+    bool updRelaunch = false;
+    std::atomic<bool> updCancel{ false };
+    HANDLE updThread = nullptr;
 };
 static App g;
 
@@ -757,6 +779,203 @@ public:
 };
 
 // ---------------------------------------------------------------------------
+// Auto update
+//
+// The installed copy checks the latest GitHub release of UPDATE_REPO at most once a day.
+// A newer NeonNet-Setup.exe is downloaded in the background, verified against the
+// release's NeonNet-Setup.exe.sha256, and run with --silent after NeonNet closes.
+// A copy running from anywhere else (for example build\app) only reports new versions.
+
+static std::wstring UpdatesDir() { return KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME + L"\\Updates"; }
+
+static bool IsInstalledCopy() {
+    wchar_t self[MAX_PATH]; GetModuleFileNameW(nullptr, self, MAX_PATH);
+    PathRemoveFileSpecW(self);
+    std::wstring dir = KnownFolder(FOLDERID_LocalAppData) + L"\\Programs\\" + APP_DIR_NAME;
+    return _wcsicmp(self, dir.c_str()) == 0;
+}
+
+static bool AutoUpdateEnabled() { return RegGetDword(L"AutoUpdate", 1) != 0; }
+
+static ULONGLONG NowMs() {
+    FILETIME ft; GetSystemTimeAsFileTime(&ft);
+    return (((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime) / 10000;
+}
+
+static ULONGLONG RegGetQword(const wchar_t* name) {
+    ULONGLONG v = 0; DWORD sz = sizeof(v);
+    if (RegGetValueW(HKEY_CURRENT_USER, REG_KEY, name, RRF_RT_REG_QWORD, nullptr, &v, &sz) != ERROR_SUCCESS) return 0;
+    return v;
+}
+
+static std::wstring RegGetString(const wchar_t* name) {
+    wchar_t buf[512] = {}; DWORD sz = sizeof(buf);
+    if (RegGetValueW(HKEY_CURRENT_USER, REG_KEY, name, RRF_RT_REG_SZ, nullptr, buf, &sz) != ERROR_SUCCESS) return {};
+    return buf;
+}
+
+static void PostUpdate(const UpdateMsg& m) {
+    auto* p = new UpdateMsg(m);
+    if (!PostMessageW(g.hwnd, WM_APP_UPDATE, 0, (LPARAM)p)) delete p;
+}
+
+static bool HasPayloadFooter(const std::wstring& path) {
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size{}; GetFileSizeEx(f, &size);
+    char magic[8] = {}; DWORD rd = 0;
+    LARGE_INTEGER pos; pos.QuadPart = size.QuadPart - 8;
+    bool ok = size.QuadPart > 16 && SetFilePointerEx(f, pos, nullptr, FILE_BEGIN) && ReadFile(f, magic, 8, &rd, nullptr) && rd == 8;
+    CloseHandle(f);
+    return ok && memcmp(magic, "NEONPAK1", 8) == 0;
+}
+
+// Runs on the updater thread: talks to the network and the disk, reports back with PostUpdate().
+static void UpdateWorker(bool manual, bool download) {
+    std::atomic<bool>* cancel = &g.updCancel;
+    UpdateMsg m; m.manual = manual;
+    auto fail = [&](const std::wstring& why) { m.state = U_FAILED; m.error = why; PostUpdate(m); };
+
+    std::string json; DWORD status = 0;
+    if (!upd::HttpGet(L"https://api.github.com/repos/" UPDATE_REPO L"/releases/latest", &json, nullptr,
+                      2 * 1024 * 1024, nullptr, cancel, &status)) {
+        return fail(status == 404 ? L"no release published yet" : status ? L"server answered " + std::to_wstring(status) : L"no connection");
+    }
+    ULONGLONG now = NowMs();
+    RegSetBin(L"LastUpdateCheck", REG_QWORD, &now, sizeof(now));
+
+    upd::Release rel; std::wstring err;
+    if (!upd::ParseLatest(json, UPDATE_REPO, rel, err)) return fail(err);
+    m.version = rel.version; m.page = rel.pageUrl;
+    if (upd::CompareVersions(rel.version, APP_VERSION) <= 0) { m.state = U_UPTODATE; PostUpdate(m); return; }
+    if (!download) { m.state = U_AVAILABLE; PostUpdate(m); return; }
+
+    std::string shaText;
+    if (!upd::HttpGet(rel.shaUrl, &shaText, nullptr, 4096, nullptr, cancel, &status)) return fail(L"checksum download failed");
+    std::string want = upd::ParseShaFile(shaText);
+    if (want.empty()) return fail(L"checksum file is invalid");
+
+    std::wstring dir = UpdatesDir();
+    SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
+    std::wstring dest = dir + L"\\NeonNet-Setup-" + rel.version + L".exe";
+    std::string have;
+    if (!(upd::Sha256File(dest, have) && have == want)) {
+        std::wstring part = dest + L".part";
+        HANDLE f = CreateFileW(part.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (f == INVALID_HANDLE_VALUE) return fail(L"cannot write the update");
+        int last = -1;
+        std::wstring ver = rel.version;
+        bool ok = upd::HttpGet(rel.installerUrl, nullptr, f, 0, [&](ULONGLONG got, ULONGLONG total) {
+            int pct = total ? (int)(got * 100 / total) : 0;
+            if (pct != last) {
+                last = pct;
+                UpdateMsg p; p.state = U_DOWNLOADING; p.percent = pct; p.version = ver; p.manual = manual;
+                PostUpdate(p);
+            }
+        }, cancel, &status);
+        CloseHandle(f);
+        if (!ok || !upd::Sha256File(part, have) || have != want || !HasPayloadFooter(part)) {
+            DeleteFileW(part.c_str());
+            return fail(ok ? L"download did not match its checksum" : L"download failed");
+        }
+        DeleteFileW(dest.c_str());
+        if (!MoveFileExW(part.c_str(), dest.c_str(), MOVEFILE_REPLACE_EXISTING)) return fail(L"cannot store the update");
+    }
+    m.state = U_READY; m.path = dest;
+    PostUpdate(m);
+}
+
+static DWORD WINAPI UpdateThread(LPVOID arg) {
+    int flags = (int)(INT_PTR)arg;
+    UpdateWorker((flags & 1) != 0, (flags & 2) != 0);
+    return 0;
+}
+
+static void ShowNotice(const std::wstring& text) {
+    g.notice = text;
+    SetTimer(g.hwnd, TIMER_NOTICE, 8000, nullptr);
+    InvalidateStatus();
+}
+
+static void StartUpdateCheck(bool manual) {
+    if (g.closing || g.upd == U_CHECKING || g.upd == U_DOWNLOADING) return;
+    if (g.upd == U_READY) { if (manual) ShowNotice(L"UPDATE v" + g.updVersion + L" IS READY - USE THE MENU TO RESTART"); return; }
+    if (g.updThread) { WaitForSingleObject(g.updThread, 0); CloseHandle(g.updThread); g.updThread = nullptr; }
+    g.upd = U_CHECKING;
+    if (manual) { g.notice = L"CHECKING FOR UPDATES..."; KillTimer(g.hwnd, TIMER_NOTICE); InvalidateStatus(); }
+    int flags = (manual ? 1 : 0) | (IsInstalledCopy() ? 2 : 0);
+    g.updThread = CreateThread(nullptr, 0, UpdateThread, (LPVOID)(INT_PTR)flags, 0, nullptr);
+    if (!g.updThread) g.upd = U_IDLE;
+}
+
+static std::wstring Upper(std::wstring s) { for (auto& c : s) c = towupper(c); return s; }
+
+static void OnUpdateMsg(const UpdateMsg& m) {
+    switch (m.state) {
+    case U_DOWNLOADING: g.upd = U_DOWNLOADING; g.updPercent = m.percent; g.updVersion = m.version; break;
+    case U_READY: g.upd = U_READY; g.updVersion = m.version; g.updPath = m.path; g.notice.clear(); break;
+    case U_AVAILABLE: g.upd = U_AVAILABLE; g.updVersion = m.version; g.updPage = m.page; g.notice.clear(); break;
+    case U_UPTODATE:
+        g.upd = U_IDLE;
+        if (m.manual) ShowNotice(L"NEONNET " APP_VERSION L" IS UP TO DATE");
+        break;
+    case U_FAILED:
+        g.upd = U_IDLE;
+        if (m.manual) ShowNotice(L"UPDATE CHECK FAILED: " + Upper(m.error));
+        break;
+    default: break;
+    }
+    InvalidateStatus();
+}
+
+// Hourly timer: starts a background check when automatic updates are on and the last
+// successful check is more than a day old.
+static void MaybeAutoCheck() {
+    SetTimer(g.hwnd, TIMER_UPDATE, 60 * 60 * 1000, nullptr);
+    if (!IsInstalledCopy() || !AutoUpdateEnabled()) return;
+    if (NowMs() - RegGetQword(L"LastUpdateCheck") < UPDATE_INTERVAL_MS) return;
+    StartUpdateCheck(false);
+}
+
+// At startup: remove installers left from earlier updates and report the last update.
+static void UpdateStartup() {
+    WIN32_FIND_DATAW fd;
+    std::wstring dir = UpdatesDir();
+    HANDLE f = FindFirstFileW((dir + L"\\NeonNet-Setup-*").c_str(), &fd);
+    if (f != INVALID_HANDLE_VALUE) {
+        do { DeleteFileW((dir + L"\\" + fd.cFileName).c_str()); } while (FindNextFileW(f, &fd));
+        FindClose(f);
+    }
+    std::wstring failed = RegGetString(L"UpdateResult");
+    std::wstring last = RegGetString(L"LastRunVersion");
+    if (!failed.empty()) {
+        ShowNotice(L"UPDATE FAILED: " + Upper(failed));
+        HKEY k;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_SET_VALUE, &k) == ERROR_SUCCESS) { RegDeleteValueW(k, L"UpdateResult"); RegCloseKey(k); }
+    } else if (!last.empty() && upd::CompareVersions(APP_VERSION, last) > 0) {
+        ShowNotice(L"UPDATED TO NEONNET " APP_VERSION);
+    }
+    std::wstring cur = APP_VERSION;
+    RegSetBin(L"LastRunVersion", REG_SZ, cur.c_str(), (DWORD)((cur.size() + 1) * sizeof(wchar_t)));
+    SetTimer(g.hwnd, TIMER_UPDATE, 10 * 1000, nullptr);   // first check shortly after start
+}
+
+// After CEF has shut down: run a downloaded installer, which waits for this process to exit.
+static void UpdateShutdown() {
+    g.updCancel = true;
+    if (g.updThread) { WaitForSingleObject(g.updThread, 5000); CloseHandle(g.updThread); g.updThread = nullptr; }
+    if (g.upd != U_READY || g.updPath.empty()) return;
+    std::wstring cmd = L"\"" + g.updPath + L"\" --silent --wait-pid=" + std::to_wstring(GetCurrentProcessId());
+    if (g.updRelaunch) cmd += L" --relaunch";
+    STARTUPINFOW si{ sizeof(si) };
+    PROCESS_INFORMATION pi{};
+    if (CreateProcessW(g.updPath.c_str(), cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Commands
 
 static void ShowAbout() {
@@ -810,9 +1029,18 @@ static void ExecCmd(int cmd) {
         if (b) { CefWindowInfo wi; wi.SetAsPopup(nullptr, "NeonNet DevTools"); b->GetHost()->ShowDevTools(wi, new DevToolsClient(), CefBrowserSettings(), CefPoint()); }
         break;
     case CMD_ABOUT: ShowAbout(); break;
+    case CMD_UPDATE_CHECK: StartUpdateCheck(true); break;
+    case CMD_UPDATE_AUTO: {
+        DWORD v = AutoUpdateEnabled() ? 0 : 1;
+        RegSetBin(L"AutoUpdate", REG_DWORD, &v, sizeof(v));
+        ShowNotice(v ? L"AUTOMATIC UPDATES ON" : L"AUTOMATIC UPDATES OFF");
+        break;
+    }
+    case CMD_UPDATE_RESTART: g.updRelaunch = true; PostMessageW(g.hwnd, WM_CLOSE, 0, 0); break;
+    case CMD_UPDATE_PAGE: if (!g.updPage.empty()) CreateTab(g.updPage, true); break;
     }
     // zoom changes are async; refresh the status bar shortly after
-    if (cmd == CMD_ZOOMIN || cmd == CMD_ZOOMOUT || cmd == CMD_ZOOMRESET) SetTimer(g.hwnd, 2, 150, nullptr);
+    if (cmd == CMD_ZOOMIN || cmd == CMD_ZOOMOUT || cmd == CMD_ZOOMRESET) SetTimer(g.hwnd, TIMER_ZOOM, 150, nullptr);
 }
 
 static void ShowMenu(int cssX, int cssY) {
@@ -829,6 +1057,11 @@ static void ShowMenu(int cssX, int cssY) {
     AppendMenuW(m, MF_STRING | (g.fullscreen ? MF_CHECKED : 0), CMD_FULLSCREEN, L"Fullscreen\tF11");
     AppendMenuW(m, MF_STRING, CMD_DEVTOOLS, L"Developer tools\tF12");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    if (g.upd == U_READY) AppendMenuW(m, MF_STRING, CMD_UPDATE_RESTART, (L"Restart to update to v" + g.updVersion).c_str());
+    if (g.upd == U_AVAILABLE) AppendMenuW(m, MF_STRING, CMD_UPDATE_PAGE, (L"Download v" + g.updVersion + L"...").c_str());
+    bool busy = g.upd == U_CHECKING || g.upd == U_DOWNLOADING;
+    AppendMenuW(m, MF_STRING | (busy ? MF_GRAYED : 0), CMD_UPDATE_CHECK, L"Check for updates");
+    if (IsInstalledCopy()) AppendMenuW(m, MF_STRING | (AutoUpdateEnabled() ? MF_CHECKED : 0), CMD_UPDATE_AUTO, L"Automatic updates");
     AppendMenuW(m, MF_STRING, CMD_ABOUT, L"About NeonNet");
     RECT c = ChromeRect();
     POINT p{ c.left + S(cssX), c.top + S(cssY) };
@@ -894,6 +1127,9 @@ public:
     void OnBeforeCommandLineProcessing(const CefString& process_type, CefRefPtr<CefCommandLine> cl) override {
         if (!process_type.empty()) return;
         cl->AppendSwitch("hide-crash-restore-bubble");
+        // Other software (download managers, antivirus) registers Chrome extensions system-wide;
+        // Chromium would load them and open their pages as stray Chrome-style windows.
+        cl->AppendSwitch("disable-extensions");
         cl->AppendSwitch("no-default-browser-check");
         cl->AppendSwitch("no-first-run");
     }
@@ -956,6 +1192,10 @@ static void Paint(HDC hdc) {
         if (!g.hoverText.empty()) { left = g.hoverText; lc = C_CYAN; }
         else if (a && a->loading) { left = L"LOADING..."; lc = C_YELLOW; }
         else if (!g.download.empty()) { left = g.download; lc = C_YELLOW; }
+        else if (!g.notice.empty()) { left = g.notice; lc = C_CYAN; }
+        else if (g.upd == U_DOWNLOADING) { left = L"DOWNLOADING UPDATE v" + g.updVersion + L"  " + std::to_wstring(g.updPercent) + L"%"; lc = C_YELLOW; }
+        else if (g.upd == U_READY) { left = L"UPDATE v" + g.updVersion + L" READY - INSTALLS WHEN NEONNET CLOSES"; lc = C_YELLOW; }
+        else if (g.upd == U_AVAILABLE) { left = L"NEONNET v" + g.updVersion + L" IS AVAILABLE - SEE THE MENU"; lc = C_YELLOW; }
         else if (a && !a->errorUrl.empty()) { left = L"SIGNAL LOST"; lc = C_PINK; }
         else left = L"LINK STABLE";
 
@@ -1051,9 +1291,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: { PAINTSTRUCT ps; HDC hdc = BeginPaint(hwnd, &ps); Paint(hdc); EndPaint(hwnd, &ps); return 0; }
     case WM_TIMER:
-        if (wp == 2) KillTimer(hwnd, 2);
+        if (wp == TIMER_ZOOM) KillTimer(hwnd, TIMER_ZOOM);
+        else if (wp == TIMER_NOTICE) { KillTimer(hwnd, TIMER_NOTICE); g.notice.clear(); }
+        else if (wp == TIMER_UPDATE) MaybeAutoCheck();
         InvalidateStatus();
         return 0;
+    case WM_APP_UPDATE: { std::unique_ptr<UpdateMsg> m((UpdateMsg*)lp); if (!g.closing) OnUpdateMsg(*m); return 0; }
     case WM_SETFOCUS: FocusPage(); return 0;
     case WM_APP_CMD: { std::unique_ptr<std::wstring> m((std::wstring*)lp); if (!g.closing) OnChromeCommand(*m); return 0; }
     case WM_APP_OPEN: {
@@ -1090,6 +1333,7 @@ static int Uninstall() {
     PathRemoveFileSpecW(self);
     std::wstring script = L"/c timeout /t 3 /nobreak >nul";
     if (_wcsicmp(self, installDir.c_str()) == 0) script += L" & rmdir /s /q \"" + installDir + L"\"";
+    script += L" & rmdir /s /q \"" + local + L"\\" + APP_DIR_NAME + L"\\Updates\"";
     if (wipe) script += L" & rmdir /s /q \"" + local + L"\\" + APP_DIR_NAME + L"\"";
     if (script.find(L"rmdir") != std::wstring::npos) {
         wchar_t sys[MAX_PATH]; GetSystemDirectoryW(sys, MAX_PATH);
@@ -1184,11 +1428,13 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     SetWindowPos(g.hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     if (!restored) ShowWindow(g.hwnd, nShow == SW_HIDE ? SW_SHOWNORMAL : nShow);
     UpdateWindow(g.hwnd);
-    SetTimer(g.hwnd, 1, 15000, nullptr);
+    SetTimer(g.hwnd, TIMER_CLOCK, 15000, nullptr);
+    UpdateStartup();
 
     CefRunMessageLoop();
     g_client = nullptr;
     CefShutdown();
+    UpdateShutdown();
     if (g.font) DeleteObject(g.font);
     CoUninitialize();
     return 0;

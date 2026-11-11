@@ -65,12 +65,15 @@ if (-not (Test-Path $wrapperLib)) {
 # --- 2. NeonNet.dll ---
 Write-Host '== NeonNet.dll'
 Push-Location src; Run rc @('/nologo', '/fo', '..\build\obj\app\app.res', 'app.rc'); Pop-Location
-Run cl ($cflags + @('/Fobuild\obj\app\', 'src\main.cpp'))
-$libs = @('build\obj\app\main.obj', 'build\obj\app\app.res', $wrapperLib, "$cef\Release\libcef.lib",
+Run cl ($cflags + @('/Fobuild\obj\app\', 'src\main.cpp', 'src\updater.cpp'))
+$libs = @('build\obj\app\main.obj', 'build\obj\app\updater.obj', 'build\obj\app\app.res', $wrapperLib, "$cef\Release\libcef.lib",
           'comctl32.lib','crypt32.lib','delayimp.lib','gdi32.lib','rpcrt4.lib','shlwapi.lib','wintrust.lib','ws2_32.lib',
-          'user32.lib','ole32.lib','shell32.lib','advapi32.lib','dwmapi.lib','uuid.lib')
+          'user32.lib','ole32.lib','shell32.lib','advapi32.lib','dwmapi.lib','uuid.lib','winhttp.lib','bcrypt.lib')
 Remove-Item build\app\NeonNet.lib, build\app\NeonNet.exp -ErrorAction SilentlyContinue
-Run link (@('/nologo','/DLL','/OUT:build\app\NeonNet.dll','/IMPLIB:build\obj\app\NeonNet.lib','/SUBSYSTEM:WINDOWS','/OPT:REF','/OPT:ICF','/DELAYLOAD:libcef.dll') + $libs)
+# winhttp/bcrypt are only used by the updater in the browser process; delay-loading keeps them
+# out of sandboxed sub-processes, which also load NeonNet.dll
+Run link (@('/nologo','/DLL','/OUT:build\app\NeonNet.dll','/IMPLIB:build\obj\app\NeonNet.lib','/SUBSYSTEM:WINDOWS','/OPT:REF','/OPT:ICF',
+            '/DELAYLOAD:libcef.dll','/DELAYLOAD:winhttp.dll','/DELAYLOAD:bcrypt.dll') + $libs)
 
 # --- 3. runtime files + NeonNet.exe (renamed CEF bootstrap with our icon/version) ---
 Write-Host '== app folder'
@@ -111,4 +114,8 @@ $fs.Write([BitConverter]::GetBytes([UInt64]$len), 0, 8)
 $fs.Write([System.Text.Encoding]::ASCII.GetBytes('NEONPAK1'), 0, 8)
 $fs.Close()
 
-Get-Item build\app\NeonNet.exe, build\app\NeonNet.dll, $out | Format-Table Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
+# checksum file for the auto-updater; upload it to the release next to the installer
+$hash = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
+[System.IO.File]::WriteAllText("$out.sha256", "$hash  NeonNet-Setup.exe`n", [System.Text.Encoding]::ASCII)
+
+Get-Item build\app\NeonNet.exe, build\app\NeonNet.dll, $out, "$out.sha256" | Format-Table Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}

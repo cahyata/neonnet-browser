@@ -43,6 +43,9 @@ Everything lives under the user's profile (`HKCU`, `%LOCALAPPDATA%`), so the ins
 | Option | Effect |
 |---|---|
 | `--extract-to=<folder>` | Only extracts the app into that folder, without shortcuts or registry entries. Exit code 0 means success. Useful for testing or a portable copy. |
+| `--silent` | Installs without any window. Used by the auto-updater. Keeps the desktop shortcut only if one already exists. Exit code 0 means success; on failure the reason is written to `HKCU\Software\NeonNet\UpdateResult`. |
+| `--wait-pid=<pid>` | With `--silent`: first waits (up to 60 s) for that process to exit, then up to 30 s more for NeonNet's files to be released |
+| `--relaunch` | With `--silent`: starts NeonNet after a successful install |
 
 To check an installer without installing:
 
@@ -52,7 +55,7 @@ NeonNet-Setup.exe --extract-to=C:\temp\neonnet-test
 
 ## Upgrading
 
-Running a newer installer overwrites the files in the same folder. The user's profile and settings are not touched.
+NeonNet's auto-updater downloads the newer installer and runs it with `--silent` after NeonNet closes (see [Architecture](ARCHITECTURE.md#auto-update)). Running a newer installer by hand does the same thing with the window. Either way, files in the same folder are overwritten, and the user's profile and settings are not touched.
 
 Files that existed in the old version but not in the new one are left behind. This is harmless; a future version could clear the folder before extracting if needed.
 

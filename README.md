@@ -19,6 +19,7 @@ NeonNet ships its own Chromium engine. It does not need Edge, WebView2 or any ot
 - **Single window:** running `NeonNet.exe <url>` while NeonNet is open adds a tab to the existing window.
 - **Chromium sandbox enabled:** renderer and GPU processes run isolated.
 - **Per-user installer:** no admin rights needed, uninstall from Settings > Apps.
+- **Automatic updates:** new releases are downloaded in the background, checked against a SHA-256 checksum, and installed when NeonNet closes. Can be turned off.
 
 ## Download and install
 
@@ -53,6 +54,7 @@ Requires Visual Studio 2022 with the "Desktop development with C++" workload. Th
 neonnet-browser/
 ├─ src/
 │  ├─ main.cpp          all browser logic
+│  ├─ updater.cpp/.h    update check, download and checksum
 │  ├─ resource.h        resource IDs and version
 │  ├─ app.rc            icon, embedded UI pages, version info
 │  ├─ app.manifest      Windows manifest (DPI awareness, common controls)
@@ -77,7 +79,6 @@ neonnet-browser/
 - DRM content (Netflix, Disney+, Spotify web player) does not play.
 - No account sync, password manager or Chrome Web Store extensions.
 - No find-in-page (Ctrl+F) yet.
-- The bundled Chromium does not update itself. See [Maintenance](docs/MAINTENANCE.md).
 
 ## License
 

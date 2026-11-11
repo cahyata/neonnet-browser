@@ -2,7 +2,7 @@
 
 ## Updating Chromium
 
-The Chromium inside NeonNet does not update itself. Chrome ships a stable security update most weeks (see the [Chrome Releases blog](https://chromereleases.googleblog.com/)), and a new stable version comes out about every 4 weeks. A browser that is rarely updated becomes easier to attack through malicious websites.
+Installed copies of NeonNet update themselves from your GitHub releases, but only after you publish a release with a newer Chromium. Chrome ships a stable security update most weeks (see the [Chrome Releases blog](https://chromereleases.googleblog.com/)), and a new stable version comes out about every 4 weeks. A browser that is rarely updated becomes easier to attack through malicious websites.
 
 Recommended schedule:
 - Update at least once per Chromium stable release (about every 4 weeks).
@@ -34,6 +34,8 @@ The version number lives in three places. Change all of them:
 
 Then add an entry to `CHANGELOG.md`.
 
+The auto-updater compares the release tag with `APP_VERSION`, so the tag must be `v` plus exactly that version (for example `v1.0.1`). A release whose tag is not newer than the installed version is ignored.
+
 Suggested scheme:
 - **Patch** (1.0.**1**): Chromium update or bug fix.
 - **Minor** (1.**1**.0): new features.
@@ -54,6 +56,7 @@ Suggested scheme:
 - [ ] Close and reopen: no stray Chromium windows, and the window position is remembered
 - [ ] `NeonNet-Setup.exe --extract-to=<folder>` returns exit code 0, and the extracted app runs
 - [ ] A real install, launch from the Start menu, then uninstall from Settings > Apps
+- [ ] Auto update: with the previous version installed, publish the release, choose `≡` > Check for updates, wait for "READY", close NeonNet, and confirm the next start shows "UPDATED TO NEONNET <version>"
 
 ## Publishing on GitHub
 
@@ -85,14 +88,21 @@ The installer is never committed. Upload it as a **Release** asset, which may be
    git push origin v1.0.0
    ```
 
-3. On GitHub: **Releases > Draft a new release**, pick the `v1.0.0` tag, write the release notes (copy from `CHANGELOG.md`), and upload `dist/NeonNet-Setup.exe`.
+3. On GitHub: **Releases > Draft a new release**, pick the `v1.0.0` tag, write the release notes (copy from `CHANGELOG.md`), and upload **both** `dist/NeonNet-Setup.exe` and `dist/NeonNet-Setup.exe.sha256`. Keep those exact file names: the auto-updater ignores a release without them.
 4. Mention the Chromium version (the contents of `cef_version.txt`) in the notes, so users know how recent the engine is.
+5. Publish it as a normal release. Drafts and pre-releases are not offered to the auto-updater.
 
 With the GitHub CLI, step 3 is one command:
 
 ```bash
-gh release create v1.0.0 dist/NeonNet-Setup.exe --title "NeonNet 1.0.0" --notes-file CHANGELOG.md
+gh release create v1.0.0 dist/NeonNet-Setup.exe dist/NeonNet-Setup.exe.sha256 --title "NeonNet 1.0.0" --notes-file CHANGELOG.md
 ```
+
+Installed copies pick up the release within a day, or right away through `≡` > Check for updates.
+
+### Forks
+
+The updater checks the repository named by `UPDATE_REPO` in `src/resource.h` (`cahyata/neonnet-browser`). A fork that publishes its own releases must change it, or its users will receive updates from this repository.
 
 ## License obligations when distributing
 

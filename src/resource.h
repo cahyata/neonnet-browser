@@ -6,3 +6,7 @@
 
 #define APP_VERSION    L"1.0.0"
 #define APP_PUBLISHER  L"NeonNet"
+
+// GitHub repository (owner/name) whose latest release the auto-updater checks.
+// Forks: change this to your own repository.
+#define UPDATE_REPO    L"cahyata/neonnet-browser"

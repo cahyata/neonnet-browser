@@ -46,7 +46,7 @@ The first build takes about 3–5 minutes: it downloads CEF, compiles `libcef_dl
    - the Chromium runtime (`libcef.dll`, `.pak` files, `locales/` and so on);
    - `NeonNet.exe`, which is CEF's `bootstrap.exe` renamed. `tools/rescopy.cpp` gives it NeonNet's icon and version info;
    - license files: `LICENSE.txt`, `CREDITS.html`, `LICENSE-CEF.txt` and `THIRD_PARTY_NOTICES.md`.
-6. **Builds the installer.** `installer/setup.cpp` is compiled, `build/app` is zipped, and the zip is appended to the exe to produce `dist/NeonNet-Setup.exe`.
+6. **Builds the installer.** `installer/setup.cpp` is compiled, `build/app` is zipped, and the zip is appended to the exe to produce `dist/NeonNet-Setup.exe`. Its SHA-256 goes into `dist/NeonNet-Setup.exe.sha256`, which the auto-updater checks downloads against.
 
 The compiler flag `/d1trimfile` strips the local build path from source file names embedded in the binaries, so your folder names never end up in the released files.
 
@@ -56,6 +56,7 @@ The compiler flag `/d1trimfile` strips the local build path from source file nam
 |---|---|---|
 | `build/app/` | Ready-to-run app: start `build/app/NeonNet.exe` | ~410 MB |
 | `dist/NeonNet-Setup.exe` | The installer to distribute | ~180 MB |
+| `dist/NeonNet-Setup.exe.sha256` | Checksum of the installer, uploaded with it | 84 bytes |
 
 For a quick test without installing, run `build/app/NeonNet.exe` directly. It uses the same profile as the installed app (`%LOCALAPPDATA%\NeonNet\Profile`).
 

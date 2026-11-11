@@ -126,8 +126,46 @@ The HTML files are embedded as `RCDATA` in `NeonNet.dll`, so there are no loose 
 | `persist_session_cookies` | `false` | When `true`, CEF switches Chromium to "restore last session", and old tabs come back as plain Chromium windows outside NeonNet |
 | `session.restore_on_startup` preference | `5` (new tab) | Extra safeguard for the same problem |
 | `hide-crash-restore-bubble` switch | on | No "Restore pages?" bubble |
+| `disable-extensions` switch | on | Other software (for example download managers) registers Chrome extensions system-wide. Chromium would load them and open their pages as stray Chrome windows. Built-in components such as the PDF viewer keep working. |
 | `background_color` | `#12062c` | No white flash while pages load |
 | Browser style | Alloy (automatic with `SetAsChild`) | A browser without Chrome's own UI, so all UI is NeonNet's |
+
+## Auto update
+
+Code: `src/updater.cpp` (network, parsing, hashing; no CEF code) and the "Auto update" section of `src/main.cpp` (state, UI, timers). The repository it checks is `UPDATE_REPO` in `src/resource.h`.
+
+```
+start ──10 s──► MaybeAutoCheck ──(installed copy, enabled, last check > 24 h)──► updater thread
+                     ▲ hourly                                                     │
+                                         GET api.github.com/repos/<repo>/releases/latest
+                                                         │ newer tag?
+                                         GET NeonNet-Setup.exe.sha256
+                                         GET NeonNet-Setup.exe → Updates\NeonNet-Setup-<ver>.exe.part
+                                                         │ SHA-256 matches, NEONPAK1 footer present
+                                         rename to .exe, post U_READY to the UI thread
+close ──► CefShutdown ──► UpdateShutdown: run "<installer> --silent --wait-pid=<pid> [--relaunch]"
+```
+
+Rules the updater follows:
+- **HTTPS only.** Redirects to the GitHub CDN are followed; a downgrade to HTTP is refused (`WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP`).
+- **Exact assets only.** The installer and checksum URLs must be exactly `https://github.com/<UPDATE_REPO>/releases/download/<tag>/NeonNet-Setup.exe` and `.sha256`. Assets from any other location are ignored.
+- **Only newer versions.** The release tag (`v1.2.3`) is compared with `APP_VERSION`; equal or older versions are never installed.
+- **Verified before use.** The file must match the SHA-256 from the release and end with the installer's `NEONPAK1` footer. Otherwise it is deleted.
+- **Installed copy only.** Downloads and installs happen only when `NeonNet.exe` runs from `%LOCALAPPDATA%\Programs\NeonNet`. Other copies (for example `build/app`) only report a newer version.
+- **Off the UI thread.** The worker runs on its own thread and reports through `PostMessageW(WM_APP_UPDATE)`. It never touches the browser state. At exit it is cancelled and given up to 5 seconds to stop.
+
+The checksum protects against corrupted or swapped downloads, but it lives in the same GitHub release as the installer. Anyone who can publish releases in the repository can publish an update. Signing the installer (see [Installer](INSTALLER.md#code-signing)) and checking the signature before running it would close that gap.
+
+Registry values under `HKCU\Software\NeonNet`:
+
+| Value | Meaning |
+|---|---|
+| `AutoUpdate` | 0 = automatic updates off (missing = on) |
+| `LastUpdateCheck` | Time of the last successful check (milliseconds since 1601) |
+| `LastRunVersion` | Version of the last run, used for the "UPDATED TO" notice |
+| `UpdateResult` | Error text written by a failed silent install, shown once on the next start |
+
+Leftover installers in `%LOCALAPPDATA%\NeonNet\Updates` are deleted at the next start.
 
 ## Shutdown
 
@@ -136,7 +174,7 @@ The HTML files are embedded as `RCDATA` in `NeonNet.dll`, so there are no loose 
 2. hides the window immediately;
 3. closes DevTools, then calls `CloseBrowser(true)` on every browser.
 
-Each `OnBeforeClose` removes its browser from `g_all`. Once all are closed, `MaybeFinishClose()` calls `DestroyWindow`, followed by `CefQuitMessageLoop()` and `CefShutdown()`. All Chromium processes usually exit within about 4–5 seconds.
+Each `OnBeforeClose` removes its browser from `g_all`. Once all are closed, `MaybeFinishClose()` calls `DestroyWindow`, followed by `CefQuitMessageLoop()` and `CefShutdown()`. All Chromium processes usually exit within about 4–5 seconds. If an update is ready, `UpdateShutdown()` then starts the installer, which waits for this process to end.
 
 ## Uninstall
 
