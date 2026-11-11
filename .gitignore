@@ -1,0 +1,16 @@
+# build output
+build/
+dist/
+
+# Chromium Embedded Framework is downloaded by tools/fetch_cef.ps1 (too large for git)
+third_party/cef/
+third_party/cef-download.tar.bz2
+third_party/cef-extract/
+
+# compiler leftovers
+*.obj
+*.pdb
+*.res
+*.ilk
+*.exp
+*.lib

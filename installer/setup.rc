@@ -1,0 +1,29 @@
+#include <winres.h>
+#include "..\src\resource.h"
+
+IDI_APP  ICON  "..\\src\\neonnet.ico"
+1        24    "..\\src\\app.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "NeonNet"
+            VALUE "FileDescription", "NeonNet Browser Setup"
+            VALUE "FileVersion", "1.0.0"
+            VALUE "OriginalFilename", "NeonNet-Setup.exe"
+            VALUE "ProductName", "NeonNet"
+            VALUE "ProductVersion", "1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
