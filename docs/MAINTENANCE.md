@@ -61,7 +61,7 @@ The repository is `neonnet-browser`. The app itself is still called NeonNet.
 
 ### What goes into the repository
 
-Everything not listed in `.gitignore`: `src/`, `ui/`, `installer/`, `tools/`, `docs/`, `build.ps1`, `cef_version.txt`, `README.md`, `CHANGELOG.md`, `THIRD_PARTY_NOTICES.md`, `LICENSE` and `.gitignore`.
+Everything not listed in `.gitignore`: `src/`, `ui/`, `installer/`, `tools/`, `docs/`, `build.ps1`, `cef_version.txt`, `README.md`, `CHANGELOG.md`, `SECURITY.md`, `THIRD_PARTY_NOTICES.md`, `LICENSE` and `.gitignore`.
 
 Keep out of the repository:
 
@@ -69,41 +69,6 @@ Keep out of the repository:
 |---|---|
 | `third_party/cef/` | About 600 MB, and `fetch_cef.ps1` downloads it again |
 | `build/`, `dist/` | Build output. `NeonNet-Setup.exe` (~180 MB) is also over GitHub's 100 MB file limit. |
-
-### First push
-
-1. Create an empty repository named `neonnet-browser` on GitHub. Do not tick "Add a README file" or "Add license"; this repository already has both.
-2. In the project folder:
-
-   ```bash
-   git init
-   ```
-
-   ```bash
-   git add .
-   ```
-
-   ```bash
-   git status
-   ```
-
-   Make sure `third_party/cef`, `build` and `dist` are not in the `git status` list.
-
-   ```bash
-   git commit -m "NeonNet 1.0.0"
-   ```
-
-   ```bash
-   git branch -M main
-   ```
-
-   ```bash
-   git remote add origin https://github.com/<username>/neonnet-browser.git
-   ```
-
-   ```bash
-   git push -u origin main
-   ```
 
 ### Creating a release (where the installer goes)
 

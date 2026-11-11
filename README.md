@@ -44,6 +44,7 @@ Requires Visual Studio 2022 with the "Desktop development with C++" workload. Th
 | [Installer](docs/INSTALLER.md) | Installer format, install and uninstall flow |
 | [Maintenance and releases](docs/MAINTENANCE.md) | Updating Chromium, release checklist, publishing on GitHub |
 | [Changelog](CHANGELOG.md) | Version history |
+| [Security policy](SECURITY.md) | How to report a vulnerability |
 | [Third-party notices](THIRD_PARTY_NOTICES.md) | Third-party components and their licenses |
 
 ## Repository layout
