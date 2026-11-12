@@ -2,7 +2,7 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.2.0] - 2026-11-12
 
 ### Features
 - Downloads page (Ctrl+J, the `≡` menu, or the new tab page): every download with progress, speed and source; cancel, open and show in folder; search; remove rows or clear the list. The list is kept between runs. Programs and scripts cannot be opened from the page.
@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 - Settings page (Ctrl+, , the `≡` menu, or the new tab page): search engine (Google, DuckDuckGo, Bing, Brave or Ecosia), home page, whether to ask where to save each download (otherwise files go to the Downloads folder), scanlines and automatic updates.
 - The home button and start-up use the home page from the settings.
 - NeonNet's own pages show and accept short addresses in the address bar and on the command line: `neonnet://settings`, `neonnet://history`, `neonnet://bookmarks`, `neonnet://downloads`.
+- An unknown NeonNet page shows a themed 404 page, and the tab is titled NOT FOUND.
 
 ### Fixes
 - Zooming a NeonNet page (new tab, history, bookmarks, downloads) no longer zooms the toolbar. Chromium keeps zoom per site, and the toolbar shared one with those pages, so it shrank or was cut off. The toolbar now has its own address (chrome.neonnet.ui).
