@@ -11,7 +11,8 @@ body{display:flex;flex-direction:column;border-left:1px solid var(--pink)}
 header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px;flex:none}
 h1{margin:0;font:italic 900 22px Impact,"Arial Black",sans-serif;letter-spacing:2px;color:var(--cyan);text-shadow:2px 2px 0 var(--pink)}
 button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
-#x{width:26px;height:26px;color:var(--muted)}
+#x{width:26px;height:26px;color:var(--muted);display:flex;align-items:center;justify-content:center}
+#x svg,.tab .a svg,.keep button svg{display:block;margin:auto}
 #x:hover{background:var(--pink);color:var(--bg)}
 main{flex:1;overflow:auto;padding:0 12px 14px}
 h2{font:bold 11px "Cascadia Mono","Consolas",monospace;color:var(--yellow);letter-spacing:2px;margin:16px 0 6px;padding-bottom:3px;border-bottom:1px solid rgba(255,46,151,.5)}
@@ -35,24 +36,29 @@ select{height:28px;background:var(--bg2);color:var(--cyan);border:1px solid var(
 select option{background:var(--bg2);color:var(--cyan)}
 .tog{min-width:64px;height:28px;padding:0 10px;border:1px solid var(--muted);color:var(--muted);font-weight:bold;letter-spacing:1px}
 .tog.on{border-color:var(--green);color:var(--green)}
-.tab{display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid rgba(138,111,192,.2)}
+.tab{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding:6px 4px;border-bottom:1px solid rgba(138,111,192,.2)}
 .tab:hover{background:var(--row)}
-.tab .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e8d8ff}
+.tab .t{flex:1 1 100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e8d8ff}
 .tab.active .t{color:var(--cyan)}
 .tab.off .t{color:var(--muted);font-style:italic}
-.tab .m{width:62px;text-align:right;color:var(--cyan);flex:none}
+.tab .m{width:62px;text-align:right;color:var(--cyan);flex:none;margin-left:auto}
 .tab .c{width:44px;text-align:right;color:var(--muted);flex:none}
 .tab.hot .c{color:var(--pink);font-weight:bold}
 .tab .a{width:22px;height:22px;flex:none;color:var(--muted);visibility:hidden}
 .tab:hover .a{visibility:visible}
 .tab .a:hover{background:var(--pink);color:var(--bg)}
 .tab .a:disabled{opacity:.3;cursor:default}
-.tag{font-size:10px;color:var(--bg);background:var(--pink);padding:0 4px;letter-spacing:1px}
+.tab .a.on{visibility:visible;color:var(--cyan)}
+.tag{font-size:10px;color:var(--bg);background:var(--pink);padding:0 4px;letter-spacing:1px;flex:none}
+.tag.ok{background:var(--green)}
+.keep{display:flex;align-items:center;justify-content:space-between;padding:4px 4px;border-bottom:1px solid rgba(138,111,192,.2);color:#e8d8ff}
+.keep button{width:22px;height:22px;color:var(--muted)}
+.keep button:hover{background:var(--pink);color:var(--bg)}
 .empty{color:var(--muted);padding:8px 0}
 </style>
 </head>
 <body>
-<header><h1>PERFORMANCE</h1><button id="x" title="Close the panel (Ctrl+Shift+M)">&#10005;</button></header>
+<header><h1>PERFORMANCE</h1><button id="x" title="Close the panel (Ctrl+Shift+M)"></button></header>
 <main>
   <h2>MEMORY</h2>
   <div class="big"><b id="total">-</b><span>in use by NeonNet</span></div>
@@ -76,15 +82,29 @@ select option{background:var(--bg2);color:var(--cyan)}
   <div class="hint">Tabs you are not looking at keep running, but with low priority and in power-saving mode.</div>
 
   <h2>TABS</h2>
+  <div class="hint">These tabs are never put to sleep on their own: one with sound, one with text typed into it, and sites you keep awake with the lock.</div>
   <div id="tabs"></div>
+
+  <h2>KEPT AWAKE</h2>
+  <div id="keep"></div>
 </main>
 <script>
 const $ = s => document.querySelector(s);
+// Line icons in the panel's colours (they follow the text colour of the button they are in).
+const svg = d => '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter">' + d + '</svg>';
+const ICON = {
+  spk:  svg('<path d="M2 6h3l4-3v10l-4-3H2z"/><path d="M11.2 5.6c1 .8 1 3.9 0 4.8M13 4c2 1.8 2 6.2 0 8"/>'),
+  mute: svg('<path d="M2 6h3l4-3v10l-4-3H2z"/><path d="M11.5 6l3.5 4M15 6l-3.5 4"/>'),
+  lock: svg('<rect x="3" y="7" width="10" height="7"/><path d="M5.2 7V5.2a2.8 2.8 0 0 1 5.6 0V7"/>'),
+  moon: svg('<path d="M12.5 9.6A5.6 5.6 0 0 1 6.4 3.5 5.6 5.6 0 1 0 12.5 9.6z"/>'),
+  x:    svg('<path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/>'),
+};
 const send = (cmd, arg) => fetch('/cmd?m=' + encodeURIComponent(cmd + (arg === undefined ? '' : '\n' + arg)), {cache:'no-store'}).catch(() => {});
 const fmt = mb => mb >= 1024 ? (mb / 1024).toFixed(2) + ' GB' : mb + ' MB';
 const HOT = 20;   // percent of the whole CPU a tab must use to be called hot
 let last = null, cleaning = 0;
 
+$('#x').innerHTML = ICON.x;
 $('#x').onclick = () => send('perf.hide');
 $('#clean').onclick = () => {
   send('perf.clean'); cleaning = Date.now();
@@ -115,7 +135,9 @@ window.nnPerf = d => {
   if(document.activeElement !== $('#ram')) $('#ram').value = String(d.limit || 0);
   $('#bg').classList.toggle('on', !!d.bg);
   $('#bg').textContent = d.bg ? 'ON' : 'OFF';
-  $('#ramHint').textContent = d.auto ? 'Put ' + d.auto + ' tab' + (d.auto === 1 ? '' : 's') + ' to sleep since NeonNet started.'
+  $('#ramHint').textContent = d.limit && d.blocked && d.total > d.limit
+      ? 'Over the limit, but ' + d.blocked + ' tab' + (d.blocked === 1 ? ' is' : 's are') + ' kept awake (sound, typing or kept sites).'
+    : d.auto ? 'Put ' + d.auto + ' tab' + (d.auto === 1 ? '' : 's') + ' to sleep since NeonNet started.'
     : 'Above the limit, the tab unused the longest goes to sleep.';
   if(cleaning && Date.now() - cleaning > 2600){
     cleaning = 0;
@@ -133,14 +155,31 @@ window.nnPerf = d => {
     mem.textContent = t.discarded ? 'SLEEPING' : (t.shared ? '~' : '') + t.mem + ' MB';
     if(t.shared) mem.title = 'This tab shares a process with another tab';
     const cpu = document.createElement('span'); cpu.className = 'c'; cpu.textContent = t.discarded ? '' : t.cpu.toFixed(0) + '%';
-    const un = document.createElement('button'); un.className = 'a'; un.innerHTML = '&#9211;'; un.title = 'Put this tab to sleep (it reloads when selected)';
+    const un = document.createElement('button'); un.className = 'a'; un.innerHTML = ICON.moon; un.title = 'Put this tab to sleep (it reloads when selected)';
     un.disabled = t.discarded || t.active; un.onclick = () => send('perf.unload', t.id);
-    const cl = document.createElement('button'); cl.className = 'a'; cl.innerHTML = '&#10005;'; cl.title = 'Close this tab';
+    const cl = document.createElement('button'); cl.className = 'a'; cl.innerHTML = ICON.x; cl.title = 'Close this tab';
     cl.onclick = () => send('perf.close', t.id);
+    const mu = document.createElement('button'); mu.className = 'a' + (t.muted ? ' on' : ''); mu.innerHTML = t.muted ? ICON.mute : ICON.spk;
+    mu.title = t.muted ? 'Unmute this tab' : 'Mute this tab'; mu.disabled = t.discarded; mu.onclick = () => send('perf.mute', t.id);
+    const ke = document.createElement('button'); ke.className = 'a' + (t.kept ? ' on' : ''); ke.innerHTML = ICON.lock;
+    ke.title = t.kept ? 'Stop keeping ' + t.site + ' awake' : 'Never put ' + (t.site || 'this site') + ' to sleep on its own'; ke.disabled = !t.site;
+    ke.onclick = () => send('perf.keep', t.id);
     row.append(title);
-    if(t.cpu >= HOT){ const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = 'HOT'; row.append(tag); }
-    row.append(mem, cpu, un, cl);
+    const tag = (txt, cls, tip) => { const s = document.createElement('span'); s.className = 'tag ' + (cls || ''); s.textContent = txt; s.title = tip; row.append(s); };
+    if(t.cpu >= HOT) tag('HOT', '', 'Uses a lot of the CPU');
+    if(t.audible) tag('SOUND', 'ok', 'Playing sound: it is not put to sleep on its own');
+    if(t.form) tag('TYPING', 'ok', 'A text field holds typed text: it is not put to sleep on its own');
+    if(t.kept) tag('AWAKE', 'ok', 'Kept awake by you');
+    row.append(mem, cpu, mu, ke, un, cl);
     list.appendChild(row);
+  }
+  const keep = $('#keep'); keep.innerHTML = '';
+  if(!d.keep.length) keep.innerHTML = '<div class="empty">No sites. Use the lock on a tab.</div>';
+  for(const h of d.keep){
+    const r = document.createElement('div'); r.className = 'keep';
+    const s = document.createElement('span'); s.textContent = h;
+    const b = document.createElement('button'); b.innerHTML = ICON.x; b.title = 'Stop keeping ' + h + ' awake'; b.onclick = () => send('perf.unkeep', h);
+    r.append(s, b); keep.appendChild(r);
   }
 };
 </script>

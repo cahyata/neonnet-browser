@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
   - **Sleeping tabs:** put a tab, or all background tabs, to sleep. A sleeping tab frees its memory, stays in the tab strip (dimmed) and reloads when you select it.
   - **RAM limiter** (off, or 1 to 8 GB): above the limit, the background tab unused the longest is put to sleep.
   - **CPU limiter:** tabs you are not looking at keep running, but with low priority and in Windows' power-saving mode.
+  - **Protected tabs:** a tab is not put to sleep on its own while it plays sound, while a text field on it holds text you typed, or when its site is on your **kept awake** list (the lock on a tab). "Sleep background tabs" and the RAM limiter skip these tabs and say so.
+- Sound indicator and mute: a tab that plays sound shows a speaker in the tab strip. Click it to mute the tab (the speaker is then crossed out); the panel has the same button. A muted tab stays muted when it sleeps and wakes.
 
 ## [1.4.0] - 2026-11-12
 

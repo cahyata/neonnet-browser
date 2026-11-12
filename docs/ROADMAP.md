@@ -27,7 +27,7 @@ Planned features for NeonNet, roughly in the order they are worth doing. Effort:
 - [ ] **Pin tabs** (S).
 - [ ] **Restore tabs from the last session** (M). Needs care: `persist_session_cookies` must stay off (see the notes in [ARCHITECTURE.md](ARCHITECTURE.md)), so this has to be done by NeonNet itself, not by Chromium.
 - [x] **Private window** (M, 1.4.0). Ctrl+Shift+N opens an incognito window with an in-memory profile.
-- [ ] **Mute tab / audio indicator** (S).
+- [x] **Mute tab / audio indicator** (S, next release). A speaker on the tab, click to mute. Sound made only through the Web Audio API is not detected.
 - [x] **Theme the right-click context menu** (M, 1.4.0). The menu uses the same painted window as the `≡` menu.
 
 ## Bookmarks and history

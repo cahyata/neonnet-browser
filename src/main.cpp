@@ -87,7 +87,7 @@ static const UINT WM_APP_CLEARDATA = WM_APP + 10;   // lParam = new ClearReq (fr
 static const UINT WM_APP_CLEARSITES = WM_APP + 11;  // lParam = new ClearSites (cookies are done, site data is next)
 
 static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5,
-                      TIMER_ALERT = 6, TIMER_TEMP = 7, TIMER_PERF = 8, TIMER_TRIM = 9;
+                      TIMER_ALERT = 6, TIMER_TEMP = 7, TIMER_PERF = 8, TIMER_TRIM = 9, TIMER_AUDIO = 10;
 static const ULONGLONG UPDATE_INTERVAL_MS = 24ull * 60 * 60 * 1000;   // check at most once a day
 
 enum Cmd {
@@ -128,6 +128,10 @@ struct Tab {
     unsigned long long memBytes = 0;
     double cpu = 0;
     ULONGLONG lastActive = 0;      // GetTickCount64() when it was last the selected tab
+    bool muted = false;            // audio muted by the user (kept when the tab sleeps and wakes)
+    ULONGLONG audioUntil = 0;      // the page said it is playing sound: audible until this tick (see MEDIA_HOOK_JS)
+    bool audible = false;          // as last shown to the UI
+    bool dirty = false;            // a text field on the page holds text the user typed: do not unload it
 };
 
 struct ClosedTab { std::wstring url; int index; };
@@ -148,6 +152,8 @@ struct App {
     double perfCpu = 0;
     DWORD ramLimitMB = 0;          // 0 = off: unload idle background tabs while all processes together use more
     bool bgLimit = false;          // run background tabs at low priority
+    std::set<std::wstring> keepHosts;   // sites whose tabs never go to sleep on their own (registry KeepAwakeHosts)
+    int sleepBlocked = 0;          // background tabs the RAM limiter would have slept but must not (audio, typing, kept awake)
     int autoUnloaded = 0;          // tabs unloaded by the RAM limiter since NeonNet started
     ULONGLONG lastLimitAct = 0;
     int lastTrimCount = 0;
@@ -308,6 +314,8 @@ static void ShowAlert(const std::wstring& text);
 static void LaunchIncognito(const std::wstring& url);
 static void ApplyBackgroundLimit();   // performance panel, below
 static void PushPerf();
+static std::wstring HostOf(Tab* t);
+static const wchar_t* SleepProtection(Tab* t);
 static std::wstring TempMediaPath(const std::wstring& name, const std::wstring& mime);
 static void OpenTempMedia(const std::wstring& path);
 // Clear browsing data (settings page). cutoffMs is the unix time (ms) from which data is removed, 0 = all time.
@@ -436,7 +444,8 @@ static void SendState() {
         Tab* t = g.tabs[i].get();
         if (i) j += L",";
         j += L"{\"id\":" + std::to_wstring(t->id) + L",\"title\":" + JsonStr(t->title) +
-             L",\"loading\":" + (t->loading ? L"true" : L"false") + L",\"discarded\":" + (t->discarded ? L"true" : L"false") + L"}";
+             L",\"loading\":" + (t->loading ? L"true" : L"false") + L",\"discarded\":" + (t->discarded ? L"true" : L"false") +
+             L",\"audible\":" + (t->audible ? L"true" : L"false") + L",\"muted\":" + (t->muted ? L"true" : L"false") + L"}";
     }
     j += L"],\"active\":" + std::to_wstring(g.active);
     j += L",\"url\":" + JsonStr(a ? DisplayUrl(a) : L"");
@@ -877,7 +886,7 @@ public:
         Tab* t = nullptr;
         if (g.creatingTab) t = FindTab(g.creatingTab);
         else if (!g.pendingPopups.empty()) { t = FindTab(g.pendingPopups.front()); g.pendingPopups.pop_front(); }
-        if (t) t->browser = browser;
+        if (t) { t->browser = browser; if (t->muted) browser->GetHost()->SetAudioMuted(true); }
         else browser->GetHost()->CloseBrowser(true);   // unknown window: refuse it
         Layout();
         SendState();
@@ -960,7 +969,7 @@ public:
         }
     }
     void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType) override {
-        if (frame->IsMain() && TabOf(browser)) ApplyScan(browser);
+        if (frame->IsMain()) { if (Tab* t = TabOf(browser)) { t->dirty = false; ApplyScan(browser); } }   // a new page: nothing typed yet
     }
     void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, ErrorCode errorCode,
                      const CefString&, const CefString& failedUrl) override {
@@ -1167,9 +1176,17 @@ public:
             return true;
         }
         if (message->GetName() != "nn.media") return false;
+        std::string kind = message->GetArgumentList()->GetString(0);
+        if (kind == "audio") {   // a media element in the page is playing sound; repeated every second while it does
+            if (Tab* at = TabOf(browser)) at->audioUntil = GetTickCount64() + 3500;
+            return true;
+        }
+        if (kind == "dirty") {   // a text field holds typed text (or no longer does): see MEDIA_HOOK_JS
+            if (Tab* dt = TabOf(browser)) dt->dirty = message->GetArgumentList()->GetString(1) == "1";
+            return true;
+        }
         Tab* t = TabOf(browser);
         if (!t || t->id != g.active || g.closing) return true;
-        std::string kind = message->GetArgumentList()->GetString(0);
         if (kind == "openplayer") {
             // the user clicked play on a video that failed: make a temporary copy for the system player
             std::wstring url = message->GetArgumentList()->GetString(1).ToWString();
@@ -1764,8 +1781,15 @@ static void PushPerf() {
         j += L"{\"id\":" + std::to_wstring(t->id) + L",\"title\":" + JsonStr(t->title.empty() ? DisplayUrl(t) : t->title) +
              L",\"mem\":" + mb(t->memBytes) + L",\"cpu\":" + c + L",\"active\":" + (t->id == g.active ? L"true" : L"false") +
              L",\"discarded\":" + (t->discarded ? L"true" : L"false") +
-             L",\"shared\":" + (t->pid && users[t->pid] > 1 ? L"true" : L"false") + L"}";
+             L",\"shared\":" + (t->pid && users[t->pid] > 1 ? L"true" : L"false") +
+             L",\"audible\":" + (t->audible ? L"true" : L"false") + L",\"muted\":" + (t->muted ? L"true" : L"false") +
+             L",\"form\":" + (t->dirty ? L"true" : L"false") +
+             L",\"kept\":" + (!HostOf(t).empty() && g.keepHosts.count(HostOf(t)) ? L"true" : L"false") +
+             L",\"site\":" + JsonStr(HostOf(t)) + L"}";
     }
+    j += L"],\"blocked\":" + std::to_wstring(g.sleepBlocked) + L",\"keep\":[";
+    bool firstKeep = true;
+    for (const auto& h : g.keepHosts) { if (!firstKeep) j += L","; firstKeep = false; j += JsonStr(h); }
     j += L"]}";
     g.panel->GetMainFrame()->ExecuteJavaScript(L"window.nnPerf&&window.nnPerf(" + j + L")", PANEL_UI, 0);
 }
@@ -1797,13 +1821,74 @@ static bool UnloadTab(int id) {
     return true;
 }
 
+// The site of a tab for the keep-awake list: host without "www.", lower case; empty for NeonNet's own pages.
+static std::wstring HostOf(Tab* t) {
+    std::wstring u = DisplayUrl(t);
+    if (u.rfind(L"http://", 0) != 0 && u.rfind(L"https://", 0) != 0) return {};
+    if (u.rfind(UI_HOST, 0) == 0 || u.rfind(CHROME_UI_HOST, 0) == 0) return {};
+    size_t s = u.find(L"://") + 3, e = u.find_first_of(L"/?#", s);
+    std::wstring h = u.substr(s, e == std::wstring::npos ? std::wstring::npos : e - s);
+    size_t at = h.rfind(L'@'); if (at != std::wstring::npos) h.erase(0, at + 1);
+    size_t colon = h.find(L':'); if (colon != std::wstring::npos) h.resize(colon);
+    for (auto& c : h) c = (wchar_t)towlower(c);
+    if (h.rfind(L"www.", 0) == 0) h.erase(0, 4);
+    return h;
+}
+
+// Why a background tab must not go to sleep on its own, or null: sound, typed text, a site kept awake.
+// (The selected and the loading tab are handled by the callers.)
+static const wchar_t* SleepProtection(Tab* t) {
+    if (GetTickCount64() < t->audioUntil) return L"audio";
+    if (t->dirty) return L"form";
+    std::wstring h = HostOf(t);
+    if (!h.empty() && g.keepHosts.count(h)) return L"kept";
+    return nullptr;
+}
+
+static void SaveKeepHosts() {
+    std::wstring s;
+    for (const auto& h : g.keepHosts) { if (!s.empty()) s += L';'; s += h; }
+    if (s.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, L"KeepAwakeHosts");
+    else RegSetBin(L"KeepAwakeHosts", REG_SZ, s.c_str(), (DWORD)((s.size() + 1) * sizeof(wchar_t)));
+}
+
+static void LoadKeepHosts() {
+    std::wstring s = RegGetString(L"KeepAwakeHosts");
+    size_t i = 0;
+    while (i < s.size()) {
+        size_t e = s.find(L';', i); if (e == std::wstring::npos) e = s.size();
+        std::wstring h = s.substr(i, e - i);
+        if (!h.empty() && h.size() < 256) g.keepHosts.insert(h);
+        i = e + 1;
+    }
+}
+
+static void ToggleKeepAwake(int id) {
+    Tab* t = FindTab(id);
+    if (!t) return;
+    std::wstring h = HostOf(t);
+    if (h.empty()) return;
+    if (!g.keepHosts.erase(h)) g.keepHosts.insert(h);
+    SaveKeepHosts();
+}
+
+static void ToggleMute(int id) {
+    Tab* t = FindTab(id);
+    if (!t) return;
+    t->muted = !t->muted;
+    if (t->browser) t->browser->GetHost()->SetAudioMuted(t->muted);
+    SendState();
+}
+
 static void ApplyRamLimit() {
     if (!g.ramLimitMB || g.closing) return;
+    g.sleepBlocked = 0;
     if (g.perfTotal <= (unsigned long long)g.ramLimitMB * 1024 * 1024) return;
     if (GetTickCount64() - g.lastLimitAct < 5000) return;   // give the last unload time to show in the figures
     Tab* oldest = nullptr;
     for (auto& t : g.tabs) {
         if (t->id == g.active || !t->browser || t->discarded || t->loading) continue;
+        if (SleepProtection(t.get())) { g.sleepBlocked++; continue; }
         if (!oldest || t->lastActive < oldest->lastActive) oldest = t.get();
     }
     if (!oldest) return;
@@ -1813,6 +1898,17 @@ static void ApplyRamLimit() {
         g.lastLimitAct = GetTickCount64();
         ShowNotice(L"RAM LIMIT: PUT TO SLEEP " + Upper(name.substr(0, 40)));
     }
+}
+
+// Once a second: which tabs make sound. The tab strip and the panel show it; a change is sent to both.
+static void OnAudioTimer() {
+    if (g.closing) return;
+    bool changed = false;
+    for (auto& t : g.tabs) {
+        bool a = t->browser && !t->muted && GetTickCount64() < t->audioUntil;   // a muted tab makes no sound, but is still "playing" (see SleepProtection)
+        if (a != t->audible) { t->audible = a; changed = true; }
+    }
+    if (changed) { SendState(); PushPerf(); }
 }
 
 static void OnPerfTimer() {
@@ -1873,7 +1969,19 @@ static void OnPerfCommand(const std::wstring& cmd, const std::wstring& arg) {
     if (cmd == L"perf.clean") CleanMemory();
     else if (cmd == L"perf.unload") { UnloadTab(id); }
     else if (cmd == L"perf.close") { if (FindTab(id)) CloseTab(id); }
-    else if (cmd == L"perf.unloadbg") { std::vector<int> ids; for (auto& t : g.tabs) ids.push_back(t->id); for (int i : ids) UnloadTab(i); }
+    else if (cmd == L"perf.unloadbg") {
+        // all background tabs except those that must stay awake (sound, typed text, kept-awake sites)
+        std::vector<int> ids; int kept = 0;
+        for (auto& t : g.tabs) {
+            if (t->id == g.active || !t->browser || t->discarded) continue;
+            if (SleepProtection(t.get())) kept++; else ids.push_back(t->id);
+        }
+        for (int i : ids) UnloadTab(i);
+        if (kept) ShowNotice(std::to_wstring(kept) + L" TAB" + (kept == 1 ? L"" : L"S") + L" KEPT AWAKE (SOUND, TYPED TEXT OR KEEP-AWAKE SITE)");
+    }
+    else if (cmd == L"perf.mute") ToggleMute(id);
+    else if (cmd == L"perf.keep") ToggleKeepAwake(id);
+    else if (cmd == L"perf.unkeep") { g.keepHosts.erase(arg); SaveKeepHosts(); }
     else if (cmd == L"perf.ram") SetRamLimit((DWORD)_wtoi(arg.c_str()));
     else if (cmd == L"perf.bg") SetBgLimit(arg == L"1");
     else if (cmd == L"perf.hide") SetPanelOpen(false);
@@ -2371,6 +2479,7 @@ static void OnChromeCommand(const std::wstring& msg) {
     else if (cmd == L"reload") ExecCmd(CMD_RELOAD);
     else if (cmd == L"stop") ExecCmd(CMD_STOP);
     else if (cmd == L"newtab") ExecCmd(CMD_NEWTAB);
+    else if (cmd == L"mute") ToggleMute(_wtoi(arg.c_str()));
     else if (cmd == L"perf") ExecCmd(CMD_PERFORMANCE);
     else if (cmd.rfind(L"perf.", 0) == 0) OnPerfCommand(cmd, arg);
     else if (cmd == L"home") ExecCmd(CMD_HOME);
@@ -2482,6 +2591,24 @@ static const char* MEDIA_HOOK_JS =
     "if(!t||(t.tagName!=='VIDEO'&&t.tagName!=='AUDIO'))return;"
     "var failed=(t.error&&t.error.code===4)||(t.networkState===3&&t.readyState===0);"
     "if(failed)openv(t);else ck=Date.now();},true);}catch(e){}"
+    // Sound: once a media element has played, check each second whether one really makes sound (playing, not
+    // muted, volume above zero, and the decoder is still producing audio: webkitAudioDecodedByteCount grows)
+    // and say so every second while it does. Sound made through the Web Audio API alone is not detected.
+    "try{var tmr=0,nb=new WeakMap();function tick(){var a=false;try{var m=document.querySelectorAll('video,audio');"
+    "for(var i=0;i<m.length&&i<50;i++){var e=m[i];if(e.paused||e.ended||e.muted||e.volume===0||e.readyState<3)continue;"
+    "var b=e.webkitAudioDecodedByteCount,p=nb.get(e);nb.set(e,b);if(p!==undefined&&(b===undefined||b>p))a=true;}}catch(x){}"
+    "if(a){try{r('audio','1');}catch(x){}}}"
+    "['play','playing'].forEach(function(n){document.addEventListener(n,function(){if(!tmr)tmr=setInterval(tick,1000);},true);});}catch(e){}"
+    // Typed text: report whether a text field, text area or editable area on the page holds text, so the
+    // performance panel does not put the tab to sleep and lose it. Checked shortly after typing stops.
+    "try{var dirty=false,dt=0;function scan(){var d=false;try{"
+    "var q=document.querySelectorAll('textarea,input,[contenteditable]');"
+    "for(var i=0;i<q.length&&i<300&&!d;i++){var e=q[i],tg=e.tagName,ty=String(e.type||'').toLowerCase();"
+    "if(tg==='INPUT'){if(/^(hidden|checkbox|radio|button|submit|reset|image|file|range|color|search)$/.test(ty))continue;}"
+    "else if(tg!=='TEXTAREA'&&!e.isContentEditable)continue;"
+    "var v=tg==='INPUT'||tg==='TEXTAREA'?e.value:e.textContent;if(v&&/\\S/.test(v))d=true;}}catch(x){}"
+    "if(d!==dirty){dirty=d;try{r('dirty',d?'1':'0');}catch(x){}}}"
+    "['input','change'].forEach(function(n){document.addEventListener(n,function(){clearTimeout(dt);dt=setTimeout(scan,500);},true);});}catch(e){}"
     "})();";
 
 class NeonApp : public CefApp, public CefBrowserProcessHandler, public CefRenderProcessHandler {
@@ -2890,6 +3017,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else if (wp == TIMER_ALERT) { KillTimer(hwnd, TIMER_ALERT); g.alert.clear(); InvalidateStatus(); }
         else if (wp == TIMER_TEMP) SweepTemp();
         else if (wp == TIMER_PERF) OnPerfTimer();
+        else if (wp == TIMER_AUDIO) OnAudioTimer();
         else if (wp == TIMER_TRIM) { KillTimer(hwnd, TIMER_TRIM); g.lastTrimCount = perf::TrimWorkingSets(); SamplePerf(); PushPerf(); }
         else if (wp == TIMER_UPDATE) MaybeAutoCheck();
         else if (wp == TIMER_SAVE) { KillTimer(hwnd, TIMER_SAVE); store::SaveIfDirty(); return 0; }
@@ -3114,6 +3242,8 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     UpdateStartup();
     SweepTemp();   // copies left over from the last run (a player may have kept one open)
     UpdatePerfTimer();   // the limiters run without the panel
+    LoadKeepHosts();
+    SetTimer(g.hwnd, TIMER_AUDIO, 1000, nullptr);
 
     CefRunMessageLoop();
     g_client = nullptr;

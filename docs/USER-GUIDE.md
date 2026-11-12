@@ -60,13 +60,20 @@ Matches must contain every word you typed, in the address or the title. Pages yo
 Ctrl+Shift+M, the `PERF` button next to `SCAN`, or **Performance panel** in the `≡` menu opens a panel on the right side of the window; the page gets narrower. Press the same keys, or `✕` in the panel, to close it. While it is closed it uses no memory itself.
 
 - **Memory and CPU:** the total NeonNet uses, split into **pages** (the tabs), **browser** (the window itself) and **engine** (graphics, network and other helper processes), and the CPU use of everything, as a share of the whole processor.
-- **Tabs:** each tab with its memory and CPU, largest first. A tab using at least 20% of the CPU is marked **HOT** and listed on top. A tab that shares a process with another one shows the shared figure with a `~`. Hover a row for `⏻` (put to sleep) and `✕` (close).
+- **Tabs:** each tab with its memory and CPU, largest first. A tab using at least 20% of the CPU is marked **HOT** and listed on top. A tab that shares a process with another one shows the shared figure with a `~`. Hover a row for the speaker (mute), the lock (keep this site awake), the moon (put to sleep) and the cross (close). Small tags show why a tab is protected: **SOUND**, **TYPING**, **AWAKE**.
 - **Clean memory:** each page collects its garbage, then NeonNet asks Windows to take back memory it no longer needs. The number drops at once, and rises again as pages are used: it helps most when another program needs the RAM. Putting tabs to sleep frees much more.
-- **Sleep background tabs / sleeping tabs:** a sleeping tab is closed to free its memory. It stays in the tab strip, dimmed and in italics, and loads again, at the same address, when you select it. What you had typed into a page, or a video playing in it, is lost when it goes to sleep. The tab you are looking at never sleeps.
+- **Sleep background tabs / sleeping tabs:** a sleeping tab is closed to free its memory. It stays in the tab strip, dimmed and in italics, and loads again, at the same address, when you select it. What you had typed into a page, or a video playing in it, is lost when it goes to sleep, so tabs that have either are protected (see below). The tab you are looking at never sleeps.
+- **Tabs that stay awake:** "Sleep background tabs" and the RAM limiter skip a tab that **plays sound**, one with **typed text** in a text field, text area or editable area (the check runs half a second after you stop typing, and the tab is free again once the field is empty or the page changes), and any tab of a site on the **kept awake** list. Put a site on the list with the lock on one of its tabs; it is shown under **KEPT AWAKE** in the panel, where `✕` takes it off. A notice in the status bar tells how many tabs were kept awake. You can still put a protected tab to sleep yourself with its moon button.
 - **RAM limiter:** off, or 1, 2, 3, 4, 6 or 8 GB. While everything NeonNet uses is above the limit, the background tab unused the longest is put to sleep, one every few seconds, until the total is under the limit or only the current tab is left. A notice in the status bar says which tab it was. A tab that is loading is skipped.
 - **CPU limiter:** background tabs keep working (a download, a chat, a build log), but with low priority and in Windows' power-saving mode, so they take less CPU and give way to what you are using. The selected tab always runs normally.
 
 The limiters are remembered between runs and work with the panel closed. Windows' own "efficiency mode" needs Windows 10 version 1709 or later; without it only the lower priority applies.
+
+## Sound and mute
+
+A tab that is playing sound shows a speaker next to its number in the tab strip. Click the speaker to mute the tab: it turns into a crossed-out speaker that stays until you click it again, and the tab stays muted even when it goes to sleep and wakes up. The same button is in the performance panel.
+
+Sound is detected from audio and video elements on the page that are playing, not muted and really producing audio, within a second or two. Sound made only through the Web Audio API (some games and synthesizers) is not detected, so such a tab shows no speaker, but muting still works on it.
 
 ## Keyboard shortcuts
 
