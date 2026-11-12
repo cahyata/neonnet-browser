@@ -65,9 +65,11 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;app-re
 #menu:hover{background:var(--cyan);color:var(--bg)}
 #bar{position:absolute;left:0;right:0;bottom:0;height:2px;overflow:hidden;opacity:0;transition:opacity .2s}
 #bar.on{opacity:1}
-#bar i{position:absolute;top:0;bottom:0;width:30%;background:linear-gradient(90deg,transparent,var(--pink),var(--cyan),transparent);
-  animation:sweep 1s linear infinite}
-@keyframes sweep{from{left:-30%}to{left:100%}}
+#bar i{position:absolute;left:0;top:0;bottom:0;width:30%;background:linear-gradient(90deg,transparent,var(--pink),var(--cyan),transparent);
+  transform:translateX(-100%)}
+/* run the sweep only while loading: an infinite animation keeps the GPU busy even at opacity 0 */
+#bar.on i{animation:sweep 1s linear infinite}
+@keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(334%)}}
 #line{position:absolute;left:0;right:0;bottom:0;height:1px;background:var(--pink);opacity:.6}
 #star{color:var(--muted);font-size:15px;width:30px;height:100%}
 #star:hover:not(:disabled){color:var(--yellow)}
