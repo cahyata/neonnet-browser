@@ -9,6 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 - Chromium's own download pop-up is turned off, because the downloads page replaces it.
 - Choose the search engine (Google, DuckDuckGo, Bing, Brave or Ecosia) from the `≡` menu. It is used by the address bar and the new tab page.
 
+### Fixes
+- The `≡` menu could open far to the left of its button on some screens. It is now placed from the right edge of the window, so a wrong screen-scale value can no longer move it by hundreds of pixels.
+
 ## [1.1.3] - 2026-11-12
 
 ### Fixes

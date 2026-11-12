@@ -236,7 +236,7 @@ $('#min').onclick = () => send('min');
 $('#max').onclick = () => send('max');
 $('#close').onclick = () => send('quit');
 $('#scanb').onclick = () => send('scan');
-$('#menu').onclick = () => { const r = $('#menu').getBoundingClientRect(); send('menu', Math.round(r.left), Math.round(r.bottom)); };
+$('#menu').onclick = () => { const r = $('#menu').getBoundingClientRect(); send('menu', Math.round(document.documentElement.clientWidth - r.right), Math.round(r.bottom), window.devicePixelRatio); };
 document.addEventListener('contextmenu', e => { if(e.target !== url && e.target !== fq) e.preventDefault(); });
 document.addEventListener('dragstart', e => e.preventDefault());
 

@@ -1546,7 +1546,7 @@ static int RunMenu(std::vector<MenuItem> items, POINT rightTop) {
     return st.result;
 }
 
-static void ShowMenu(int cssX, int cssY) {
+static void ShowMenu(int cssRightGap, int cssY, double ratio) {
     // A click on ≡ while the menu is open first closes it (the menu loses focus);
     // that same click must not open it again.
     if (GetTickCount64() - g_menuClosedAt < 250) return;
@@ -1586,7 +1586,12 @@ static void ShowMenu(int cssX, int cssY) {
     add(CMD_ABOUT, L"About NeonNet");
 
     RECT c = ChromeRect();
-    POINT p{ c.left + S(cssX) + S(32), c.top + S(cssY) + S(2) };   // right edge of the ≡ button
+    // Right edge of the ≡ button, measured from the right edge of the UI area, which we know
+    // exactly in pixels. Only the small gap and the button's bottom go through the CSS-to-pixel
+    // factor (devicePixelRatio, which is what Chromium actually uses), so a wrong factor can
+    // only move the menu by a few pixels instead of hundreds.
+    auto px = [&](double css) { return (int)lround(css * ratio); };
+    POINT p{ c.right - px(cssRightGap), c.top + px(cssY) + px(2) };
     ClientToScreen(g.hwnd, &p);
     int cmd = RunMenu(std::move(m), p);
     if (cmd) ExecCmd(cmd);
@@ -1630,8 +1635,18 @@ static void OnChromeCommand(const std::wstring& msg) {
         }
     }
     else if (cmd == L"menu") {
-        size_t sp = arg.find(L'\n');
-        ShowMenu(_wtoi(arg.substr(0, sp).c_str()), sp == std::wstring::npos ? 0 : _wtoi(arg.substr(sp + 1).c_str()));
+        // arguments: distance from the button's right edge to the right edge of the UI and the
+        // button's bottom (both CSS pixels), and the page's devicePixelRatio
+        std::vector<std::wstring> v;
+        for (size_t s = 0;;) {
+            size_t nl = arg.find(L'\n', s);
+            v.push_back(arg.substr(s, nl == std::wstring::npos ? std::wstring::npos : nl - s));
+            if (nl == std::wstring::npos) break;
+            s = nl + 1;
+        }
+        double ratio = v.size() > 2 ? wcstod(v[2].c_str(), nullptr) : 0;
+        if (!(ratio >= 0.5 && ratio <= 8)) ratio = g.dpi / 96.0;
+        ShowMenu(_wtoi(v[0].c_str()), v.size() > 1 ? _wtoi(v[1].c_str()) : 0, ratio);
     }
 }
 
