@@ -35,6 +35,7 @@
 #include "resource.h"
 #include "updater.h"
 #include "store.h"
+#include "perf.h"
 #include <windowsx.h>   // after CEF headers: its macros (GetFirstChild...) clash with cef_dom.h
 
 // ---------------------------------------------------------------------------
@@ -60,6 +61,10 @@ static const wchar_t* NEWTAB = L"https://neonnet.ui/newtab.html";
 // shrink or grow whenever the user zooms the new tab, history or downloads page.
 static const wchar_t* CHROME_UI_HOST = L"https://chrome.neonnet.ui/";
 static const wchar_t* CHROME_UI = L"https://chrome.neonnet.ui/chrome.html";
+// The performance panel: a second UI browser docked to the right of the page. Like the toolbar it
+// lives on the chrome.neonnet.ui host (own zoom, and allowed to send commands).
+static const wchar_t* PANEL_UI = L"https://chrome.neonnet.ui/performance.html";
+static const int PANEL_DIP = 340;
 static const wchar_t* HISTORY_PAGE = L"https://neonnet.ui/history.html";
 static const wchar_t* BOOKMARKS_PAGE = L"https://neonnet.ui/bookmarks.html";
 static const wchar_t* DOWNLOADS_PAGE = L"https://neonnet.ui/downloads.html";
@@ -82,7 +87,7 @@ static const UINT WM_APP_CLEARDATA = WM_APP + 10;   // lParam = new ClearReq (fr
 static const UINT WM_APP_CLEARSITES = WM_APP + 11;  // lParam = new ClearSites (cookies are done, site data is next)
 
 static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5,
-                      TIMER_ALERT = 6, TIMER_TEMP = 7;
+                      TIMER_ALERT = 6, TIMER_TEMP = 7, TIMER_PERF = 8, TIMER_TRIM = 9;
 static const ULONGLONG UPDATE_INTERVAL_MS = 24ull * 60 * 60 * 1000;   // check at most once a day
 
 enum Cmd {
@@ -91,7 +96,7 @@ enum Cmd {
     CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
     CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE,
     CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_HISTORY,
-    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO
+    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE
 };
 enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW };
 
@@ -116,6 +121,13 @@ struct Tab {
     bool canBack = false, canFwd = false;
     bool errorPending = false;
     long long histId = 0;   // history entry of the page shown
+    // performance panel
+    DWORD pid = 0;                 // renderer process of the page (reported by the renderer itself)
+    bool discarded = false;        // unloaded to free memory: no browser until the tab is selected again
+    bool discarding = false;       // CloseBrowser() called by UnloadTab(): the tab itself stays
+    unsigned long long memBytes = 0;
+    double cpu = 0;
+    ULONGLONG lastActive = 0;      // GetTickCount64() when it was last the selected tab
 };
 
 struct ClosedTab { std::wstring url; int index; };
@@ -127,6 +139,18 @@ struct App {
     HFONT font = nullptr;
     CefRefPtr<CefBrowser> chrome;
     std::atomic<int> chromeId{ 0 };
+    // performance panel
+    CefRefPtr<CefBrowser> panel;
+    std::atomic<int> panelId{ 0 };
+    bool panelOpen = false, creatingPanel = false;
+    perf::Snapshot perfSnap;
+    unsigned long long perfTotal = 0, perfBrowser = 0;   // bytes: all processes, the browser process alone
+    double perfCpu = 0;
+    DWORD ramLimitMB = 0;          // 0 = off: unload idle background tabs while all processes together use more
+    bool bgLimit = false;          // run background tabs at low priority
+    int autoUnloaded = 0;          // tabs unloaded by the RAM limiter since NeonNet started
+    ULONGLONG lastLimitAct = 0;
+    int lastTrimCount = 0;
     std::vector<std::unique_ptr<Tab>> tabs;
     std::deque<int> pendingPopups;  // tab ids waiting for their popup browser
     int creatingTab = 0;            // tab id while CreateBrowserSync runs
@@ -282,6 +306,8 @@ static void RegSetBin(const wchar_t* name, DWORD type, const void* data, DWORD s
 static std::wstring DownloadTarget(std::wstring name);   // below, next to ApplySetting
 static void ShowAlert(const std::wstring& text);
 static void LaunchIncognito(const std::wstring& url);
+static void ApplyBackgroundLimit();   // performance panel, below
+static void PushPerf();
 static std::wstring TempMediaPath(const std::wstring& name, const std::wstring& mime);
 static void OpenTempMedia(const std::wstring& path);
 // Clear browsing data (settings page). cutoffMs is the unix time (ms) from which data is removed, 0 = all time.
@@ -308,6 +334,8 @@ static Tab* TabOf(CefRefPtr<CefBrowser> b) {
     return nullptr;
 }
 static bool IsChrome(CefRefPtr<CefBrowser> b) { return b && b->GetIdentifier() == g.chromeId.load(); }
+static bool IsPanel(CefRefPtr<CefBrowser> b) { return b && g.panelId.load() && b->GetIdentifier() == g.panelId.load(); }
+static bool IsUiBrowser(CefRefPtr<CefBrowser> b) { return IsChrome(b) || IsPanel(b); }   // NeonNet's own UI, never a page
 static Tab* Active() { return FindTab(g.active); }
 static int IndexOf(int id) { for (size_t i = 0; i < g.tabs.size(); i++) if (g.tabs[i]->id == id) return (int)i; return -1; }
 
@@ -344,7 +372,14 @@ static RECT ContentRect() {
     RECT rc; GetClientRect(g.hwnd, &rc);
     if (g.fullscreen) return rc;
     RECT c = ChromeRect(), s = StatusRect();
-    return { c.left, c.bottom, c.right, s.top };
+    int right = c.right;
+    if (g.panelOpen) right = std::max((int)c.left + S(200), (int)c.right - S(PANEL_DIP));   // the panel takes the right edge
+    return { c.left, c.bottom, right, s.top };
+}
+// The performance panel: right of the page, same height.
+static RECT PanelRect() {
+    RECT c = ChromeRect(), s = StatusRect(), p = ContentRect();
+    return { p.right, c.bottom, c.right, s.top };
 }
 
 static void UpdateRegion() {
@@ -373,6 +408,7 @@ static void Place(CefRefPtr<CefBrowser> b, const RECT& r, bool visible, bool rai
 static void Layout() {
     if (!g.hwnd) return;
     if (g.chrome) Place(g.chrome, ChromeHostRect(), !g.fullscreen, g.dropNeed > 0);
+    if (g.panel) Place(g.panel, PanelRect(), g.panelOpen && !g.fullscreen);
     RECT content = ContentRect();
     for (auto& t : g.tabs) Place(t->browser, content, t->id == g.active);
     UpdateRegion();
@@ -400,7 +436,7 @@ static void SendState() {
         Tab* t = g.tabs[i].get();
         if (i) j += L",";
         j += L"{\"id\":" + std::to_wstring(t->id) + L",\"title\":" + JsonStr(t->title) +
-             L",\"loading\":" + (t->loading ? L"true" : L"false") + L"}";
+             L",\"loading\":" + (t->loading ? L"true" : L"false") + L",\"discarded\":" + (t->discarded ? L"true" : L"false") + L"}";
     }
     j += L"],\"active\":" + std::to_wstring(g.active);
     j += L",\"url\":" + JsonStr(a ? DisplayUrl(a) : L"");
@@ -409,6 +445,7 @@ static void SendState() {
     j += std::wstring(L",\"loading\":") + (a && a->loading ? L"true" : L"false");
     j += std::wstring(L",\"scan\":") + (g.scan ? L"true" : L"false");
     j += std::wstring(L",\"incognito\":") + (g.incognito ? L"true" : L"false");
+    j += std::wstring(L",\"perf\":") + (g.panelOpen ? L"true" : L"false");
     j += std::wstring(L",\"max\":") + (IsZoomed(g.hwnd) ? L"true" : L"false");
     std::wstring cur = a ? DisplayUrl(a) : L"";
     j += std::wstring(L",\"canStar\":") + (!g.incognito && store::Recordable(cur) ? L"true" : L"false");
@@ -564,15 +601,21 @@ static void HideFind() {
     g.findOpen = false;
 }
 
+static void RestoreTab(Tab* t);   // below: gives an unloaded tab its page back
+
 static void SelectTab(int id, bool focus) {
-    if (!FindTab(id)) return;
+    Tab* sel = FindTab(id);
+    if (!sel) return;
     if (id != g.active) HideFind();
     g.active = id;
+    sel->lastActive = GetTickCount64();
+    if (sel->discarded) RestoreTab(sel);
     if (g.fsElement) { g.fsElement = false; UpdateFullscreen(); }
     g.hoverText.clear();
     Layout();
     SendState();
     InvalidateStatus();
+    ApplyBackgroundLimit();
     if (focus) FocusPage();
 }
 
@@ -597,6 +640,7 @@ static void CreateTab(const std::wstring& url, bool activate, int at) {
     auto tab = std::make_unique<Tab>();
     int id = tab->id = g.nextId++;
     tab->url = url;
+    tab->lastActive = GetTickCount64();
     int cur = IndexOf(g.active);
     int pos = at >= 0 ? std::min(at, (int)g.tabs.size()) : (cur < 0 ? (int)g.tabs.size() : cur + 1);
     g.tabs.insert(g.tabs.begin() + pos, std::move(tab));
@@ -612,6 +656,18 @@ static void CreateTab(const std::wstring& url, bool activate, int at) {
     Layout();
     SendState();
     if (activate) FocusPage();
+}
+
+// A tab unloaded by the performance panel gets a browser again, showing the address it had.
+static void RestoreTab(Tab* t) {
+    if (!t || !t->discarded || t->browser) return;
+    t->discarded = false; t->loading = true; t->pid = 0;
+    std::wstring url = DisplayUrl(t);
+    g.creatingTab = t->id;
+    CefRefPtr<CefBrowser> b = CefBrowserHost::CreateBrowserSync(ChildInfo(ContentRect()), MainClient(),
+        url.empty() ? NEWTAB : url, BrowserSettings(), nullptr, g.reqCtx);
+    g.creatingTab = 0;
+    if (b && !t->browser) t->browser = b;
 }
 
 static void CloseTab(int id) {
@@ -788,7 +844,7 @@ public:
                        const CefString&, CefLifeSpanHandler::WindowOpenDisposition, bool, const CefPopupFeatures&,
                        CefWindowInfo& windowInfo, CefRefPtr<CefClient>& client, CefBrowserSettings& settings,
                        CefRefPtr<CefDictionaryValue>&, bool*) override {
-        if (IsChrome(browser) || g.closing) return true;   // the chrome UI never opens popups
+        if (IsUiBrowser(browser) || g.closing) return true;   // the chrome UI never opens popups
         // Keep the popup (so window.opener works for logins) but host it as a new tab.
         auto tab = std::make_unique<Tab>();
         int id = tab->id = g.nextId++;
@@ -817,6 +873,7 @@ public:
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
         g_all.push_back(browser);
         if (g.creatingChrome) { g.chrome = browser; g.chromeId = browser->GetIdentifier(); return; }
+        if (g.creatingPanel) { g.panel = browser; g.panelId = browser->GetIdentifier(); return; }
         Tab* t = nullptr;
         if (g.creatingTab) t = FindTab(g.creatingTab);
         else if (!g.pendingPopups.empty()) { t = FindTab(g.pendingPopups.front()); g.pendingPopups.pop_front(); }
@@ -834,10 +891,16 @@ public:
         g_all.erase(std::remove_if(g_all.begin(), g_all.end(),
             [bid](const CefRefPtr<CefBrowser>& b) { return b->GetIdentifier() == bid; }), g_all.end());
         if (IsChrome(browser)) { g.chrome = nullptr; g.chromeId = 0; }
+        else if (IsPanel(browser)) { g.panel = nullptr; g.panelId = 0; }
         else if (Tab* t = TabOf(browser)) {
-            // closed from inside the page (window.close())
             t->browser = nullptr;
-            if (!g.closing) CloseTab(t->id);
+            if (t->discarding) {
+                // unloaded on purpose (UnloadTab): the tab stays, without a browser, until it is selected
+                t->discarding = false; t->discarded = true; t->pid = 0; t->loading = false; t->memBytes = 0; t->cpu = 0;
+                if (!g.closing) SendState();
+            } else if (!g.closing) {
+                CloseTab(t->id);   // closed from inside the page (window.close())
+            }
         }
         MaybeFinishClose();
     }
@@ -892,6 +955,8 @@ public:
             if (t->id == g.active) InvalidateStatus();
         } else if (IsChrome(browser) && !isLoading) {
             SendState();
+        } else if (IsPanel(browser) && !isLoading) {
+            PushPerf();
         }
     }
     void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType) override {
@@ -934,6 +999,7 @@ public:
             case 'G': cmd = shift ? CMD_FINDPREV : CMD_FINDNEXT; break;
             case 'D': if (!repeat) cmd = CMD_BOOKMARK; break;
             case 'N': if (shift && !repeat) cmd = CMD_INCOGNITO; break;
+            case 'M': if (shift && !repeat) cmd = CMD_PERFORMANCE; break;
             case 'H': if (!repeat) cmd = CMD_HISTORY; break;
             case 'J': if (!repeat) cmd = CMD_DOWNLOADS; break;
             case VK_OEM_COMMA: if (!repeat) cmd = CMD_SETTINGS; break;
@@ -1041,7 +1107,7 @@ public:
     // --- context menu ---
     void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, CefRefPtr<CefContextMenuParams> params,
                              CefRefPtr<CefMenuModel> model) override {
-        if (IsChrome(browser)) {
+        if (IsUiBrowser(browser)) {
             if (!(params->GetTypeFlags() & CM_TYPEFLAG_EDITABLE)) model->Clear();
             return;
         }
@@ -1096,6 +1162,10 @@ public:
     // The renderer reports videos this build cannot play and sites that ask for DRM.
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId,
                                   CefRefPtr<CefProcessMessage> message) override {
+        if (message->GetName() == "nn.pid") {
+            if (Tab* pt = TabOf(browser)) { pt->pid = (DWORD)message->GetArgumentList()->GetInt(0); ApplyBackgroundLimit(); }
+            return true;
+        }
         if (message->GetName() != "nn.media") return false;
         Tab* t = TabOf(browser);
         if (!t || t->id != g.active || g.closing) return true;
@@ -1344,7 +1414,8 @@ public:
 
         if (path == L"cmd") {
             // Only the chrome UI browser may send commands.
-            if (browser && browser->GetIdentifier() == g.chromeId.load() && query.rfind(L"m=", 0) == 0) {
+            if (browser && (browser->GetIdentifier() == g.chromeId.load() ||
+                            (g.panelId.load() && browser->GetIdentifier() == g.panelId.load())) && query.rfind(L"m=", 0) == 0) {
                 auto* msg = new std::wstring(PercentDecode(query.substr(2)));
                 if (!PostMessageW(g.hwnd, WM_APP_CMD, 0, (LPARAM)msg)) delete msg;
             }
@@ -1368,6 +1439,7 @@ public:
         else if (path == L"bookmarks.html") id = IDR_BOOKMARKS;
         else if (path == L"downloads.html") id = IDR_DOWNLOADS;
         else if (path == L"settings.html") id = IDR_SETTINGS;
+        else if (path == L"performance.html") id = IDR_PERFORMANCE;
         std::string body;
         if (id && LoadUi(id, body)) return new StringResource(std::move(body), "text/html", 200);
         // Unknown neonnet:// page: a themed page with a proper title (the tab would otherwise
@@ -1643,12 +1715,179 @@ static void LaunchIncognito(const std::wstring& url) {
     ShellExecuteW(nullptr, L"open", exe, args.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
+// ---------------------------------------------------------------------------
+// Performance panel: memory and CPU per tab, cleaning, and two optional limiters.
+//
+// Every renderer reports its process id (message nn.pid, see NeonApp), so a tab's memory and
+// CPU are those of its renderer process. Tabs that share a process show the same figures.
+// Cleaning asks each page to collect garbage and then trims the working sets of all processes.
+// A tab can be unloaded (its browser is closed, the tab stays and reloads when selected). The RAM
+// limiter unloads the longest-unused background tab while all processes use more than the limit,
+// and the background limiter runs the processes of background tabs at low priority.
+
+static void UpdatePerfTimer() {
+    if (!g.hwnd) return;
+    if (g.panelOpen || g.ramLimitMB || g.bgLimit) SetTimer(g.hwnd, TIMER_PERF, g.panelOpen ? 2000 : 4000, nullptr);
+    else KillTimer(g.hwnd, TIMER_PERF);
+}
+
+static void SamplePerf() {
+    g.perfSnap = perf::Sample();
+    g.perfTotal = g.perfSnap.totalBytes;
+    g.perfCpu = g.perfSnap.totalCpu;
+    auto self = g.perfSnap.byPid.find(GetCurrentProcessId());
+    g.perfBrowser = self != g.perfSnap.byPid.end() ? self->second.bytes : 0;
+    for (auto& t : g.tabs) {
+        auto p = t->pid ? g.perfSnap.byPid.find(t->pid) : g.perfSnap.byPid.end();
+        t->memBytes = p != g.perfSnap.byPid.end() ? p->second.bytes : 0;
+        t->cpu = p != g.perfSnap.byPid.end() ? p->second.cpu : 0;
+    }
+}
+
+static void PushPerf() {
+    if (!g.panel || !g.panelOpen) return;
+    auto mb = [](unsigned long long b) { return std::to_wstring((long long)(b / (1024 * 1024))); };
+    std::map<DWORD, int> users;   // tabs per process
+    for (auto& t : g.tabs) if (t->pid) users[t->pid]++;
+    unsigned long long tabBytes = 0;
+    for (auto& u : users) { auto p = g.perfSnap.byPid.find(u.first); if (p != g.perfSnap.byPid.end()) tabBytes += p->second.bytes; }
+    unsigned long long engine = g.perfTotal > g.perfBrowser + tabBytes ? g.perfTotal - g.perfBrowser - tabBytes : 0;
+    wchar_t cpu[32]; swprintf_s(cpu, L"%.1f", g.perfCpu);
+    std::wstring j = L"{\"total\":" + mb(g.perfTotal) + L",\"browser\":" + mb(g.perfBrowser) + L",\"engine\":" + mb(engine) +
+                     L",\"cpu\":" + cpu + L",\"limit\":" + std::to_wstring(g.ramLimitMB) +
+                     L",\"bg\":" + (g.bgLimit ? L"true" : L"false") + L",\"auto\":" + std::to_wstring(g.autoUnloaded) +
+                     L",\"trimmed\":" + std::to_wstring(g.lastTrimCount) + L",\"tabs\":[";
+    for (size_t i = 0; i < g.tabs.size(); i++) {
+        Tab* t = g.tabs[i].get();
+        wchar_t c[32]; swprintf_s(c, L"%.1f", t->cpu);
+        if (i) j += L",";
+        j += L"{\"id\":" + std::to_wstring(t->id) + L",\"title\":" + JsonStr(t->title.empty() ? DisplayUrl(t) : t->title) +
+             L",\"mem\":" + mb(t->memBytes) + L",\"cpu\":" + c + L",\"active\":" + (t->id == g.active ? L"true" : L"false") +
+             L",\"discarded\":" + (t->discarded ? L"true" : L"false") +
+             L",\"shared\":" + (t->pid && users[t->pid] > 1 ? L"true" : L"false") + L"}";
+    }
+    j += L"]}";
+    g.panel->GetMainFrame()->ExecuteJavaScript(L"window.nnPerf&&window.nnPerf(" + j + L")", PANEL_UI, 0);
+}
+
+// Priority of the renderer processes: low for background tabs while the limiter is on.
+static void ApplyBackgroundLimit() {
+    static std::map<DWORD, bool> applied;   // pid -> low priority is set
+    std::set<DWORD> inUse;
+    if (Tab* a = Active()) if (a->pid) inUse.insert(a->pid);   // the selected tab's process is never slowed down
+    std::set<DWORD> live;
+    for (auto& t : g.tabs) {
+        if (!t->pid) continue;
+        live.insert(t->pid);
+        bool low = g.bgLimit && !inUse.count(t->pid);
+        auto it = applied.find(t->pid);
+        if ((it == applied.end() && !low) || (it != applied.end() && it->second == low)) continue;
+        if (perf::SetBackground(t->pid, low)) applied[t->pid] = low;
+    }
+    for (auto it = applied.begin(); it != applied.end();) it = live.count(it->first) ? std::next(it) : applied.erase(it);
+}
+
+static bool UnloadTab(int id) {
+    Tab* t = FindTab(id);
+    if (!t || !t->browser || t->discarded || id == g.active) return false;
+    t->discarding = true;
+    HWND w = t->browser->GetHost()->GetWindowHandle();
+    if (w) ShowWindow(w, SW_HIDE);
+    t->browser->GetHost()->CloseBrowser(true);
+    return true;
+}
+
+static void ApplyRamLimit() {
+    if (!g.ramLimitMB || g.closing) return;
+    if (g.perfTotal <= (unsigned long long)g.ramLimitMB * 1024 * 1024) return;
+    if (GetTickCount64() - g.lastLimitAct < 5000) return;   // give the last unload time to show in the figures
+    Tab* oldest = nullptr;
+    for (auto& t : g.tabs) {
+        if (t->id == g.active || !t->browser || t->discarded || t->loading) continue;
+        if (!oldest || t->lastActive < oldest->lastActive) oldest = t.get();
+    }
+    if (!oldest) return;
+    std::wstring name = oldest->title.empty() ? DisplayUrl(oldest) : oldest->title;
+    if (UnloadTab(oldest->id)) {
+        g.autoUnloaded++;
+        g.lastLimitAct = GetTickCount64();
+        ShowNotice(L"RAM LIMIT: PUT TO SLEEP " + Upper(name.substr(0, 40)));
+    }
+}
+
+static void OnPerfTimer() {
+    if (g.closing) return;
+    if (Tab* a = Active()) a->lastActive = GetTickCount64();
+    SamplePerf();
+    ApplyBackgroundLimit();
+    ApplyRamLimit();
+    PushPerf();
+}
+
+// First every page collects its garbage (the DevTools command), then, a moment later, the
+// working sets are trimmed (TIMER_TRIM) and the figures are taken again.
+static void CleanMemory() {
+    for (auto& t : g.tabs)
+        if (t->browser) t->browser->GetHost()->ExecuteDevToolsMethod(0, "HeapProfiler.collectGarbage", CefDictionaryValue::Create());
+    if (g.hwnd) SetTimer(g.hwnd, TIMER_TRIM, 1200, nullptr);
+}
+
+static void SetPanelOpen(bool open) {
+    if (open == g.panelOpen) return;
+    g.panelOpen = open;
+    if (open) {
+        if (!g.panel) {
+            g.creatingPanel = true;
+            CefBrowserHost::CreateBrowserSync(ChildInfo(PanelRect()), g_client.get(), PANEL_UI, BrowserSettings(), nullptr, nullptr);
+            g.creatingPanel = false;
+        }
+        SamplePerf();
+    } else if (g.panel) {
+        // closed for good, so the panel itself holds no memory while it is hidden
+        CefRefPtr<CefBrowser> p = g.panel;
+        g.panel = nullptr;
+        p->GetHost()->CloseBrowser(true);
+    }
+    Layout();
+    UpdatePerfTimer();
+    SendState();
+}
+
+static void SetRamLimit(DWORD mb) {
+    g.ramLimitMB = (mb >= 512 && mb <= 65536) ? mb : 0;
+    RegSetBin(L"RamLimitMB", REG_DWORD, &g.ramLimitMB, sizeof(DWORD));
+    UpdatePerfTimer();
+}
+
+static void SetBgLimit(bool on) {
+    g.bgLimit = on;
+    DWORD v = on ? 1 : 0;
+    RegSetBin(L"BgLimit", REG_DWORD, &v, sizeof(v));
+    ApplyBackgroundLimit();
+    UpdatePerfTimer();
+}
+
+// Commands from the panel page (see OnChromeCommand).
+static void OnPerfCommand(const std::wstring& cmd, const std::wstring& arg) {
+    int id = _wtoi(arg.c_str());
+    if (cmd == L"perf.clean") CleanMemory();
+    else if (cmd == L"perf.unload") { UnloadTab(id); }
+    else if (cmd == L"perf.close") { if (FindTab(id)) CloseTab(id); }
+    else if (cmd == L"perf.unloadbg") { std::vector<int> ids; for (auto& t : g.tabs) ids.push_back(t->id); for (int i : ids) UnloadTab(i); }
+    else if (cmd == L"perf.ram") SetRamLimit((DWORD)_wtoi(arg.c_str()));
+    else if (cmd == L"perf.bg") SetBgLimit(arg == L"1");
+    else if (cmd == L"perf.hide") SetPanelOpen(false);
+    SamplePerf();
+    PushPerf();
+}
+
 static void ExecCmd(int cmd) {
     Tab* a = Active();
     CefRefPtr<CefBrowser> b = a ? a->browser : nullptr;
     switch (cmd) {
     case CMD_NEWTAB: CreateTab(NEWTAB, true); break;
     case CMD_INCOGNITO: if (g.incognito) CreateTab(NEWTAB, true); else LaunchIncognito(L""); break;
+    case CMD_PERFORMANCE: SetPanelOpen(!g.panelOpen); break;
     case CMD_CLOSETAB: if (a) CloseTab(a->id); break;
     case CMD_HOME: if (b) b->GetMainFrame()->LoadURL(HomeUrl()); break;
     case CMD_RELOAD:
@@ -1980,6 +2219,7 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
     add(CMD_BOOKMARKS, L"Bookmarks", L"Ctrl+Shift+O");
     add(CMD_HISTORY, L"History", L"Ctrl+H", g.incognito);   // nothing is recorded in an incognito window
     add(CMD_DOWNLOADS, L"Downloads", L"Ctrl+J");
+    add(CMD_PERFORMANCE, L"Performance panel", L"Ctrl+Shift+M", false, g.panelOpen);
     add(CMD_FIND, L"Find in page", L"Ctrl+F");
     sep();
     add(CMD_ZOOMIN, L"Zoom in", L"Ctrl++");
@@ -2131,6 +2371,8 @@ static void OnChromeCommand(const std::wstring& msg) {
     else if (cmd == L"reload") ExecCmd(CMD_RELOAD);
     else if (cmd == L"stop") ExecCmd(CMD_STOP);
     else if (cmd == L"newtab") ExecCmd(CMD_NEWTAB);
+    else if (cmd == L"perf") ExecCmd(CMD_PERFORMANCE);
+    else if (cmd.rfind(L"perf.", 0) == 0) OnPerfCommand(cmd, arg);
     else if (cmd == L"home") ExecCmd(CMD_HOME);
     else if (cmd == L"dropdown") {
         // address bar suggestions: the toolbar height they need (CSS px, 0 = closed)
@@ -2248,6 +2490,12 @@ public:
     CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override { return this; }
 
     void OnContextCreated(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
+        if (frame->IsMain()) {
+            // Which process runs this tab: the performance panel measures and limits it.
+            CefRefPtr<CefProcessMessage> pm = CefProcessMessage::Create("nn.pid");
+            pm->GetArgumentList()->SetInt(0, (int)GetCurrentProcessId());
+            frame->SendProcessMessage(PID_BROWSER, pm);
+        }
         std::string url = frame->GetURL();
         if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) return;
         if (url.rfind("https://neonnet.ui/", 0) == 0 || url.rfind("https://chrome.neonnet.ui/", 0) == 0) return;
@@ -2641,6 +2889,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else if (wp == TIMER_NOTICE) { KillTimer(hwnd, TIMER_NOTICE); g.notice.clear(); }
         else if (wp == TIMER_ALERT) { KillTimer(hwnd, TIMER_ALERT); g.alert.clear(); InvalidateStatus(); }
         else if (wp == TIMER_TEMP) SweepTemp();
+        else if (wp == TIMER_PERF) OnPerfTimer();
+        else if (wp == TIMER_TRIM) { KillTimer(hwnd, TIMER_TRIM); g.lastTrimCount = perf::TrimWorkingSets(); SamplePerf(); PushPerf(); }
         else if (wp == TIMER_UPDATE) MaybeAutoCheck();
         else if (wp == TIMER_SAVE) { KillTimer(hwnd, TIMER_SAVE); store::SaveIfDirty(); return 0; }
         InvalidateStatus();
@@ -2790,6 +3040,8 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     }
     EnableDarkMenus();
     g.scan = RegGetDword(L"Scanlines", 1) != 0;
+    { DWORD r = RegGetDword(L"RamLimitMB", 0); g.ramLimitMB = (r >= 512 && r <= 65536) ? r : 0; }
+    g.bgLimit = RegGetDword(L"BgLimit", 0) != 0;
     {
         std::wstring eid = RegGetString(L"SearchEngine");
         for (int i = 0; i < SEARCH_ENGINE_COUNT; i++) if (eid == SEARCH_ENGINES[i].id) g.engine = i;
@@ -2861,6 +3113,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     SetTimer(g.hwnd, TIMER_CLOCK, 15000, nullptr);
     UpdateStartup();
     SweepTemp();   // copies left over from the last run (a player may have kept one open)
+    UpdatePerfTimer();   // the limiters run without the panel
 
     CefRunMessageLoop();
     g_client = nullptr;

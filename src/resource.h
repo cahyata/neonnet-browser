@@ -7,6 +7,7 @@
 #define IDR_BOOKMARKS  204
 #define IDR_DOWNLOADS  205
 #define IDR_SETTINGS   206
+#define IDR_PERFORMANCE 207
 
 #define APP_VERSION    L"1.4.0"
 #define APP_PUBLISHER  L"NeonNet"

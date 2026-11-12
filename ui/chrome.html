@@ -65,6 +65,9 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;app-re
 #go:hover{background:var(--cyan)}
 #scanb{height:28px;padding:0 8px;border:1px solid var(--muted);color:var(--muted)}
 #scanb.on{border-color:var(--cyan);color:var(--cyan)}
+#perfb{height:28px;padding:0 8px;border:1px solid var(--muted);color:var(--muted)}
+#perfb.on{border-color:var(--cyan);color:var(--cyan)}
+.tab.discarded{opacity:.55;font-style:italic}
 #menu{color:var(--cyan);font-size:16px;width:32px;height:28px}
 #menu:hover{background:var(--cyan);color:var(--bg)}
 #bar{position:absolute;left:0;right:0;bottom:0;height:2px;overflow:hidden;opacity:0;transition:opacity .2s}
@@ -129,6 +132,7 @@ body.find #find{display:flex}
   <button class="nb" id="home" title="Home">[&#8962;]</button>
   <div id="addr"><span>&gt;&gt;</span><input id="url" spellcheck="false" autocomplete="off" placeholder="search the grid or enter address"><button id="star" title="Bookmark this page (Ctrl+D)">&#9734;</button></div>
   <button id="go">GO</button>
+  <button id="perfb" title="Performance panel (Ctrl+Shift+M)">PERF</button>
   <button id="scanb" title="Toggle scanlines">SCAN</button>
   <button id="menu" title="Menu">&#8801;</button>
   <div id="line"></div>
@@ -182,7 +186,7 @@ function render(){
   const box = $('#tabs'); box.innerHTML = '';
   state.tabs.forEach((t, i) => {
     const d = document.createElement('div');
-    d.className = 'tab' + (t.id === state.active ? ' active' : '') + (t.loading ? ' loading' : '');
+    d.className = 'tab' + (t.id === state.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.discarded ? ' discarded' : '');
     d.title = t.title;
     d.innerHTML = '<span class="n"></span><span class="t"></span><button class="x" title="Close tab (Ctrl+W)">&#10005;</button>';
     d.querySelector('.n').textContent = String(i + 1).padStart(2, '0');
@@ -198,6 +202,7 @@ function render(){
   $('#reload').title = state.loading ? 'Stop (Esc)' : 'Reload (F5)';
   $('#bar').classList.toggle('on', !!state.loading);
   $('#scanb').classList.toggle('on', !!state.scan);
+  $('#perfb').classList.toggle('on', !!state.perf);
   document.documentElement.classList.toggle('incog', !!state.incognito);
   document.documentElement.style.setProperty('--scan', state.scan ? 'block' : 'none');
   document.documentElement.style.setProperty('--cutline', state.max ? 'none' : 'block');
@@ -351,6 +356,7 @@ $('#min').onclick = () => send('min');
 $('#max').onclick = () => send('max');
 $('#close').onclick = () => send('quit');
 $('#scanb').onclick = () => send('scan');
+$('#perfb').onclick = () => send('perf');
 $('#menu').onclick = () => { const r = $('#menu').getBoundingClientRect(); send('menu', Math.round(document.documentElement.clientWidth - r.right), Math.round(r.bottom), window.devicePixelRatio); };
 document.addEventListener('contextmenu', e => { if(e.target !== url && e.target !== fq) e.preventDefault(); });
 document.addEventListener('dragstart', e => e.preventDefault());

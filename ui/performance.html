@@ -1,0 +1,148 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PERFORMANCE</title>
+<style>
+:root{--bg:#12062c;--bg2:#0a0420;--row:#1b0b3d;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0;--green:#35ffa0}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:#e8d8ff;font:12px "Cascadia Mono","Consolas","Courier New",monospace;user-select:none;overflow:hidden}
+body{display:flex;flex-direction:column;border-left:1px solid var(--pink)}
+header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px;flex:none}
+h1{margin:0;font:italic 900 22px Impact,"Arial Black",sans-serif;letter-spacing:2px;color:var(--cyan);text-shadow:2px 2px 0 var(--pink)}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+#x{width:26px;height:26px;color:var(--muted)}
+#x:hover{background:var(--pink);color:var(--bg)}
+main{flex:1;overflow:auto;padding:0 12px 14px}
+h2{font:bold 11px "Cascadia Mono","Consolas",monospace;color:var(--yellow);letter-spacing:2px;margin:16px 0 6px;padding-bottom:3px;border-bottom:1px solid rgba(255,46,151,.5)}
+.big{display:flex;align-items:baseline;gap:8px}
+.big b{font-size:28px;color:var(--cyan);font-weight:bold}
+.big span{color:var(--muted)}
+.meter{height:8px;background:var(--bg2);border:1px solid rgba(138,111,192,.5);margin:6px 0 4px;position:relative}
+.meter i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--cyan),var(--pink));width:0}
+.meter.over i{background:var(--pink)}
+.split{display:flex;justify-content:space-between;color:var(--muted);margin-top:2px}
+.split b{color:#e8d8ff;font-weight:normal}
+.btn{display:block;width:100%;height:32px;margin-top:8px;border:1px solid var(--pink);color:var(--pink);font-weight:bold;letter-spacing:1px}
+.btn:hover{background:var(--pink);color:var(--bg)}
+.btn.alt{border-color:var(--cyan);color:var(--cyan)}
+.btn.alt:hover{background:var(--cyan);color:var(--bg)}
+.hint{color:var(--muted);margin-top:4px;line-height:1.5;min-height:16px}
+.hint.ok{color:var(--green)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
+.row label{color:#e8d8ff}
+select{height:28px;background:var(--bg2);color:var(--cyan);border:1px solid var(--cyan);padding:0 6px;font:inherit;outline:0;min-width:110px}
+select option{background:var(--bg2);color:var(--cyan)}
+.tog{min-width:64px;height:28px;padding:0 10px;border:1px solid var(--muted);color:var(--muted);font-weight:bold;letter-spacing:1px}
+.tog.on{border-color:var(--green);color:var(--green)}
+.tab{display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid rgba(138,111,192,.2)}
+.tab:hover{background:var(--row)}
+.tab .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e8d8ff}
+.tab.active .t{color:var(--cyan)}
+.tab.off .t{color:var(--muted);font-style:italic}
+.tab .m{width:62px;text-align:right;color:var(--cyan);flex:none}
+.tab .c{width:44px;text-align:right;color:var(--muted);flex:none}
+.tab.hot .c{color:var(--pink);font-weight:bold}
+.tab .a{width:22px;height:22px;flex:none;color:var(--muted);visibility:hidden}
+.tab:hover .a{visibility:visible}
+.tab .a:hover{background:var(--pink);color:var(--bg)}
+.tab .a:disabled{opacity:.3;cursor:default}
+.tag{font-size:10px;color:var(--bg);background:var(--pink);padding:0 4px;letter-spacing:1px}
+.empty{color:var(--muted);padding:8px 0}
+</style>
+</head>
+<body>
+<header><h1>PERFORMANCE</h1><button id="x" title="Close the panel (Ctrl+Shift+M)">&#10005;</button></header>
+<main>
+  <h2>MEMORY</h2>
+  <div class="big"><b id="total">-</b><span>in use by NeonNet</span></div>
+  <div class="meter" id="meter"><i id="meterFill"></i></div>
+  <div class="split"><span>PAGES <b id="pages">-</b></span><span>BROWSER <b id="browser">-</b></span><span>ENGINE <b id="engine">-</b></span></div>
+  <div class="split"><span>CPU <b id="cpu">-</b></span><span id="limitNote"></span></div>
+  <button class="btn" id="clean">CLEAN MEMORY</button>
+  <div class="hint" id="cleanHint">Collects garbage and gives unused memory back to Windows. Use rises again as pages are used.</div>
+  <button class="btn alt" id="unloadbg">SLEEP BACKGROUND TABS</button>
+  <div class="hint">A sleeping tab frees its memory and reloads when you select it.</div>
+
+  <h2>LIMITERS</h2>
+  <div class="row"><label for="ram">RAM limiter</label>
+    <select id="ram">
+      <option value="0">Off</option>
+      <option value="1024">1 GB</option><option value="2048">2 GB</option><option value="3072">3 GB</option>
+      <option value="4096">4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option>
+    </select></div>
+  <div class="hint" id="ramHint">Above the limit, the tab unused the longest goes to sleep.</div>
+  <div class="row"><label>CPU limiter</label><button class="tog" id="bg">OFF</button></div>
+  <div class="hint">Tabs you are not looking at keep running, but with low priority and in power-saving mode.</div>
+
+  <h2>TABS</h2>
+  <div id="tabs"></div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const send = (cmd, arg) => fetch('/cmd?m=' + encodeURIComponent(cmd + (arg === undefined ? '' : '\n' + arg)), {cache:'no-store'}).catch(() => {});
+const fmt = mb => mb >= 1024 ? (mb / 1024).toFixed(2) + ' GB' : mb + ' MB';
+const HOT = 20;   // percent of the whole CPU a tab must use to be called hot
+let last = null, cleaning = 0;
+
+$('#x').onclick = () => send('perf.hide');
+$('#clean').onclick = () => {
+  send('perf.clean'); cleaning = Date.now();
+  $('#cleanHint').className = 'hint'; $('#cleanHint').textContent = 'Cleaning...';
+};
+$('#unloadbg').onclick = () => send('perf.unloadbg');
+$('#ram').onchange = () => send('perf.ram', $('#ram').value);
+$('#bg').onclick = () => send('perf.bg', $('#bg').classList.contains('on') ? '0' : '1');
+
+window.nnPerf = d => {
+  const before = last ? last.total : d.total;
+  last = d;
+  const pages = d.total - d.browser - d.engine;
+  $('#total').textContent = fmt(d.total);
+  $('#pages').textContent = fmt(Math.max(0, pages));
+  $('#browser').textContent = fmt(d.browser);
+  $('#engine').textContent = fmt(d.engine);
+  $('#cpu').textContent = d.cpu.toFixed(1) + '%';
+  const meter = $('#meter');
+  if(d.limit){
+    meter.style.display = '';
+    $('#meterFill').style.width = Math.min(100, d.total / d.limit * 100) + '%';
+    meter.classList.toggle('over', d.total > d.limit);
+    $('#limitNote').textContent = 'LIMIT ' + fmt(d.limit);
+  } else {
+    meter.style.display = 'none'; $('#limitNote').textContent = '';
+  }
+  if(document.activeElement !== $('#ram')) $('#ram').value = String(d.limit || 0);
+  $('#bg').classList.toggle('on', !!d.bg);
+  $('#bg').textContent = d.bg ? 'ON' : 'OFF';
+  $('#ramHint').textContent = d.auto ? 'Put ' + d.auto + ' tab' + (d.auto === 1 ? '' : 's') + ' to sleep since NeonNet started.'
+    : 'Above the limit, the tab unused the longest goes to sleep.';
+  if(cleaning && Date.now() - cleaning > 2600){
+    cleaning = 0;
+    const h = $('#cleanHint'); h.className = 'hint ok';
+    h.textContent = 'Done. ' + d.trimmed + ' processes trimmed, now ' + fmt(d.total) + '.';
+  }
+  const list = $('#tabs'); list.innerHTML = '';
+  const tabs = d.tabs.slice().sort((a, b) => (b.cpu >= HOT) - (a.cpu >= HOT) || b.mem - a.mem);
+  if(!tabs.length) list.innerHTML = '<div class="empty">No tabs.</div>';
+  for(const t of tabs){
+    const row = document.createElement('div');
+    row.className = 'tab' + (t.active ? ' active' : '') + (t.discarded ? ' off' : '') + (t.cpu >= HOT ? ' hot' : '');
+    const title = document.createElement('span'); title.className = 't'; title.textContent = t.title; title.title = t.title;
+    const mem = document.createElement('span'); mem.className = 'm';
+    mem.textContent = t.discarded ? 'SLEEPING' : (t.shared ? '~' : '') + t.mem + ' MB';
+    if(t.shared) mem.title = 'This tab shares a process with another tab';
+    const cpu = document.createElement('span'); cpu.className = 'c'; cpu.textContent = t.discarded ? '' : t.cpu.toFixed(0) + '%';
+    const un = document.createElement('button'); un.className = 'a'; un.innerHTML = '&#9211;'; un.title = 'Put this tab to sleep (it reloads when selected)';
+    un.disabled = t.discarded || t.active; un.onclick = () => send('perf.unload', t.id);
+    const cl = document.createElement('button'); cl.className = 'a'; cl.innerHTML = '&#10005;'; cl.title = 'Close this tab';
+    cl.onclick = () => send('perf.close', t.id);
+    row.append(title);
+    if(t.cpu >= HOT){ const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = 'HOT'; row.append(tag); }
+    row.append(mem, cpu, un, cl);
+    list.appendChild(row);
+  }
+};
+</script>
+</body>
+</html>

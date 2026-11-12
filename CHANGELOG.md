@@ -2,6 +2,15 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Features
+- Performance panel (Ctrl+Shift+M, the `PERF` button, or **Performance panel** in the `≡` menu): a side panel docked to the right of the page. It shows the memory NeonNet uses (pages, browser, engine) and CPU, and lists every tab with its own memory and CPU, marking tabs that use a lot of CPU as HOT.
+  - **Clean memory:** every page collects its garbage, then unused memory is handed back to Windows.
+  - **Sleeping tabs:** put a tab, or all background tabs, to sleep. A sleeping tab frees its memory, stays in the tab strip (dimmed) and reloads when you select it.
+  - **RAM limiter** (off, or 1 to 8 GB): above the limit, the background tab unused the longest is put to sleep.
+  - **CPU limiter:** tabs you are not looking at keep running, but with low priority and in Windows' power-saving mode.
+
 ## [1.4.0] - 2026-11-12
 
 ### Features

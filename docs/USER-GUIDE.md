@@ -55,10 +55,24 @@ While you type, a list opens under the address bar with matching bookmarks (`★
 
 Matches must contain every word you typed, in the address or the title. Pages you visit often, recently, or have bookmarked rank higher. Suggestions come only from your own bookmarks and history on this computer; nothing you type is sent to a server for them. Text you submit as a search goes to your search engine, as before.
 
+## Performance panel
+
+Ctrl+Shift+M, the `PERF` button next to `SCAN`, or **Performance panel** in the `≡` menu opens a panel on the right side of the window; the page gets narrower. Press the same keys, or `✕` in the panel, to close it. While it is closed it uses no memory itself.
+
+- **Memory and CPU:** the total NeonNet uses, split into **pages** (the tabs), **browser** (the window itself) and **engine** (graphics, network and other helper processes), and the CPU use of everything, as a share of the whole processor.
+- **Tabs:** each tab with its memory and CPU, largest first. A tab using at least 20% of the CPU is marked **HOT** and listed on top. A tab that shares a process with another one shows the shared figure with a `~`. Hover a row for `⏻` (put to sleep) and `✕` (close).
+- **Clean memory:** each page collects its garbage, then NeonNet asks Windows to take back memory it no longer needs. The number drops at once, and rises again as pages are used: it helps most when another program needs the RAM. Putting tabs to sleep frees much more.
+- **Sleep background tabs / sleeping tabs:** a sleeping tab is closed to free its memory. It stays in the tab strip, dimmed and in italics, and loads again, at the same address, when you select it. What you had typed into a page, or a video playing in it, is lost when it goes to sleep. The tab you are looking at never sleeps.
+- **RAM limiter:** off, or 1, 2, 3, 4, 6 or 8 GB. While everything NeonNet uses is above the limit, the background tab unused the longest is put to sleep, one every few seconds, until the total is under the limit or only the current tab is left. A notice in the status bar says which tab it was. A tab that is loading is skipped.
+- **CPU limiter:** background tabs keep working (a download, a chat, a build log), but with low priority and in Windows' power-saving mode, so they take less CPU and give way to what you are using. The selected tab always runs normally.
+
+The limiters are remembered between runs and work with the panel closed. Windows' own "efficiency mode" needs Windows 10 version 1709 or later; without it only the lower priority applies.
+
 ## Keyboard shortcuts
 
 | Keys | Action |
 |---|---|
+| Ctrl+Shift+M | Performance panel |
 | Ctrl+T | New tab |
 | Ctrl+W or Ctrl+F4 | Close tab |
 | Ctrl+Shift+T | Reopen the last closed tab |
