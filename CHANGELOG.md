@@ -10,6 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 - Address bar suggestions: bookmarks and history matches appear as you type (arrow keys, Enter, click, Esc), ranked by how well they match, how often and how recently you visited them, with inline completion of the best match. Nothing you type is sent anywhere for this.
 - Settings page (Ctrl+, , the `≡` menu, or the new tab page): search engine (Google, DuckDuckGo, Bing, Brave or Ecosia), home page, whether to ask where to save each download (otherwise files go to the Downloads folder), scanlines and automatic updates.
 - The home button and start-up use the home page from the settings.
+- NeonNet's own pages show and accept short addresses in the address bar and on the command line: `neonnet://settings`, `neonnet://history`, `neonnet://bookmarks`, `neonnet://downloads`.
 
 ### Fixes
 - Zooming a NeonNet page (new tab, history, bookmarks, downloads) no longer zooms the toolbar. Chromium keeps zoom per site, and the toolbar shared one with those pages, so it shrank or was cut off. The toolbar now has its own address (chrome.neonnet.ui).

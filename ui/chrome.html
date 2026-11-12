@@ -155,12 +155,24 @@ let editing = false;
 
 function toUrl(v){
   v = v.trim(); if(!v) return null;
+  const nn = /^neonnet:\/\/([a-z0-9_-]*)\/?([?#].*)?$/i.exec(v);   // neonnet://settings -> the settings page
+  if(nn) return NN_BASE + (nn[1] ? nn[1].toLowerCase() : 'newtab') + '.html' + (nn[2] || '');
   if(/^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^(about|data|edge|view-source):/i.test(v)) return v;
   if(/^localhost(:\d+)?(\/.*)?$/i.test(v) || /^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/.*)?$/.test(v)) return 'http://' + v;
   if(!/\s/.test(v) && /^[^\s\/]+\.[a-z]{2,}(:\d+)?([\/?#].*)?$/i.test(v)) return 'https://' + v;
   return (state.search || 'https://www.google.com/search?q=') + encodeURIComponent(v);
 }
-function shownUrl(u){ return (!u || u.startsWith(NEWTAB)) ? '' : u; }
+// NeonNet's own pages live at https://neonnet.ui/<name>.html; the address bar shows and
+// accepts the short form neonnet://<name>, like edge://settings.
+const NN_BASE = 'https://neonnet.ui/';
+function shownUrl(u){
+  if(!u || u.startsWith(NEWTAB)) return '';
+  if(u.startsWith(NN_BASE)){
+    const m = /^([a-z0-9_-]+)\.html([?#].*)?$/i.exec(u.slice(NN_BASE.length));
+    if(m) return 'neonnet://' + m[1] + (m[2] || '');
+  }
+  return u;
+}
 
 function render(){
   const box = $('#tabs'); box.innerHTML = '';

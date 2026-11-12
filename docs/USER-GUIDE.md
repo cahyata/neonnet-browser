@@ -39,6 +39,7 @@ Moving and resizing:
 | A full address (`https://...`) | Opened as is |
 | A domain (`github.com`, `wikipedia.org/wiki/Neon`) | Opened with `https://` |
 | `localhost:3000` or an IP address | Opened with `http://` |
+| `neonnet://settings` (also `history`, `bookmarks`, `downloads`) | One of NeonNet's own pages. The address bar shows this short form on those pages. |
 | Anything else (`weather tokyo`) | Searched with your search engine (Google until you change it, see [Search engine](#search-engine)) |
 
 Press Esc to cancel typing and restore the current page's address.

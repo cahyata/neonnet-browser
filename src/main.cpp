@@ -1732,6 +1732,17 @@ static void OnChromeCommand(const std::wstring& msg) {
 // Application: browser-process callbacks
 
 static std::wstring NormalizeArgUrl(std::wstring u) {
+    // neonnet://settings from the command line: the short form of NeonNet's own pages
+    if (_wcsnicmp(u.c_str(), L"neonnet://", 10) == 0) {
+        std::wstring name = u.substr(10), tail;
+        size_t cut = name.find_first_of(L"/?#");
+        if (cut != std::wstring::npos) { tail = name.substr(cut); name.resize(cut); }
+        if (!tail.empty() && tail[0] == L'/') tail.erase(0, 1);
+        for (auto& c : name) c = towlower(c);
+        bool ok = !name.empty();
+        for (wchar_t c : name) if (!(iswalnum(c) || c == L'_' || c == L'-')) ok = false;
+        return ok ? std::wstring(UI_HOST) + name + L".html" + tail : std::wstring(NEWTAB);
+    }
     if (u.empty() || u.find(L"://") != std::wstring::npos) return u;
     if (PathFileExistsW(u.c_str())) {
         wchar_t buf[2048]; DWORD n = 2048;
