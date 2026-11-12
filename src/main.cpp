@@ -1668,6 +1668,12 @@ public:
         CefString err;
         CefRequestContext::GetGlobalContext()->SetPreference("session.restore_on_startup", startup, err);
 
+        // Chromium pops up its own (unthemed) download bubble after every download; the
+        // downloads page replaces it. This is the "Don't show when downloads finish" option.
+        CefRefPtr<CefValue> noBubble = CefValue::Create();
+        noBubble->SetBool(false);
+        CefRequestContext::GetGlobalContext()->SetPreference("download_bubble.partial_view_enabled", noBubble, err);
+
         CefRegisterSchemeHandlerFactory("https", "neonnet.ui", new UiSchemeFactory());
         g_client = new Client();
         g.creatingChrome = true;

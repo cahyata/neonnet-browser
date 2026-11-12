@@ -132,6 +132,8 @@ Every response carries `X-Frame-Options: DENY`, so websites cannot load NeonNet'
 
 `ServeApi()` runs on the IO thread, but cancelling needs the `CefDownloadItemCallback`, which `OnDownloadUpdated` keeps in `g.dlCallbacks` on the UI thread. So `downloads/cancel`, `open` and `show` only post `WM_APP_DOWNLOAD` with the entry id, and `DoDownloadAction()` does the work on the UI thread. The page never sends a path: the file is looked up by id in the list, must exist and be finished, and `OPEN` is refused for programs and scripts (`store::DownloadOpenable()`). `SHOW` runs `explorer.exe /select,"<path>"`. `downloads.html` polls `/api/downloads` once a second while it is visible and updates rows in place, so buttons stay clickable.
 
+`OnContextInitialized` also sets the Chromium preference `download_bubble.partial_view_enabled` to false (the "Don't show when downloads finish" option). Without it Chromium pops up its own unthemed download bubble after every download. A `disable-features=DownloadBubble` switch did not remove it; the preference does.
+
 ## Search engine
 
 `SEARCH_ENGINES` in `main.cpp` lists the engines. The chosen index is `g.engine` (atomic, because the IO thread reads it for `/api/settings`) and is saved as the registry string `SearchEngine` (`google`, `duckduckgo`, ...). The `≡` menu item `Search engine` (`CMD_SEARCH`) switches to the next one. The state sent to the chrome UI carries `search`, the URL prefix that `chrome.html` appends the encoded query to; `newtab.html` reads it from `/api/settings`.
