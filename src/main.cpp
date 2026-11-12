@@ -1894,9 +1894,11 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
 
     CefRunMessageLoop();
     g_client = nullptr;
-    CefShutdown();
     store::SaveIfDirty();
+    // Start the installer before CefShutdown(): it waits for this process to exit, and it must
+    // not depend on CefShutdown() returning normally.
     UpdateShutdown();
+    CefShutdown();
     if (g.font) DeleteObject(g.font);
     CoUninitialize();
     return 0;

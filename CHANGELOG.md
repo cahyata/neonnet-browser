@@ -2,6 +2,11 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] - 2026-11-12
+
+### Fixes
+- Automatic updates now install: the installer is started before the browser engine shuts down, because the engine could crash while closing and the update was never applied.
+
 ## [1.1.0] - 2026-11-12
 
 ### Features
