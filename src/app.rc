@@ -10,8 +10,8 @@ IDR_DOWNLOADS RCDATA "..\\ui\\downloads.html"
 IDR_SETTINGS RCDATA "..\\ui\\settings.html"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,3,0,0
- PRODUCTVERSION 1,3,0,0
+ FILEVERSION 1,4,0,0
+ PRODUCTVERSION 1,4,0,0
  FILEOS 0x40004L
  FILETYPE 0x1L
 BEGIN
@@ -21,11 +21,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "NeonNet"
             VALUE "FileDescription", "NeonNet Browser"
-            VALUE "FileVersion", "1.3.0"
+            VALUE "FileVersion", "1.4.0"
             VALUE "InternalName", "NeonNet"
             VALUE "OriginalFilename", "NeonNet.exe"
             VALUE "ProductName", "NeonNet"
-            VALUE "ProductVersion", "1.3.0"
+            VALUE "ProductVersion", "1.4.0"
         END
     END
     BLOCK "VarFileInfo"

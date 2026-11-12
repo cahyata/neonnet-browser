@@ -8,7 +8,7 @@
 #define IDR_DOWNLOADS  205
 #define IDR_SETTINGS   206
 
-#define APP_VERSION    L"1.3.0"
+#define APP_VERSION    L"1.4.0"
 #define APP_PUBLISHER  L"NeonNet"
 
 // GitHub repository (owner/name) whose latest release the auto-updater checks.

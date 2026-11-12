@@ -2,7 +2,7 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.0] - 2026-11-12
 
 ### Features
 - Clear browsing data, in a new **PRIVACY** section of the settings page. Choose a period (last hour, 24 hours, 7 days, 4 weeks, all time) and whether to clear cookies and site data, the cache and the browsing history, in any combination. History entries are removed by the time of the visit. Cookies are removed by the time they were created. Site data (local storage, offline data) is cleared for the sites that lost a cookie, the sites in your history for that period, and the pages open now. The cache is always cleared completely. In an incognito window it clears the incognito session.

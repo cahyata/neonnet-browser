@@ -18,7 +18,7 @@ Planned features for NeonNet, roughly in the order they are worth doing. Effort:
 - [x] **Choose the search engine** (S, 1.2.0). Plain text typed in the address bar goes to one fixed engine. Add a setting (for example Google, DuckDuckGo, Bing, Brave).
 - [x] **Settings page** (M, 1.2.0). One place for home page, search engine, start-up behaviour, default download folder, scanlines and auto-update. Several of these are only in the menu or the registry now.
 - [x] **Open unplayable videos in the system player, and warn about DRM** (M, 1.3.0). NeonNet has no H.264 or AAC (patent licences), so such videos are opened in the user's own player from a temporary copy that is deleted afterwards. The status bar warns when a site asks for DRM.
-- [ ] **Clear browsing data** (S). Clear cookies, cache and site data (history already has its own button), with a time range.
+- [x] **Clear browsing data** (S, 1.4.0). Cookies, site data, cache and history, each for a chosen period.
 - [ ] **Permission prompts** (M). Camera, microphone, location and notification requests need an in-app prompt with allow/block and a remembered choice.
 
 ## Tabs and windows
@@ -26,9 +26,9 @@ Planned features for NeonNet, roughly in the order they are worth doing. Effort:
 - [ ] **Drag to reorder tabs** (M).
 - [ ] **Pin tabs** (S).
 - [ ] **Restore tabs from the last session** (M). Needs care: `persist_session_cookies` must stay off (see the notes in [ARCHITECTURE.md](ARCHITECTURE.md)), so this has to be done by NeonNet itself, not by Chromium.
-- [ ] **Private window** (M). A window with a temporary profile that is deleted on close.
+- [x] **Private window** (M, 1.4.0). Ctrl+Shift+N opens an incognito window with an in-memory profile.
 - [ ] **Mute tab / audio indicator** (S).
-- [ ] **Theme the right-click context menu** (M). It is still the native menu; the `≡` menu already has the NeonNet look.
+- [x] **Theme the right-click context menu** (M, 1.4.0). The menu uses the same painted window as the `≡` menu.
 
 ## Bookmarks and history
 
