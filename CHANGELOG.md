@@ -2,7 +2,7 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.5.0] - 2026-11-12
 
 ### Features
 - Performance panel (Ctrl+Shift+M, the `PERF` button, or **Performance panel** in the `≡` menu): a side panel docked to the right of the page. It shows the memory NeonNet uses (pages, browser, engine) and CPU, and lists every tab with its own memory and CPU, marking tabs that use a lot of CPU as HOT.

@@ -11,6 +11,17 @@ Planned features for NeonNet, roughly in the order they are worth doing. Effort:
 - [x] Themed `≡` menu (1.1.0)
 - [x] Automatic updates with checksum check (1.0.0, working since 1.1.2)
 
+Done without being planned here first (the planned ones are ticked in the lists below):
+
+- [x] Short NeonNet addresses (`neonnet://settings`, `neonnet://history` ...) and a themed 404 page (1.2.0)
+- [x] Home page setting, used by the home button and at start-up (1.2.0)
+- [x] Ask-where-to-save switch for downloads (1.2.0)
+- [x] Chromium's own pop-ups turned off where NeonNet shows the same thing itself: download bubble, link address bubble, zoom bubble (1.2.0)
+- [x] Warning in the status bar when a site asks for DRM, and when a video cannot be played (1.3.0)
+- [x] New right-click items: open link in incognito window, open image in new tab, view page source, search for the selected text (1.4.0)
+- [x] History can be cleared by period from the settings page, with a link from the history page (1.4.0)
+- [x] Tabs with sound, typed text or a kept-awake site are never put to sleep by the performance panel (1.5.0)
+
 ## Next: everyday use
 
 - [x] **Address bar suggestions** from history and bookmarks (M, 1.2.0). Type a few letters, get matching pages and an inline completion. Most visible gap versus other browsers.
@@ -27,7 +38,9 @@ Planned features for NeonNet, roughly in the order they are worth doing. Effort:
 - [ ] **Pin tabs** (S).
 - [ ] **Restore tabs from the last session** (M). Needs care: `persist_session_cookies` must stay off (see the notes in [ARCHITECTURE.md](ARCHITECTURE.md)), so this has to be done by NeonNet itself, not by Chromium.
 - [x] **Private window** (M, 1.4.0). Ctrl+Shift+N opens an incognito window with an in-memory profile.
-- [x] **Mute tab / audio indicator** (S, next release). A speaker on the tab, click to mute. Sound made only through the Web Audio API is not detected.
+- [x] **Mute tab / audio indicator** (S, 1.5.0). A speaker on the tab, click to mute. Sound made only through the Web Audio API is not detected.
+- [x] **Performance panel** (L, 1.5.0). Ctrl+Shift+M: memory and CPU per tab, memory cleaner, sleeping tabs, RAM and CPU limiters, tabs with sound, typed text or a kept-awake site are never slept on their own.
+- [ ] **Network limiter** (M). Cap the download speed of all tabs or of background tabs, through the DevTools network conditions.
 - [x] **Theme the right-click context menu** (M, 1.4.0). The menu uses the same painted window as the `≡` menu.
 
 ## Bookmarks and history
