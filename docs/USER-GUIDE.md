@@ -92,7 +92,18 @@ Use the mouse, or the arrow keys and Enter. Esc, a click outside the menu, or an
 
 The standard Chromium menu (back, reload, copy, paste and so on), plus:
 - **Open link in new tab:** shown when you right-click a link.
+- **Open in system player:** shown when you right-click a video or audio player on a page. See [Videos NeonNet cannot play](#videos-neonnet-cannot-play).
 - **Inspect:** opens the developer tools at the clicked element.
+
+## Videos NeonNet cannot play
+
+NeonNet does not include the H.264 and AAC codecs, because they need patent licences. Most `.mp4`, `.mov` and `.m4a` files use them. VP9, AV1, Opus and MP3 work, so YouTube and most streaming sites are fine.
+
+- **A link straight to a video file:** NeonNet asks what to do. **Yes** opens it in your media player (VLC, mpv, Windows' own player, whatever is set for that file type), **No** saves it, **Cancel** does nothing.
+- **A video inside a page that fails:** the status bar shows `VIDEO FORMAT NOT SUPPORTED`. Click play on the video and it opens in your media player (a right-click and **Open in system player** does the same).
+- **Temporary copy:** the player gets a copy in `%LOCALAPPDATA%\NeonNet\Temp\media`. NeonNet deletes it about two minutes after opening it, once no program holds it open: a player that is still showing the video keeps the file locked, so it stays until you close it. Anything left over is removed the next time NeonNet starts. If no program can open the file, it is moved to your Downloads folder instead.
+- **Files you download on purpose** (a Download button, or a server that marks the file as an attachment) are saved as usual, without a question.
+- **DRM:** when a site asks for DRM (Widevine and similar), the status bar shows `THIS SITE NEEDS DRM`. Protected video cannot be opened in a player either; it only exists encrypted.
 
 ## Find in page
 
@@ -202,7 +213,7 @@ Open **Settings > Apps > Installed apps > NeonNet Browser > Uninstall**. You are
 NeonNet carries a complete Chromium, so it does not depend on any other browser on the PC.
 
 **Why doesn't Netflix play?**
-Paid streaming services need the Widevine DRM module, which requires a separate license from Google. It is not included.
+Paid streaming services need the Widevine DRM module, which requires a separate license from Google. It is not included, and NeonNet shows a warning in the status bar when a site asks for it. They also use H.264 and AAC, which NeonNet leaves out for licensing reasons.
 
 **Does NeonNet update itself?**
 Yes, unless you turn off **Automatic updates** in the `≡` menu. See [Updates](#updates).

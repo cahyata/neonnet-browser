@@ -30,6 +30,7 @@
 #include "include/cef_parser.h"
 #include "include/cef_sandbox_win.h"
 #include "include/cef_scheme.h"
+#include "include/cef_v8.h"
 #include "resource.h"
 #include "updater.h"
 #include "store.h"
@@ -73,8 +74,10 @@ static const UINT WM_APP_STORE = WM_APP + 4;    // history/bookmarks changed by 
 static const UINT WM_APP_FINISH = WM_APP + 5;   // all browsers closed: destroy the window (posted, not called from OnBeforeClose)
 static const UINT WM_APP_DOWNLOAD = WM_APP + 6; // wParam = DlAction, lParam = download id (from the downloads page)
 static const UINT WM_APP_SETTING = WM_APP + 7;  // lParam = const std::pair<std::wstring, std::wstring>* (key, value; from the settings page)
+static const UINT WM_APP_MEDIA = WM_APP + 8;    // lParam = new MediaAsk (a video NeonNet cannot play was opened)
 
-static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5;
+static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5,
+                      TIMER_ALERT = 6, TIMER_TEMP = 7;
 static const ULONGLONG UPDATE_INTERVAL_MS = 24ull * 60 * 60 * 1000;   // check at most once a day
 
 enum Cmd {
@@ -95,7 +98,7 @@ struct UpdateMsg {
     bool manual = false;
     std::wstring version, path, page, error;
 };
-enum { MENU_OPEN_LINK_TAB = MENU_ID_USER_FIRST, MENU_INSPECT };
+enum { MENU_OPEN_LINK_TAB = MENU_ID_USER_FIRST, MENU_INSPECT, MENU_OPEN_PLAYER };
 
 struct Tab {
     int id = 0;
@@ -128,6 +131,7 @@ struct App {
     bool fsUser = false, fsElement = false, fullscreen = false;
     WINDOWPLACEMENT fsPrev{ sizeof(WINDOWPLACEMENT) };
     std::wstring hoverText, download;
+    std::wstring alert;   // urgent status bar message (unsupported video / DRM), shown above everything else
     std::wstring startUrl;
     bool closing = false;
     int devtools = 0;
@@ -146,6 +150,12 @@ struct App {
     std::atomic<int> engine{ 0 };
     // running downloads (UI thread only): CEF id -> handle used to cancel them
     std::map<unsigned, CefRefPtr<CefDownloadItemCallback>> dlCallbacks;
+    // "Open in system player": CEF download id -> temporary file, while it downloads; and the
+    // time each finished temporary file was handed to a program (UI thread only)
+    std::map<unsigned, std::wstring> tempDl;
+    std::map<std::wstring, ULONGLONG> tempOpened;
+    std::wstring pendingPlayerUrl;   // media URL to download as a temporary copy for the system player
+    std::wstring pendingSaveUrl;     // media URL the user chose to save: no second question
     // recently closed tabs, newest last
     std::vector<ClosedTab> closed;
 };
@@ -257,6 +267,17 @@ static void RegSetBin(const wchar_t* name, DWORD type, const void* data, DWORD s
 }
 
 static std::wstring DownloadTarget(std::wstring name);   // below, next to ApplySetting
+static void ShowAlert(const std::wstring& text);
+static std::wstring TempMediaPath(const std::wstring& name, const std::wstring& mime);
+static void OpenTempMedia(const std::wstring& path);
+// A video NeonNet cannot play. `callback` is set when Chromium already started a download for it;
+// otherwise the video was opened as a page and `browser` starts the download after the answer.
+struct MediaAsk {
+    CefRefPtr<CefBeforeDownloadCallback> callback;
+    unsigned id = 0;
+    std::wstring url, name, mime;
+    CefRefPtr<CefBrowser> browser;
+};
 
 // History and bookmarks are written to disk shortly after they change.
 static void ScheduleSave() { if (g.hwnd) SetTimer(g.hwnd, TIMER_SAVE, 2000, nullptr); }
@@ -617,6 +638,28 @@ public:
     IMPLEMENT_REFCOUNTING(DevToolsClient);
 };
 
+// Containers and codecs this build of Chromium cannot play (H.264, AAC and friends are left out
+// of the build for licensing reasons). Chromium turns a direct link to one of these into a download.
+static bool IsUnplayableMime(std::wstring m) {
+    for (auto& c : m) c = (wchar_t)towlower(c);
+    size_t semi = m.find(L';');
+    if (semi != std::wstring::npos) m.resize(semi);
+    while (!m.empty() && m.back() == L' ') m.pop_back();
+    static const wchar_t* list[] = {
+        L"video/mp4", L"video/x-m4v", L"video/quicktime", L"video/3gpp", L"video/3gpp2", L"video/mp2t",
+        L"video/x-matroska", L"video/x-msvideo", L"video/avi", L"video/x-ms-wmv", L"video/x-flv", L"video/mpeg",
+        L"audio/mp4", L"audio/x-m4a", L"audio/m4a", L"audio/aac", L"audio/x-aac", L"audio/aacp", L"audio/x-ms-wma",
+    };
+    for (auto* s : list) if (m == s) return true;
+    return false;
+}
+
+// A server that sends Content-Disposition: attachment wants the file saved, not played.
+static bool IsAttachment(const std::wstring& cd) {
+    size_t i = cd.find_first_not_of(L" \t");
+    return i != std::wstring::npos && _wcsnicmp(cd.c_str() + i, L"attachment", 10) == 0;
+}
+
 static std::vector<CefRefPtr<CefBrowser>> g_all;   // every live browser we own (for shutdown)
 static size_t OpenBrowsers() { return g_all.size(); }
 
@@ -821,6 +864,26 @@ public:
     // --- downloads ---
     bool OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, const CefString& suggested_name,
                           CefRefPtr<CefBeforeDownloadCallback> callback) override {
+        std::wstring url = item->GetURL().ToWString();
+        std::wstring mime = item->GetMimeType().ToWString();
+        bool forPlayer = !g.pendingPlayerUrl.empty() && url == g.pendingPlayerUrl;   // asked for in the context menu
+        if (forPlayer) g.pendingPlayerUrl.clear();
+        bool forSave = !g.pendingSaveUrl.empty() && url == g.pendingSaveUrl;   // already asked
+        if (forSave) g.pendingSaveUrl.clear();
+        if (!forPlayer && !forSave && !g.closing && IsUnplayableMime(mime) && !IsAttachment(item->GetContentDisposition().ToWString())) {
+            // A video NeonNet cannot play: ask what to do (from the main window loop, not from this callback).
+            auto* ask = new MediaAsk{ callback, item->GetId(), url, suggested_name.ToWString(), mime };
+            if (PostMessageW(g.hwnd, WM_APP_MEDIA, 0, (LPARAM)ask)) return true;
+            delete ask;
+        }
+        if (forPlayer) {
+            std::wstring tmp = TempMediaPath(suggested_name.ToWString(), mime);
+            if (!tmp.empty()) {
+                g.tempDl[item->GetId()] = tmp;
+                callback->Continue(tmp, false);
+                return true;
+            }
+        }
         // listed on the downloads page from the moment the save dialog opens
         if (store::DownloadUpdate(item->GetId(), item->GetURL().ToWString(), L"", suggested_name.ToWString(), 0, 0, 0, store::DL_ACTIVE))
             ScheduleSave();
@@ -834,6 +897,22 @@ public:
         std::wstring name = path;
         size_t slash = name.find_last_of(L"\\/");
         if (slash != std::wstring::npos) name = name.substr(slash + 1);
+        auto temp = g.tempDl.find(item->GetId());
+        if (temp != g.tempDl.end()) {
+            // Copy for the system player: not listed as a download, opened when complete, removed later.
+            std::wstring tmpPath = temp->second;
+            if (item->IsComplete()) {
+                g.tempDl.erase(temp); g.download.clear();
+                OpenTempMedia(path.empty() ? tmpPath : path);
+            } else if (item->IsCanceled() || item->IsInterrupted()) {
+                g.tempDl.erase(temp); g.download.clear();
+                DeleteFileW(tmpPath.c_str());
+            } else {
+                g.download = L"PREPARING " + name + L" " + std::to_wstring(std::max(0, item->GetPercentComplete())) + L"%";
+            }
+            InvalidateStatus();
+            return;
+        }
         int state = item->IsComplete() ? store::DL_COMPLETE : item->IsCanceled() ? store::DL_CANCELED :
                     item->IsInterrupted() ? store::DL_INTERRUPTED : store::DL_ACTIVE;
         unsigned id = item->GetId();
@@ -862,14 +941,60 @@ public:
             model->InsertItemAt(0, MENU_OPEN_LINK_TAB, "Open link in new tab");
             model->InsertSeparatorAt(1);
         }
+        cef_context_menu_media_type_t media = params->GetMediaType();
+        std::wstring src = params->GetSourceUrl().ToWString();
+        if ((media == CM_MEDIATYPE_VIDEO || media == CM_MEDIATYPE_AUDIO) && (src.rfind(L"http://", 0) == 0 || src.rfind(L"https://", 0) == 0)) {
+            model->InsertItemAt(0, MENU_OPEN_PLAYER, "Open in system player");
+            model->InsertSeparatorAt(1);
+        }
         if (model->GetCount() > 0) model->AddSeparator();
         model->AddItem(MENU_INSPECT, "Inspect");
+    }
+    // The renderer reports videos this build cannot play and sites that ask for DRM.
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId,
+                                  CefRefPtr<CefProcessMessage> message) override {
+        if (message->GetName() != "nn.media") return false;
+        Tab* t = TabOf(browser);
+        if (!t || t->id != g.active || g.closing) return true;
+        std::string kind = message->GetArgumentList()->GetString(0);
+        if (kind == "openplayer") {
+            // the user clicked play on a video that failed: make a temporary copy for the system player
+            std::wstring url = message->GetArgumentList()->GetString(1).ToWString();
+            static ULONGLONG lastOpen = 0;   // a double click must not start two downloads
+            ULONGLONG now = GetTickCount64();
+            if ((url.rfind(L"http://", 0) != 0 && url.rfind(L"https://", 0) != 0) || !g.tempDl.empty() || now - lastOpen < 5000)
+                return true;
+            lastOpen = now;
+            g.pendingPlayerUrl = url;
+            browser->GetHost()->StartDownload(url);
+            return true;
+        }
+        if (kind == "mediadoc") {
+            // the whole page is a video that failed to play: offer the system player right away
+            std::wstring url = frame->GetURL().ToWString();
+            std::wstring name = url.substr(0, url.find_first_of(L"?#"));
+            name = PercentDecode(name.substr(name.find_last_of(L'/') + 1));
+            auto* ask = new MediaAsk{ nullptr, 0, url, name, message->GetArgumentList()->GetString(1).ToWString(), browser };
+            if (!PostMessageW(g.hwnd, WM_APP_MEDIA, 0, (LPARAM)ask)) delete ask;
+            return true;
+        }
+        if (kind == "drm")
+            ShowAlert(L"THIS SITE NEEDS DRM (WIDEVINE) - NEONNET CANNOT PLAY PROTECTED VIDEO");
+        else if (kind == "media" && g.alert.find(L"DRM") == std::wstring::npos)   // the DRM message already explains it
+            ShowAlert(L"VIDEO FORMAT NOT SUPPORTED - CLICK PLAY TO OPEN IT IN YOUR MEDIA PLAYER");
+        return true;
     }
     bool OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, CefRefPtr<CefContextMenuParams> params,
                               int command_id, EventFlags) override {
         if (command_id == MENU_OPEN_LINK_TAB) {
             std::wstring link = params->GetLinkUrl().ToWString();
             if (link.rfind(L"http", 0) == 0) CreateTab(link, false);
+            return true;
+        }
+        if (command_id == MENU_OPEN_PLAYER) {
+            // Download a temporary copy (marked by its URL, see OnBeforeDownload) and hand it to the system player.
+            g.pendingPlayerUrl = params->GetSourceUrl().ToWString();
+            browser->GetHost()->StartDownload(params->GetSourceUrl());
             return true;
         }
         if (command_id == MENU_INSPECT) {
@@ -1765,9 +1890,61 @@ static std::wstring NormalizeArgUrl(std::wstring u) {
     return L"https://" + u;
 }
 
-class NeonApp : public CefApp, public CefBrowserProcessHandler {
+// Renderer side: tells the browser process when a page asks for DRM (the key system is missing from
+// this build) or a video element fails with "format not supported". The page cannot call the
+// reporter: it is removed from the global object by the same script that picks it up.
+class MediaReporter : public CefV8Handler {
+public:
+    bool Execute(const CefString&, CefRefPtr<CefV8Value>, const CefV8ValueList& args, CefRefPtr<CefV8Value>&, CefString&) override {
+        if (args.empty() || args.size() > 2 || !args[0]->IsString()) return true;
+        CefRefPtr<CefV8Context> ctx = CefV8Context::GetCurrentContext();
+        if (!ctx || !ctx->GetFrame()) return true;
+        CefRefPtr<CefProcessMessage> msg = CefProcessMessage::Create("nn.media");
+        msg->GetArgumentList()->SetString(0, args[0]->GetStringValue());
+        if (args.size() == 2 && args[1]->IsString()) msg->GetArgumentList()->SetString(1, args[1]->GetStringValue());
+        ctx->GetFrame()->SendProcessMessage(PID_BROWSER, msg);
+        return true;
+    }
+    IMPLEMENT_REFCOUNTING(MediaReporter);
+};
+
+static const char* MEDIA_HOOK_JS =
+    "(function(){var r=window.__nn;try{delete window.__nn;}catch(e){}"
+    "if(typeof r!=='function')return;var sent={};"
+    "function tell(k,x){if(sent[k])return;sent[k]=1;try{if(x)r(k,x);else r(k);}catch(e){}}"
+    "try{var P=Navigator.prototype,o=P.requestMediaKeySystemAccess;"
+    "if(typeof o==='function'){P.requestMediaKeySystemAccess=function(ks){var p=o.apply(this,arguments);"
+    "try{if(/widevine|playready|fairplay/i.test(String(ks)))p.then(null,function(){tell('drm');});}catch(e){}return p;};}}catch(e){}"
+    "try{document.addEventListener('error',function(e){var t=e.target;if(!t)return;var v=null;"
+    // a media element failed itself, or its last <source> failed (then the element has no error object, only networkState 3)
+    "if((t.tagName==='VIDEO'||t.tagName==='AUDIO')&&t.error&&t.error.code===4)v=t;"
+    "else if(t.tagName==='SOURCE'&&!t.nextElementSibling&&t.parentNode&&t.parentNode.networkState===3)v=t.parentNode;"
+    "if(!v)return;var ct=String(document.contentType||'');"
+    // a page that is nothing but the video (a direct link to a file)
+    "if(window===window.top&&/^(video|audio)\\//i.test(ct)&&v.parentNode===document.body&&document.body.childElementCount===1)tell('mediadoc',ct);"
+    "else tell('media');},true);}catch(e){}"
+    // Clicking (play) on a video that cannot be played opens it in the system player, no menu needed.
+    // The browser process checks the address again and ignores a second click while a copy is being made.
+    "try{document.addEventListener('click',function(e){var t=e.target;"
+    "if(!t||(t.tagName!=='VIDEO'&&t.tagName!=='AUDIO'))return;"
+    "var failed=(t.error&&t.error.code===4)||(t.networkState===3&&t.readyState===0);if(!failed)return;"
+    "var s=t.querySelector('source'),u=t.currentSrc||t.src||(s&&s.src)||'';"
+    "if(/^https?:\\/\\//i.test(u))try{r('openplayer',u);}catch(x){}},true);}catch(e){}"
+    "})();";
+
+class NeonApp : public CefApp, public CefBrowserProcessHandler, public CefRenderProcessHandler {
 public:
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
+    CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override { return this; }
+
+    void OnContextCreated(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
+        std::string url = frame->GetURL();
+        if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) return;
+        if (url.rfind("https://neonnet.ui/", 0) == 0 || url.rfind("https://chrome.neonnet.ui/", 0) == 0) return;
+        context->GetGlobal()->SetValue("__nn", CefV8Value::CreateFunction("r", new MediaReporter()), V8_PROPERTY_ATTRIBUTE_NONE);
+        CefRefPtr<CefV8Value> ret; CefRefPtr<CefV8Exception> ex;
+        context->Eval(MEDIA_HOOK_JS, "", 0, ret, ex);
+    }
 
     void OnBeforeCommandLineProcessing(const CefString& process_type, CefRefPtr<CefCommandLine> cl) override {
         if (!process_type.empty()) return;
@@ -1841,7 +2018,8 @@ static void Paint(HDC hdc) {
         RECT tr = st; tr.left += S(12) + (IsZoomed(g.hwnd) ? 0 : S(CUT_DIP) / 2); tr.right -= S(12); tr.top += 1;
         Tab* a = Active();
         std::wstring left; COLORREF lc = C_MUTED;
-        if (!g.hoverText.empty()) { left = g.hoverText; lc = C_CYAN; }
+        if (!g.alert.empty()) { left = g.alert; lc = C_PINK; }
+        else if (!g.hoverText.empty()) { left = g.hoverText; lc = C_CYAN; }
         else if (a && a->loading) { left = L"LOADING..."; lc = C_YELLOW; }
         else if (!g.download.empty()) { left = g.download; lc = C_YELLOW; }
         else if (!g.notice.empty()) { left = g.notice; lc = C_CYAN; }
@@ -1917,6 +2095,140 @@ static std::wstring DownloadTarget(std::wstring name) {
     return path;
 }
 
+// ---------------------------------------------------------------------------
+// Videos NeonNet cannot play: a temporary copy is handed to the system's media player.
+//
+// The copies live in %LOCALAPPDATA%\NeonNet\Temp\media. Nothing can tell when a player is done
+// with a file (many reuse a running instance, so the process we start exits at once), so the
+// folder is swept instead: every 20 s while it holds files, at start-up and at exit. A file is
+// deleted once it is unlocked, and not before two minutes after it was opened. A player that is
+// still showing the video keeps the file open, so Windows refuses the delete until it is closed.
+
+static std::wstring MediaDir(bool create) {
+    std::wstring base = KnownFolder(FOLDERID_LocalAppData);
+    if (base.empty()) return {};
+    base += std::wstring(L"\\") + APP_DIR_NAME + L"\\Temp";
+    std::wstring dir = base + L"\\media";
+    if (create) { CreateDirectoryW(base.c_str(), nullptr); CreateDirectoryW(dir.c_str(), nullptr); }
+    return dir;
+}
+
+static void ShowAlert(const std::wstring& text) {
+    if (!g.hwnd) return;
+    g.alert = text;
+    SetTimer(g.hwnd, TIMER_ALERT, 12000, nullptr);
+    InvalidateStatus();
+}
+
+// Where a copy of `name` goes. The extension is checked against a list of media types, so a
+// server cannot make "open in the system player" start a program or script: an unknown extension
+// is replaced by one that fits the MIME type, and with neither the answer is empty.
+static std::wstring TempMediaPath(const std::wstring& name, const std::wstring& mimeIn) {
+    static const wchar_t* exts[] = { L".mp4", L".m4v", L".mov", L".m4a", L".aac", L".3gp", L".3g2", L".ts", L".mkv", L".avi",
+                                     L".wmv", L".wma", L".flv", L".mpg", L".mpeg", L".webm", L".mp3", L".ogg", L".opus", L".wav" };
+    std::wstring clean = name;
+    for (auto& c : clean) if (wcschr(L"\\/:*?\"<>|", c) || c < 0x20) c = L'_';
+    size_t dot = clean.find_last_of(L'.');
+    std::wstring stem = dot == std::wstring::npos || dot == 0 ? clean : clean.substr(0, dot);
+    std::wstring ext = dot == std::wstring::npos || dot == 0 ? L"" : clean.substr(dot);
+    for (auto& c : ext) c = (wchar_t)towlower(c);
+    bool ok = false;
+    for (auto* e : exts) if (ext == e) ok = true;
+    if (!ok) {
+        std::wstring m = mimeIn;
+        for (auto& c : m) c = (wchar_t)towlower(c);
+        size_t semi = m.find(L';'); if (semi != std::wstring::npos) m.resize(semi);
+        static const struct { const wchar_t* mime; const wchar_t* ext; } map[] = {
+            { L"video/mp4", L".mp4" }, { L"video/x-m4v", L".m4v" }, { L"video/quicktime", L".mov" }, { L"video/3gpp", L".3gp" },
+            { L"video/3gpp2", L".3g2" }, { L"video/mp2t", L".ts" }, { L"video/x-matroska", L".mkv" }, { L"video/x-msvideo", L".avi" },
+            { L"video/avi", L".avi" }, { L"video/x-ms-wmv", L".wmv" }, { L"video/x-flv", L".flv" }, { L"video/mpeg", L".mpg" },
+            { L"video/webm", L".webm" }, { L"audio/mp4", L".m4a" }, { L"audio/x-m4a", L".m4a" }, { L"audio/m4a", L".m4a" },
+            { L"audio/aac", L".aac" }, { L"audio/x-aac", L".aac" }, { L"audio/aacp", L".aac" }, { L"audio/x-ms-wma", L".wma" },
+            { L"audio/mpeg", L".mp3" }, { L"audio/ogg", L".ogg" }, { L"audio/webm", L".webm" }, { L"audio/wav", L".wav" },
+        };
+        ext.clear();
+        for (auto& e : map) if (m == e.mime) { ext = e.ext; break; }
+        if (ext.empty()) return {};
+    }
+    if (stem.empty()) stem = L"video";
+    if (stem.size() > 60) stem.resize(60);
+    std::wstring dir = MediaDir(true);
+    if (dir.empty()) return {};
+    wchar_t tag[24]; swprintf_s(tag, L"%llx_", GetTickCount64());
+    return dir + L"\\" + tag + stem + ext;
+}
+
+// Delete the copies nobody holds open any more. Called by a timer while the folder has files.
+static void SweepTemp() {
+    std::wstring dir = MediaDir(false);
+    if (dir.empty() || !g.tempDl.empty()) return;   // nothing to do, or a copy is still downloading
+    ULONGLONG now = GetTickCount64();
+    int left = 0;
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            std::wstring p = dir + L"\\" + fd.cFileName;
+            auto it = g.tempOpened.find(p);
+            if (it != g.tempOpened.end() && now - it->second < 120000) { left++; continue; }
+            if (DeleteFileW(p.c_str())) { if (it != g.tempOpened.end()) g.tempOpened.erase(it); }
+            else left++;   // still open in a player
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    if (!g.hwnd) return;
+    if (left) SetTimer(g.hwnd, TIMER_TEMP, 20000, nullptr);
+    else KillTimer(g.hwnd, TIMER_TEMP);
+}
+
+static void OpenTempMedia(const std::wstring& path) {
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+    g.tempOpened[path] = GetTickCount64();
+    if (g.hwnd) SetTimer(g.hwnd, TIMER_TEMP, 20000, nullptr);
+    HINSTANCE r = ShellExecuteW(g.hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    if ((INT_PTR)r > 32) return;
+    // No program is registered for this type: keep the file by moving it to Downloads.
+    std::wstring name = path.substr(path.find_last_of(L'\\') + 1);
+    size_t us = name.find(L'_');
+    if (us != std::wstring::npos) name = name.substr(us + 1);   // drop the temp-name tag
+    std::wstring dest = DownloadTarget(name);
+    g.tempOpened.erase(path);
+    if (!dest.empty() && MoveFileExW(path.c_str(), dest.c_str(), 0))
+        ShowAlert(L"NO MEDIA PLAYER FOUND - SAVED TO YOUR DOWNLOADS FOLDER INSTEAD");
+    else
+        ShowAlert(L"NO MEDIA PLAYER FOUND FOR THIS FILE");
+}
+
+// A direct link to a video NeonNet cannot play: open it in the system player, save it, or drop it.
+static void AskMedia(std::unique_ptr<MediaAsk> m) {
+    if (g.closing) return;
+    std::wstring text = L"NeonNet cannot play this file:\n\n" + (m->name.empty() ? std::wstring(L"(no name)") : m->name) +
+        L"\n\nIts format (H.264 / AAC) is not built into NeonNet for licensing reasons.\n\n"
+        L"Yes: open it in your media player. A temporary copy is made and deleted afterwards.\n"
+        L"No: save it to your computer.\nCancel: do nothing.";
+    int r = MessageBoxW(g.hwnd, text.c_str(), L"NeonNet - format not supported", MB_YESNOCANCEL | MB_ICONQUESTION);
+    if (g.closing) return;
+    if (!m->callback) {
+        // the video is shown as a page: start the download now, the answer is remembered by its URL
+        if (!m->browser || (r != IDYES && r != IDNO)) return;
+        if (r == IDYES && TempMediaPath(m->name, m->mime).empty()) r = IDNO;   // type unknown: save instead
+        (r == IDYES ? g.pendingPlayerUrl : g.pendingSaveUrl) = m->url;
+        m->browser->GetHost()->StartDownload(m->url);
+        return;
+    }
+    if (r == IDYES) {
+        std::wstring tmp = TempMediaPath(m->name, m->mime);
+        if (!tmp.empty()) { g.tempDl[m->id] = tmp; m->callback->Continue(tmp, false); return; }
+        r = IDNO;
+    }
+    if (r != IDNO) return;   // Cancel: releasing the callback cancels the download
+    if (store::DownloadUpdate(m->id, m->url, L"", m->name, 0, 0, 0, store::DL_ACTIVE)) ScheduleSave();
+    std::wstring target = RegGetDword(L"AskDownload", 1) ? std::wstring() : DownloadTarget(m->name);
+    if (target.empty()) m->callback->Continue("", true);
+    else m->callback->Continue(target, false);
+}
+
 // Cancel, open or show a download for the downloads page. Only the id comes from the page;
 // the file is looked up in the list, and programs and scripts are never opened.
 static void DoDownloadAction(int act, long long id) {
@@ -1946,6 +2258,7 @@ static void BeginClose() {
     if (g.closing) return;
     SavePlacement();
     store::SaveIfDirty();
+    SweepTemp();
     g.closing = true;
     ShowWindow(g.hwnd, SW_HIDE);
     for (auto& t : g.tabs) if (t->browser) t->browser->GetHost()->CloseDevTools();
@@ -2004,6 +2317,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_TIMER:
         if (wp == TIMER_ZOOM) KillTimer(hwnd, TIMER_ZOOM);
         else if (wp == TIMER_NOTICE) { KillTimer(hwnd, TIMER_NOTICE); g.notice.clear(); }
+        else if (wp == TIMER_ALERT) { KillTimer(hwnd, TIMER_ALERT); g.alert.clear(); InvalidateStatus(); }
+        else if (wp == TIMER_TEMP) SweepTemp();
         else if (wp == TIMER_UPDATE) MaybeAutoCheck();
         else if (wp == TIMER_SAVE) { KillTimer(hwnd, TIMER_SAVE); store::SaveIfDirty(); return 0; }
         InvalidateStatus();
@@ -2011,6 +2326,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APP_UPDATE: { std::unique_ptr<UpdateMsg> m((UpdateMsg*)lp); if (!g.closing) OnUpdateMsg(*m); return 0; }
     case WM_APP_STORE: ScheduleSave(); SendState(); return 0;
     case WM_APP_DOWNLOAD: DoDownloadAction((int)wp, (long long)lp); return 0;
+    case WM_APP_MEDIA: AskMedia(std::unique_ptr<MediaAsk>((MediaAsk*)lp)); return 0;
     case WM_APP_SETTING: {
         auto* m = (const std::pair<std::wstring, std::wstring>*)lp;   // owned by the sender, which waits for us
         if (m) ApplySetting(m->first, m->second);
@@ -2079,7 +2395,8 @@ static void EnableDarkMenus() {
 
 static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     CefMainArgs main_args(hinst);
-    int code = CefExecuteProcess(main_args, nullptr, sandbox_info);
+    CefRefPtr<NeonApp> app(new NeonApp());   // sub-processes need it too (renderer hooks)
+    int code = CefExecuteProcess(main_args, app.get(), sandbox_info);
     if (code >= 0) return code;   // a sub-process finished
 
     // ---- browser process from here ----
@@ -2137,7 +2454,6 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     settings.background_color = CEF_BG;
     settings.log_severity = LOGSEVERITY_DISABLE;
 
-    CefRefPtr<NeonApp> app(new NeonApp());
     if (!CefInitialize(main_args, settings, app.get(), sandbox_info)) {
         // another NeonNet already owns the profile; it got our URL via OnAlreadyRunningAppRelaunch
         DestroyWindow(g.hwnd);
@@ -2158,6 +2474,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     UpdateWindow(g.hwnd);
     SetTimer(g.hwnd, TIMER_CLOCK, 15000, nullptr);
     UpdateStartup();
+    SweepTemp();   // copies left over from the last run (a player may have kept one open)
 
     CefRunMessageLoop();
     g_client = nullptr;

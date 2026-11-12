@@ -85,7 +85,8 @@ neonnet-browser/
 
 ## Limitations
 
-- DRM content (Netflix, Disney+, Spotify web player) does not play.
+- DRM content (Netflix, Disney+, Spotify web player) does not play. NeonNet warns in the status bar when a site asks for it.
+- H.264 and AAC are not built in (patent licences), so files such as most `.mp4` cannot play inside NeonNet. VP9, AV1, Opus and MP3 work, which covers YouTube. A video NeonNet cannot play can be opened in your own media player instead (see the user guide).
 - No account sync, password manager or Chrome Web Store extensions.
 - Bookmarks are a flat list (no folders), and the address bar does not suggest from history yet.
 

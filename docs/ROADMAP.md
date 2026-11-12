@@ -48,7 +48,7 @@ Planned features for NeonNet, roughly in the order they are worth doing. Effort:
 - [ ] **Set as default browser** (S). Register the URL and file handlers so links from other apps open in NeonNet.
 - [ ] **Installer: choose install folder and per-machine install** (M).
 - [ ] **Signed installer and executables** (M). Removes the SmartScreen warning. Needs a code-signing certificate.
-- [ ] **Widevine DRM** (L). Needed for Netflix, Disney+ and similar; depends on a licence from the CDM vendor, so it may not be possible.
+- [ ] **Widevine DRM** (L). Needed for Netflix, Disney+ and similar; depends on a licence from the CDM vendor, and on H.264 and AAC, which are not built in because of patent licences. Not planned. NeonNet only warns in the status bar when a site asks for DRM, and opens videos it cannot play in the system player.
 - [ ] **Extensions** (L). Currently turned off on purpose (`disable-extensions`); a full Chrome Web Store system is out of scope, but a small set of NeonNet-specific features could be.
 
 ## Quality and maintenance
