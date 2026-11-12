@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 ## [Unreleased]
 
 ### Features
+- The right-click menu is drawn in the NeonNet theme (the same look as the `≡` menu, with a green frame in an incognito window) instead of the native Windows menu. It shows shortcuts, dims unavailable items, and works with the keyboard (arrows, Enter, Esc).
+- New right-click items: **Open link in incognito window**, **Open image in new tab**, **View page source** (in a NeonNet tab) and, for selected text, **Search** with your chosen search engine. Chromium's own versions of these opened stray Chromium windows, and its Cast, QR code and "send to your devices" items, spell-check language submenus and settings links are no longer shown.
 - Incognito window (Ctrl+Shift+N, or **New incognito window** in the `≡` menu). It is a separate window with a green frame and an INCOGNITO badge, and its own in-memory profile: cookies, cache, local storage and sign-ins are not written to disk and are gone when the window closes. No history is recorded, and bookmarks are shown but cannot be changed. Downloaded files are kept as usual. Several incognito tabs share one session, and the normal window is not affected. Automatic updates are handled by the normal window.
 
 ## [1.3.0] - 2026-11-12

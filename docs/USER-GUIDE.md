@@ -91,8 +91,11 @@ Use the mouse, or the arrow keys and Enter. Esc, a click outside the menu, or an
 
 ## Right-click on a page
 
-The standard Chromium menu (back, reload, copy, paste and so on), plus:
-- **Open link in new tab:** shown when you right-click a link.
+The menu is drawn in the NeonNet theme, like the `≡` menu: arrows and Enter, or the mouse; Esc or a click elsewhere closes it. It holds the usual commands for what you clicked (back, reload, save, print, copy, paste, select all and so on), plus:
+- **Open link in new tab** and **Open link in incognito window:** shown when you right-click a link.
+- **Open image in new tab:** shown when you right-click an image.
+- **Search <engine> for "...":** shown when text is selected. It uses the search engine from Settings.
+- **View page source:** shown when you right-click empty page space; opens in a new tab.
 - **Open in system player:** shown when you right-click a video or audio player on a page. See [Videos NeonNet cannot play](#videos-neonnet-cannot-play).
 - **Inspect:** opens the developer tools at the clicked element.
 

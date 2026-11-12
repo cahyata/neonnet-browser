@@ -140,6 +140,12 @@ The toolbar (`chrome.html`) is served from `https://chrome.neonnet.ui/`, a secon
 
 `OnContextInitialized` also sets the Chromium preference `download_bubble.partial_view_enabled` to false (the "Don't show when downloads finish" option). Without it Chromium pops up its own unthemed download bubble after every download. A `disable-features=DownloadBubble` switch did not remove it; the preference does.
 
+## Right-click menu
+
+`Client::RunContextMenu()` takes over the menu (CEF calls it for Chrome-style browsers). It copies the `CefMenuModel` into `MenuItem` rows right away (`AppendMenuModel()`; the model must not be kept), posts `WM_APP_CTXMENU`, and `ShowContextMenu()` runs `RunMenu()`, the same painted menu window as the `≡` menu, with the title `CONTEXT` and the menu's top-left corner at the cursor (`anchorLeft`). The position is the cursor position when the callback ran, not `params->GetXCoord()`, whose scale differs. The result goes to `callback->Continue()`, or `Cancel()` for Esc, so Chromium runs its own commands and `OnContextMenuCommand` gets ours. An empty model (the toolbar outside a text box) is cancelled at once.
+
+Chromium's command ids in this build are large numbers, not below `MENU_ID_USER_FIRST`, so NeonNet's items are told apart by their own id range (`MENU_OPEN_LINK_TAB` to `MENU_SEARCH_SELECTION`). Chromium's commands that open a new tab or window do not use NeonNet's tabs: choosing View page source created a separate Chromium window with the omnibox popup. `ReplacedByNeonNet()` therefore hides them by label (open link or image in new tab, new window, incognito, view page source, inspect, search, Cast, QR code, send to your devices, language settings, copy link to highlight), and `OnBeforeContextMenu()` adds NeonNet's versions: they call `CreateTab()`, `LaunchIncognito(url)` or `ShowDevTools()`. Submenus (spell check, writing direction) are not shown. Commands that act inside the page (back, reload, save as, print, copy, paste, select all, spell-check suggestions) are left to Chromium and work through `Continue()`.
+
 ## Incognito window
 
 An incognito window is a second NeonNet process started with `--neonnet-incognito` (`LaunchIncognito()`, run by `CMD_INCOGNITO`, Ctrl+Shift+N). `g` is a single global, so a process-per-window design avoids turning every function into one that takes a window.

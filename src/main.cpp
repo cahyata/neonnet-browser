@@ -76,6 +76,7 @@ static const UINT WM_APP_FINISH = WM_APP + 5;   // all browsers closed: destroy 
 static const UINT WM_APP_DOWNLOAD = WM_APP + 6; // wParam = DlAction, lParam = download id (from the downloads page)
 static const UINT WM_APP_SETTING = WM_APP + 7;  // lParam = const std::pair<std::wstring, std::wstring>* (key, value; from the settings page)
 static const UINT WM_APP_MEDIA = WM_APP + 8;    // lParam = new MediaAsk (a video NeonNet cannot play was opened)
+static const UINT WM_APP_CTXMENU = WM_APP + 9;  // lParam = new CtxMenu (a right-click menu to show in the NeonNet theme)
 
 static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5,
                       TIMER_ALERT = 6, TIMER_TEMP = 7;
@@ -99,7 +100,8 @@ struct UpdateMsg {
     bool manual = false;
     std::wstring version, path, page, error;
 };
-enum { MENU_OPEN_LINK_TAB = MENU_ID_USER_FIRST, MENU_INSPECT, MENU_OPEN_PLAYER };
+enum { MENU_OPEN_LINK_TAB = MENU_ID_USER_FIRST, MENU_INSPECT, MENU_OPEN_PLAYER,
+       MENU_VIEW_SOURCE, MENU_OPEN_IMAGE_TAB, MENU_OPEN_LINK_INCOGNITO, MENU_SEARCH_SELECTION };
 
 struct Tab {
     int id = 0;
@@ -274,6 +276,7 @@ static void RegSetBin(const wchar_t* name, DWORD type, const void* data, DWORD s
 
 static std::wstring DownloadTarget(std::wstring name);   // below, next to ApplySetting
 static void ShowAlert(const std::wstring& text);
+static void LaunchIncognito(const std::wstring& url);
 static std::wstring TempMediaPath(const std::wstring& name, const std::wstring& mime);
 static void OpenTempMedia(const std::wstring& path);
 // A video NeonNet cannot play. `callback` is set when Chromium already started a download for it;
@@ -646,6 +649,93 @@ public:
     IMPLEMENT_REFCOUNTING(DevToolsClient);
 };
 
+// One row of a NeonNet-themed menu (the ≡ menu and the right-click menu; see RunMenu below).
+struct MenuItem {
+    int cmd = 0;              // 0 = separator
+    std::wstring text, keys;
+    bool disabled = false, checked = false;
+};
+
+// A right-click menu taken over from Chromium: its rows, and the callback that gets the choice.
+struct CtxMenu {
+    CefRefPtr<CefRunContextMenuCallback> callback;
+    std::vector<MenuItem> items;
+    POINT at{};
+};
+
+// "&Back" -> "Back" (the "&" marks a keyboard mnemonic; "&&" is a literal ampersand), and
+// "Back\tAlt+Left" -> "Back".
+static std::wstring CleanMenuLabel(const std::wstring& in) {
+    std::wstring s = in.substr(0, in.find(L'\t')), o;
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] == L'&') { if (i + 1 < s.size() && s[i + 1] == L'&') { o += L'&'; i++; } continue; }
+        o += s[i];
+    }
+    if (o.size() > 56) { o.resize(55); o += L"\x2026"; }
+    return o;
+}
+
+static std::wstring AcceleratorText(CefRefPtr<CefMenuModel> m, size_t i) {
+    int key = 0; bool shift = false, ctrl = false, alt = false;
+    if (!m->GetAcceleratorAt(i, key, shift, ctrl, alt) || !key) return {};
+    std::wstring k;
+    if ((key >= 'A' && key <= 'Z') || (key >= '0' && key <= '9')) k = std::wstring(1, (wchar_t)key);
+    else if (key >= VK_F1 && key <= VK_F12) k = L"F" + std::to_wstring(key - VK_F1 + 1);
+    else switch (key) {
+        case VK_LEFT: k = L"Left"; break;
+        case VK_RIGHT: k = L"Right"; break;
+        case VK_DELETE: k = L"Del"; break;
+        case VK_RETURN: k = L"Enter"; break;
+        default: return {};
+    }
+    return std::wstring(ctrl ? L"Ctrl+" : L"") + (alt ? L"Alt+" : L"") + (shift ? L"Shift+" : L"") + k;
+}
+
+// Chromium's own items that open a new tab or window would open a stray Chromium window (its
+// commands know nothing about NeonNet's tabs), or lead to Chromium pages and Google services.
+// NeonNet adds its own versions of the useful ones (see OnBeforeContextMenu); these are hidden.
+static bool ReplacedByNeonNet(const std::wstring& label) {
+    std::wstring l = label;
+    for (auto& c : l) c = (wchar_t)towlower(c);
+    static const wchar_t* exact[] = {
+        L"open link in new tab", L"open link in new window", L"open link in incognito window",
+        L"open image in new tab", L"open video in new tab", L"open audio in new tab", L"view page source", L"inspect",
+        L"language settings", L"cast\x2026", L"cast...",
+    };
+    for (auto* e : exact) if (l == e) return true;
+    return l.rfind(L"search ", 0) == 0 || l.rfind(L"create qr", 0) == 0 || l.rfind(L"send to your", 0) == 0 ||
+           l.rfind(L"copy link to highlight", 0) == 0;
+}
+
+// Copy a Chromium menu model into rows.
+static void AppendMenuModel(CefRefPtr<CefMenuModel> m, std::vector<MenuItem>& out, int depth) {
+    for (size_t i = 0; i < m->GetCount(); i++) {
+        if (!m->IsVisibleAt(i)) continue;
+        cef_menu_item_type_t type = m->GetTypeAt(i);
+        if (type == MENUITEMTYPE_SEPARATOR) { out.push_back(MenuItem()); continue; }
+        MenuItem it;
+        it.text = CleanMenuLabel(m->GetLabelAt(i).ToWString());
+        if (it.text.empty()) continue;
+        // Submenus (spell check languages, writing direction) are not offered: they are long, and
+        // some lead to Chromium settings pages.
+        if (type == MENUITEMTYPE_SUBMENU) continue;
+        it.cmd = m->GetCommandIdAt(i);
+        if (!it.cmd) continue;
+        bool ours = it.cmd >= MENU_OPEN_LINK_TAB && it.cmd <= MENU_SEARCH_SELECTION;   // added in OnBeforeContextMenu
+        if (!ours && ReplacedByNeonNet(it.text)) continue;
+        it.disabled = !m->IsEnabledAt(i);
+        it.checked = (type == MENUITEMTYPE_CHECK || type == MENUITEMTYPE_RADIO) && m->IsCheckedAt(i);
+        it.keys = AcceleratorText(m, i);
+        out.push_back(std::move(it));
+    }
+    if (depth == 0) {   // no separator first, last or twice in a row
+        std::vector<MenuItem> t;
+        for (auto& r : out) { if (!r.cmd && (t.empty() || !t.back().cmd)) continue; t.push_back(std::move(r)); }
+        while (!t.empty() && !t.back().cmd) t.pop_back();
+        out = std::move(t);
+    }
+}
+
 // Containers and codecs this build of Chromium cannot play (H.264, AAC and friends are left out
 // of the build for licensing reasons). Chromium turns a direct link to one of these into a download.
 static bool IsUnplayableMime(std::wstring m) {
@@ -946,18 +1036,53 @@ public:
             if (!(params->GetTypeFlags() & CM_TYPEFLAG_EDITABLE)) model->Clear();
             return;
         }
-        if (!params->GetLinkUrl().empty()) {
-            model->InsertItemAt(0, MENU_OPEN_LINK_TAB, "Open link in new tab");
-            model->InsertSeparatorAt(1);
-        }
+        // Items are inserted at the top, last group first. Chromium's own items for these actions are
+        // hidden when the menu is shown (ReplacedByNeonNet), because they would open stray windows.
+        int flags = params->GetTypeFlags();
+        std::wstring link = params->GetLinkUrl().ToWString();
+        bool httpLink = link.rfind(L"http://", 0) == 0 || link.rfind(L"https://", 0) == 0;
         cef_context_menu_media_type_t media = params->GetMediaType();
         std::wstring src = params->GetSourceUrl().ToWString();
-        if ((media == CM_MEDIATYPE_VIDEO || media == CM_MEDIATYPE_AUDIO) && (src.rfind(L"http://", 0) == 0 || src.rfind(L"https://", 0) == 0)) {
+        bool httpSrc = src.rfind(L"http://", 0) == 0 || src.rfind(L"https://", 0) == 0;
+        if ((media == CM_MEDIATYPE_VIDEO || media == CM_MEDIATYPE_AUDIO) && httpSrc) {
             model->InsertItemAt(0, MENU_OPEN_PLAYER, "Open in system player");
             model->InsertSeparatorAt(1);
         }
+        if (media == CM_MEDIATYPE_IMAGE && httpSrc) {
+            model->InsertItemAt(0, MENU_OPEN_IMAGE_TAB, "Open image in new tab");
+            model->InsertSeparatorAt(1);
+        }
+        if (!link.empty()) {
+            int at = 0;
+            model->InsertItemAt(at++, MENU_OPEN_LINK_TAB, "Open link in new tab");
+            if (!g.incognito && httpLink) model->InsertItemAt(at++, MENU_OPEN_LINK_INCOGNITO, "Open link in incognito window");
+            model->InsertSeparatorAt(at);
+        }
+        std::wstring sel = params->GetSelectionText().ToWString();
+        if ((flags & CM_TYPEFLAG_SELECTION) && !sel.empty()) {
+            // one line, shortened, for the menu text
+            for (auto& c : sel) if (c == L'\r' || c == L'\n' || c == L'\t') c = L' ';
+            if (sel.size() > 28) { sel.resize(27); sel += L"\x2026"; }
+            model->InsertItemAt(0, MENU_SEARCH_SELECTION, L"Search " + std::wstring(CurrentEngine().name) + L" for \"" + sel + L"\"");
+            model->InsertSeparatorAt(1);
+        }
         if (model->GetCount() > 0) model->AddSeparator();
+        if ((flags & CM_TYPEFLAG_PAGE) && !(flags & (CM_TYPEFLAG_LINK | CM_TYPEFLAG_MEDIA | CM_TYPEFLAG_SELECTION | CM_TYPEFLAG_EDITABLE)))
+            model->AddItem(MENU_VIEW_SOURCE, "View page source");
         model->AddItem(MENU_INSPECT, "Inspect");
+    }
+    // Show the right-click menu in the NeonNet theme instead of Chromium's native menu. The rows are
+    // copied now (the model must not be kept); the menu itself runs from the window procedure.
+    bool RunContextMenu(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefRefPtr<CefContextMenuParams>,
+                        CefRefPtr<CefMenuModel> model, CefRefPtr<CefRunContextMenuCallback> callback) override {
+        if (g.closing || !g.hwnd) return false;
+        auto* m = new CtxMenu;
+        m->callback = callback;
+        AppendMenuModel(model, m->items, 0);
+        if (m->items.empty()) { delete m; callback->Cancel(); return true; }   // e.g. the toolbar outside a text box
+        GetCursorPos(&m->at);
+        if (!PostMessageW(g.hwnd, WM_APP_CTXMENU, 0, (LPARAM)m)) { delete m; return false; }
+        return true;
     }
     // The renderer reports videos this build cannot play and sites that ask for DRM.
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId,
@@ -998,6 +1123,26 @@ public:
         if (command_id == MENU_OPEN_LINK_TAB) {
             std::wstring link = params->GetLinkUrl().ToWString();
             if (link.rfind(L"http", 0) == 0) CreateTab(link, false);
+            return true;
+        }
+        if (command_id == MENU_VIEW_SOURCE) {
+            std::wstring u = browser->GetMainFrame()->GetURL().ToWString();
+            if (u.rfind(L"http", 0) == 0 || u.rfind(L"file:", 0) == 0) CreateTab(L"view-source:" + u, true);
+            return true;
+        }
+        if (command_id == MENU_OPEN_IMAGE_TAB) {
+            std::wstring u = params->GetSourceUrl().ToWString();
+            if (u.rfind(L"http", 0) == 0) CreateTab(u, false);
+            return true;
+        }
+        if (command_id == MENU_OPEN_LINK_INCOGNITO) {
+            std::wstring u = params->GetLinkUrl().ToWString();
+            if (u.rfind(L"http", 0) == 0) LaunchIncognito(u);
+            return true;
+        }
+        if (command_id == MENU_SEARCH_SELECTION) {
+            std::wstring q = params->GetSelectionText().ToWString();
+            if (!q.empty() && q.size() < 2000) CreateTab(std::wstring(CurrentEngine().url) + CefURIEncode(q, false).ToWString(), false);
             return true;
         }
         if (command_id == MENU_OPEN_PLAYER) {
@@ -1455,10 +1600,12 @@ static void OpenPage(const std::wstring& page) {
 // An incognito window is a second NeonNet process with its own in-memory profile (like Chrome's
 // separate incognito window, but isolated by process). Starting it again while it is open
 // does not start a third one: CEF hands the request to the running one, which opens a new tab.
-static void LaunchIncognito() {
+static void LaunchIncognito(const std::wstring& url) {
     wchar_t exe[MAX_PATH]; DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
     if (!n || n >= MAX_PATH) return;
-    ShellExecuteW(nullptr, L"open", exe, L"--neonnet-incognito", nullptr, SW_SHOWNORMAL);
+    std::wstring args = L"--neonnet-incognito";
+    if (url.rfind(L"http", 0) == 0 && url.find(L'"') == std::wstring::npos) args += L" \"" + url + L"\"";
+    ShellExecuteW(nullptr, L"open", exe, args.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
 static void ExecCmd(int cmd) {
@@ -1466,7 +1613,7 @@ static void ExecCmd(int cmd) {
     CefRefPtr<CefBrowser> b = a ? a->browser : nullptr;
     switch (cmd) {
     case CMD_NEWTAB: CreateTab(NEWTAB, true); break;
-    case CMD_INCOGNITO: if (g.incognito) CreateTab(NEWTAB, true); else LaunchIncognito(); break;
+    case CMD_INCOGNITO: if (g.incognito) CreateTab(NEWTAB, true); else LaunchIncognito(L""); break;
     case CMD_CLOSETAB: if (a) CloseTab(a->id); break;
     case CMD_HOME: if (b) b->GetMainFrame()->LoadURL(HomeUrl()); break;
     case CMD_RELOAD:
@@ -1535,18 +1682,13 @@ static void ExecCmd(int cmd) {
 // recolored or given clipped corners). RunMenu() runs its own message loop, like
 // TrackPopupMenu, and returns the chosen command or 0.
 
-struct MenuItem {
-    int cmd = 0;              // 0 = separator
-    std::wstring text, keys;
-    bool disabled = false, checked = false;
-};
-
 struct MenuState {
     std::vector<MenuItem> items;
     std::vector<RECT> rows;
     HFONT font = nullptr;
     int hot = -1, result = 0;
     bool done = false, tracking = false;
+    std::wstring title = L"SYSTEM MENU";
 };
 
 static const COLORREF C_MENU_BG = RGB(0x0a, 0x04, 0x20);
@@ -1579,7 +1721,8 @@ static void PaintMenu(HWND hwnd, MenuState& st, HDC hdc) {
     // header
     RECT hr{ S(14), S(6), w - S(14), S(26) };
     SetTextColor(mem, C_YELLOW);
-    DrawTextW(mem, L"> SYSTEM MENU", -1, &hr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    std::wstring head = L"> " + st.title;
+    DrawTextW(mem, head.c_str(), -1, &hr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
     for (size_t i = 0; i < st.items.size(); i++) {
         const MenuItem& it = st.items[i];
@@ -1707,8 +1850,9 @@ static LRESULT CALLBACK MenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
-// rightTop: screen point where the menu's top-right corner goes.
-static int RunMenu(std::vector<MenuItem> items, POINT rightTop) {
+// rightTop: screen point where the menu's top-right corner goes (the ≡ menu), or with
+// anchorLeft its top-left corner (the right-click menu).
+static int RunMenu(std::vector<MenuItem> items, POINT rightTop, const wchar_t* title = L"SYSTEM MENU", bool anchorLeft = false) {
     static bool registered = false;
     if (!registered) {
         WNDCLASSEXW wc{ sizeof(wc) };
@@ -1721,6 +1865,7 @@ static int RunMenu(std::vector<MenuItem> items, POINT rightTop) {
     }
     MenuState st;
     st.items = std::move(items);
+    st.title = title;
     st.font = CreateFontW(-S(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                           CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
 
@@ -1747,8 +1892,9 @@ static int RunMenu(std::vector<MenuItem> items, POINT rightTop) {
     // keep it on the monitor
     MONITORINFO mi{ sizeof(mi) };
     GetMonitorInfoW(MonitorFromPoint(rightTop, MONITOR_DEFAULTTONEAREST), &mi);
-    int x = std::max((int)mi.rcWork.left, (int)std::min(rightTop.x, mi.rcWork.right) - w);
-    int top = std::min(rightTop.y, mi.rcWork.bottom - h);
+    int x = anchorLeft ? std::max((int)mi.rcWork.left, (int)std::min(rightTop.x, mi.rcWork.right - w))
+                       : std::max((int)mi.rcWork.left, (int)std::min(rightTop.x, mi.rcWork.right) - w);
+    int top = std::max((int)mi.rcWork.top, (int)std::min(rightTop.y, mi.rcWork.bottom - h));
 
     HWND hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"NeonNetMenu", L"", WS_POPUP,
                                 x, top, w, h, g.hwnd, nullptr, g.hmod, &st);
@@ -1829,6 +1975,16 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
     ClientToScreen(g.hwnd, &p);
     int cmd = RunMenu(std::move(m), p);
     if (cmd) ExecCmd(cmd);
+}
+
+// The right-click menu. The chosen command goes back to Chromium, which runs it (or hands it to
+// OnContextMenuCommand for NeonNet's own items).
+static void ShowContextMenu(std::unique_ptr<CtxMenu> m) {
+    if (g.closing) { m->callback->Cancel(); return; }
+    if (GetTickCount64() - g_menuClosedAt < 150) { m->callback->Cancel(); return; }   // the click that closed another menu
+    int cmd = RunMenu(std::move(m->items), m->at, L"CONTEXT", true);
+    if (cmd > 0) m->callback->Continue(cmd, EVENTFLAG_NONE);
+    else m->callback->Cancel();
 }
 
 static void OnChromeCommand(const std::wstring& msg) {
@@ -2367,6 +2523,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APP_STORE: ScheduleSave(); SendState(); return 0;
     case WM_APP_DOWNLOAD: DoDownloadAction((int)wp, (long long)lp); return 0;
     case WM_APP_MEDIA: AskMedia(std::unique_ptr<MediaAsk>((MediaAsk*)lp)); return 0;
+    case WM_APP_CTXMENU: ShowContextMenu(std::unique_ptr<CtxMenu>((CtxMenu*)lp)); return 0;
     case WM_APP_SETTING: {
         auto* m = (const std::pair<std::wstring, std::wstring>*)lp;   // owned by the sender, which waits for us
         if (m) ApplySetting(m->first, m->second);
