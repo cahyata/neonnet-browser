@@ -5,7 +5,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 ## [Unreleased]
 
 ### Features
-- Videos NeonNet cannot play (H.264 / AAC, such as most `.mp4` and `.mov` files) can be opened in your own media player. A direct link to such a file asks whether to open it in the system player, save it, or do nothing; on a page, clicking play on a video that cannot be played opens it in the system player (also videos that only load when played), and right-clicking a video adds **Open in system player**. The player gets a temporary copy, which NeonNet deletes once the player has closed it. NeonNet does not include or install any player or codec.
+- Videos NeonNet cannot play (H.264 / AAC, such as most `.mp4` and `.mov` files) can be opened in your own media player. A direct link to such a file asks whether to open it in the system player, save it, or do nothing; on a page, clicking play on a video that cannot be played opens it in the system player (also videos that only load when played, such as `preload="none"`; the built-in play button sends no click event to the page, so the play event is used), and right-clicking a video adds **Open in system player**. The player gets a temporary copy, which NeonNet deletes once the player has closed it. NeonNet does not include or install any player or codec.
 - A warning in the status bar when a site asks for DRM (Widevine, PlayReady, FairPlay), which NeonNet does not have, and when a video on a page fails because its format is not supported.
 
 ## [1.2.0] - 2026-11-12

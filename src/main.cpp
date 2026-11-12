@@ -1928,6 +1928,9 @@ static const char* MEDIA_HOOK_JS =
     "else tell('media');},true);}catch(e){}"
     // Clicking (play) on a video that cannot be played opens it in the system player, no menu needed.
     // The browser process checks the address again and ignores a second click while a copy is being made.
+    // The built-in play button sends no click event to the page, only 'play'. Count it when the user just interacted.
+    "try{document.addEventListener('play',function(e){var t=e.target;"
+    "if(t&&(t.tagName==='VIDEO'||t.tagName==='AUDIO')&&(!navigator.userActivation||navigator.userActivation.isActive))ck=Date.now();},true);}catch(e){}"
     "try{document.addEventListener('click',function(e){var t=e.target;"
     "if(!t||(t.tagName!=='VIDEO'&&t.tagName!=='AUDIO'))return;"
     "var failed=(t.error&&t.error.code===4)||(t.networkState===3&&t.readyState===0);"
