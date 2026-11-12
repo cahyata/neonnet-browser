@@ -351,6 +351,21 @@ void Forget(long long id, const std::wstring& url) {
         if (it->id == id && it->url == url) { history.erase(it); histDirty = true; return; }
 }
 
+// Distinct http(s) origins (scheme://host[:port]) of the pages visited since sinceMs, newest first.
+std::vector<std::wstring> OriginsSince(long long sinceMs, size_t max) {
+    Shared s;
+    std::vector<std::wstring> out;
+    for (auto it = history.rbegin(); it != history.rend() && out.size() < max; ++it) {
+        if (it->time < sinceMs) break;   // oldest first, so everything before this is older too
+        const std::wstring& u = it->url;
+        if (u.rfind(L"http://", 0) != 0 && u.rfind(L"https://", 0) != 0) continue;
+        size_t slash = u.find(L'/', u.find(L"://") + 3);
+        std::wstring origin = slash == std::wstring::npos ? u : u.substr(0, slash);
+        if (std::find(out.begin(), out.end(), origin) == out.end()) out.push_back(std::move(origin));
+    }
+    return out;
+}
+
 std::string HistoryJson(const std::wstring& query, size_t limit) {
     std::wstring q = Lower(query);
     std::string o = "[";

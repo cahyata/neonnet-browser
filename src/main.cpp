@@ -19,6 +19,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -77,6 +78,8 @@ static const UINT WM_APP_DOWNLOAD = WM_APP + 6; // wParam = DlAction, lParam = d
 static const UINT WM_APP_SETTING = WM_APP + 7;  // lParam = const std::pair<std::wstring, std::wstring>* (key, value; from the settings page)
 static const UINT WM_APP_MEDIA = WM_APP + 8;    // lParam = new MediaAsk (a video NeonNet cannot play was opened)
 static const UINT WM_APP_CTXMENU = WM_APP + 9;  // lParam = new CtxMenu (a right-click menu to show in the NeonNet theme)
+static const UINT WM_APP_CLEARDATA = WM_APP + 10;   // lParam = new ClearReq (from the settings page)
+static const UINT WM_APP_CLEARSITES = WM_APP + 11;  // lParam = new ClearSites (cookies are done, site data is next)
 
 static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5,
                       TIMER_ALERT = 6, TIMER_TEMP = 7;
@@ -155,6 +158,8 @@ struct App {
     // search engine used for text typed in the address bar (index into SEARCH_ENGINES;
     // atomic because the IO thread answers /api/settings)
     std::atomic<int> engine{ 0 };
+    // "Clear browsing data": 0 idle, 1 running, 2 done, with what the last run removed (read by the IO thread)
+    std::atomic<int> clearState{ 0 }, clearCookies{ 0 }, clearSites{ 0 };
     // running downloads (UI thread only): CEF id -> handle used to cancel them
     std::map<unsigned, CefRefPtr<CefDownloadItemCallback>> dlCallbacks;
     // "Open in system player": CEF download id -> temporary file, while it downloads; and the
@@ -279,6 +284,10 @@ static void ShowAlert(const std::wstring& text);
 static void LaunchIncognito(const std::wstring& url);
 static std::wstring TempMediaPath(const std::wstring& name, const std::wstring& mime);
 static void OpenTempMedia(const std::wstring& path);
+// Clear browsing data (settings page). cutoffMs is the unix time (ms) from which data is removed, 0 = all time.
+struct ClearReq { long long cutoffMs = 0; bool cookies = false, cache = false; };
+struct ClearSites { long long cutoffMs = 0; int cookies = 0; std::set<std::wstring> hosts; };
+
 // A video NeonNet cannot play. `callback` is set when Chromium already started a download for it;
 // otherwise the video was opened as a page and `browser` starts the download after the answer.
 struct MediaAsk {
@@ -1264,6 +1273,32 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
             return new StringResource("{\"error\":\"invalid address\"}", "application/json", 400);
         changed = true;
     }
+    else if (path == L"api/cleardata/run") {
+        // The time range is a name, turned into a cut-off here; the page never sends a time.
+        std::wstring range = QueryParam(query, L"range");
+        long long span = -1;
+        if (range == L"hour") span = 60LL * 60 * 1000;
+        else if (range == L"day") span = 24LL * 60 * 60 * 1000;
+        else if (range == L"week") span = 7LL * 24 * 60 * 60 * 1000;
+        else if (range == L"month") span = 28LL * 24 * 60 * 60 * 1000;
+        else if (range == L"all") span = 0;
+        bool cookies = QueryParam(query, L"cookies") == L"1", cache = QueryParam(query, L"cache") == L"1";
+        if (span < 0 || (!cookies && !cache))
+            return new StringResource("{\"error\":\"invalid request\"}", "application/json", 400);
+        if (g.clearState.load() == 1) return new StringResource("{\"error\":\"already running\"}", "application/json", 409);
+        auto* req = new ClearReq;
+        req->cookies = cookies; req->cache = cache;
+        FILETIME ft; GetSystemTimeAsFileTime(&ft);
+        long long nowMs = (((long long)ft.dwHighDateTime << 32 | ft.dwLowDateTime) / 10000) - 11644473600000LL;
+        req->cutoffMs = span ? nowMs - span : 0;
+        g.clearState = 1; g.clearCookies = 0; g.clearSites = 0;
+        if (!PostMessageW(g.hwnd, WM_APP_CLEARDATA, 0, (LPARAM)req)) { delete req; g.clearState = 0; }
+        out = "{\"started\":true}";
+    }
+    else if (path == L"api/cleardata/status") {
+        out = "{\"state\":" + std::to_string(g.clearState.load()) + ",\"cookies\":" + std::to_string(g.clearCookies.load()) +
+              ",\"sites\":" + std::to_string(g.clearSites.load()) + "}";
+    }
     else if (path == L"api/downloads") out = store::DownloadsJson();
     else if (path == L"api/downloads/remove") changed = store::DownloadRemove(id);
     else if (path == L"api/downloads/clear") { store::DownloadsClear(); changed = true; }
@@ -1979,6 +2014,89 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
 
 // The right-click menu. The chosen command goes back to Chromium, which runs it (or hands it to
 // OnContextMenuCommand for NeonNet's own items).
+// ---------------------------------------------------------------------------
+// Clear browsing data. CEF has no "delete everything since" call, so:
+//  - cookies are visited and deleted by their creation time (exact);
+//  - site data (local storage, IndexedDB, service workers, cache storage ...) is deleted per
+//    origin through the DevTools protocol, for the sites that had a cookie removed and the sites
+//    in the history for that period (a best match: the engine keeps no list of sites to ask);
+//  - the HTTP cache is always cleared completely, whatever the range (it only holds copies).
+// Works on the incognito session when run from an incognito window.
+
+class CookieClearer : public CefCookieVisitor {
+public:
+    explicit CookieClearer(long long cutoffMs) { s_.cutoffMs = cutoffMs; }
+    bool Visit(const CefCookie& c, int, int, bool& deleteCookie) override {
+        long long createdMs = c.creation.val / 1000 - 11644473600000LL;   // microseconds since 1601
+        if (s_.cutoffMs && createdMs < s_.cutoffMs) return true;
+        deleteCookie = true;
+        s_.cookies++;
+        std::wstring host = CefString(&c.domain).ToWString();
+        if (!host.empty() && host[0] == L'.') host.erase(0, 1);
+        if (!host.empty()) s_.hosts.insert(host);
+        return true;
+    }
+    // Released once the visit is over (also when there were no cookies): go on with the site data.
+    ~CookieClearer() {
+        auto* next = new ClearSites(std::move(s_));
+        if (!g.hwnd || !PostMessageW(g.hwnd, WM_APP_CLEARSITES, 0, (LPARAM)next)) delete next;
+    }
+private:
+    ClearSites s_;
+    IMPLEMENT_REFCOUNTING(CookieClearer);
+};
+
+static void FinishClear(int cookies, int sites) {
+    g.clearCookies = cookies; g.clearSites = sites;
+    g.clearState = 2;
+}
+
+static void StartClearData(std::unique_ptr<ClearReq> r) {
+    CefRefPtr<CefRequestContext> ctx = g.reqCtx ? g.reqCtx : CefRequestContext::GetGlobalContext();
+    if (r->cache) {
+        // CefRequestContext::ClearHttpCache() crashes libcef in this (Chrome-style) build, in the
+        // normal profile and in an incognito one. The DevTools command empties the cache of the
+        // context of the tab it is sent to.
+        for (auto& t : g.tabs) {
+            if (!t->browser) continue;
+            t->browser->GetHost()->ExecuteDevToolsMethod(0, "Network.clearBrowserCache", CefDictionaryValue::Create());
+            break;
+        }
+    }
+    CefRefPtr<CefCookieManager> cm = r->cookies ? ctx->GetCookieManager(nullptr) : nullptr;
+    if (!cm) { FinishClear(0, 0); return; }
+    // the visitor's destructor posts WM_APP_CLEARSITES with the cut-off and what it removed
+    if (!cm->VisitAllCookies(new CookieClearer(r->cutoffMs))) FinishClear(0, 0);
+}
+
+static void ClearSiteData(std::unique_ptr<ClearSites> s) {
+    std::set<std::wstring> origins;
+    for (const auto& h : s->hosts) { origins.insert(L"https://" + h); origins.insert(L"http://" + h); }
+    for (const auto& o : store::OriginsSince(s->cutoffMs, 500)) origins.insert(o);
+    // pages open right now (cookies carry no port, history is empty in an incognito window)
+    for (auto& t : g.tabs) {
+        const std::wstring& u = t->url;
+        if (u.rfind(L"http://", 0) != 0 && u.rfind(L"https://", 0) != 0) continue;
+        if (u.rfind(UI_HOST, 0) == 0) continue;   // NeonNet's own pages hold no site data
+        size_t slash = u.find(L'/', u.find(L"://") + 3);
+        origins.insert(slash == std::wstring::npos ? u : u.substr(0, slash));
+    }
+    CefRefPtr<CefBrowser> b;
+    for (auto& t : g.tabs) if (t->browser) { b = t->browser; break; }
+    int n = 0;
+    if (b) {
+        for (const auto& o : origins) {
+            if (n >= 600) break;
+            CefRefPtr<CefDictionaryValue> p = CefDictionaryValue::Create();
+            p->SetString("origin", o);
+            p->SetString("storageTypes", "appcache,file_systems,indexeddb,local_storage,websql,service_workers,cache_storage");
+            b->GetHost()->ExecuteDevToolsMethod(0, "Storage.clearDataForOrigin", p);
+            n++;
+        }
+    }
+    FinishClear(s->cookies, n);
+}
+
 static void ShowContextMenu(std::unique_ptr<CtxMenu> m) {
     if (g.closing) { m->callback->Cancel(); return; }
     if (GetTickCount64() - g_menuClosedAt < 150) { m->callback->Cancel(); return; }   // the click that closed another menu
@@ -2524,6 +2642,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APP_DOWNLOAD: DoDownloadAction((int)wp, (long long)lp); return 0;
     case WM_APP_MEDIA: AskMedia(std::unique_ptr<MediaAsk>((MediaAsk*)lp)); return 0;
     case WM_APP_CTXMENU: ShowContextMenu(std::unique_ptr<CtxMenu>((CtxMenu*)lp)); return 0;
+    case WM_APP_CLEARDATA: StartClearData(std::unique_ptr<ClearReq>((ClearReq*)lp)); return 0;
+    case WM_APP_CLEARSITES: ClearSiteData(std::unique_ptr<ClearSites>((ClearSites*)lp)); return 0;
     case WM_APP_SETTING: {
         auto* m = (const std::pair<std::wstring, std::wstring>*)lp;   // owned by the sender, which waits for us
         if (m) ApplySetting(m->first, m->second);

@@ -140,6 +140,16 @@ The toolbar (`chrome.html`) is served from `https://chrome.neonnet.ui/`, a secon
 
 `OnContextInitialized` also sets the Chromium preference `download_bubble.partial_view_enabled` to false (the "Don't show when downloads finish" option). Without it Chromium pops up its own unthemed download bubble after every download. A `disable-features=DownloadBubble` switch did not remove it; the preference does.
 
+## Clear browsing data
+
+`settings.html` calls `api/cleardata/run?range=<hour|day|week|month|all>&cookies=0|1&cache=0|1` and polls `api/cleardata/status` (`g.clearState`: 0 idle, 1 running, 2 done, plus counts). The page sends a range name, never a time: `ServeApi()` turns it into a cut-off and posts `WM_APP_CLEARDATA` to the UI thread, where `StartClearData()` runs. CEF has no "delete everything since" call, so the work is split:
+
+- **Cookies:** `CefCookieManager::VisitAllCookies()` with `CookieClearer`, which sets `deleteCookie` for cookies whose `creation` (microseconds since 1601) is at or after the cut-off, and remembers their domains. The context is `g.reqCtx` in an incognito window, the global one otherwise.
+- **Site data:** the visitor's destructor (it runs when the visit is over, also when there were no cookies) posts `WM_APP_CLEARSITES`, and `ClearSiteData()` sends `Storage.clearDataForOrigin` through `ExecuteDevToolsMethod()` for each origin: both schemes of the cookie domains, `store::OriginsSince()` (history in the period), and the pages open now (cookies carry no port, and an incognito window has no history). Storage types are everything except cookies. This is a best match, not a full sweep: the engine offers no list of sites with stored data. At most 600 origins.
+- **Cache:** `Network.clearBrowserCache` through `ExecuteDevToolsMethod()`, always the whole cache. `CefRequestContext::ClearHttpCache()` crashes libcef in this build (access violation at the same offset, in the normal profile and in an incognito one), so it is not used. Checked by fetching an asset with `cache: 'force-cache'` before and after: it is served from the cache before, and from the network after.
+
+A DevTools command sent this way, followed by `Browser.close` from an external debugging client, crashed the process once on exit during testing; closing the window normally did not. The DevTools command has no observer registered, so nothing waits for its result.
+
 ## Right-click menu
 
 `Client::RunContextMenu()` takes over the menu (CEF calls it for Chrome-style browsers). It copies the `CefMenuModel` into `MenuItem` rows right away (`AppendMenuModel()`; the model must not be kept), posts `WM_APP_CTXMENU`, and `ShowContextMenu()` runs `RunMenu()`, the same painted menu window as the `≡` menu, with the title `CONTEXT` and the menu's top-left corner at the cursor (`anchorLeft`). The position is the cursor position when the callback ran, not `params->GetXCoord()`, whose scale differs. The result goes to `callback->Continue()`, or `Cancel()` for Esc, so Chromium runs its own commands and `OnContextMenuCommand` gets ours. An empty model (the toolbar outside a text box) is cancelled at once.

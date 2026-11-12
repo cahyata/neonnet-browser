@@ -30,8 +30,11 @@ select option{background:var(--bg2);color:var(--cyan)}
 .txt{width:300px}
 .txt::placeholder{color:#5a4a8a}
 .btn{height:32px;padding:0 14px;background:none;border:1px solid var(--pink);color:var(--pink);font-weight:bold}
-.btn:hover{background:var(--pink);color:var(--bg)}
+.btn:hover:not(:disabled){background:var(--pink);color:var(--bg)}
+.btn:disabled{opacity:.5;cursor:default}
 .pair{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.row.stack{flex-direction:column;align-items:stretch;gap:10px}
+.row.stack .pair{justify-content:flex-start}
 .err{color:var(--pink2);font-size:12px;min-height:16px;margin-top:3px}
 #saved{position:fixed;right:18px;bottom:16px;color:var(--bg);background:var(--green);padding:4px 12px;font-weight:bold;letter-spacing:1px;
   opacity:0;transition:opacity .25s;pointer-events:none}
@@ -57,6 +60,25 @@ select option{background:var(--bg2);color:var(--cyan)}
       <div class="err" id="homeErr"></div></div>
     <div class="pair"><input class="txt" id="home" spellcheck="false" autocomplete="off" placeholder="https://... (empty = new tab page)">
       <button class="btn" id="homeSave">SAVE</button></div>
+  </div>
+
+  <h2>PRIVACY</h2>
+  <div class="row stack">
+    <div class="lab"><b>Clear browsing data</b>
+      <span>Deletes the data you tick, for the chosen period. Cookies and site data also sign you out of sites. The cache is always cleared completely. Your history has its own button on the history page.</span>
+      <div class="err" id="clrMsg"></div></div>
+    <div class="pair">
+      <select id="clrRange">
+        <option value="hour">Last hour</option>
+        <option value="day">Last 24 hours</option>
+        <option value="week">Last 7 days</option>
+        <option value="month">Last 4 weeks</option>
+        <option value="all" selected>All time</option>
+      </select>
+      <button class="tog on" id="clrCookies" title="Cookies and other site data (local storage, offline data, sign-ins)">COOKIES + SITE DATA</button>
+      <button class="tog on" id="clrCache" title="Cached images and files">CACHE</button>
+      <button class="btn" id="clrGo">CLEAR</button>
+    </div>
   </div>
 
   <h2>DOWNLOADS</h2>
@@ -128,6 +150,36 @@ async function saveHome(){
   if(!(await set('home', v))) $('#homeErr').textContent = 'That address was not accepted.';
   else load();
 }
+// Clear browsing data: the app deletes in the background; this page polls until it is done.
+for(const id of ['#clrCookies', '#clrCache']) $(id).onclick = () => $(id).classList.toggle('on');
+let clearing = false;
+$('#clrGo').onclick = async () => {
+  if(clearing) return;
+  const cookies = $('#clrCookies').classList.contains('on'), cache = $('#clrCache').classList.contains('on');
+  const msg = $('#clrMsg');
+  if(!cookies && !cache){ msg.textContent = 'Tick at least one kind of data.'; return; }
+  msg.textContent = ''; clearing = true; $('#clrGo').disabled = true; $('#clrGo').textContent = 'CLEARING...';
+  try {
+    const q = 'range=' + encodeURIComponent($('#clrRange').value) + '&cookies=' + (cookies ? 1 : 0) + '&cache=' + (cache ? 1 : 0);
+    const r = await fetch('/api/cleardata/run?' + q, {cache:'no-store'});
+    if(!r.ok) throw new Error('refused');
+    let st = null;
+    for(let i = 0; i < 100; i++){            // up to about 30 seconds
+      await new Promise(res => setTimeout(res, 300));
+      st = await (await fetch('/api/cleardata/status', {cache:'no-store'})).json();
+      if(st.state === 2) break;
+    }
+    if(!st || st.state !== 2) throw new Error('timeout');
+    const parts = [];
+    if(cookies) parts.push(st.cookies + ' cookie' + (st.cookies === 1 ? '' : 's') + ', site data of ' + st.sites + ' site' + (st.sites === 1 ? '' : 's'));
+    if(cache) parts.push('cache');
+    msg.style.color = 'var(--green)'; msg.textContent = 'Cleared: ' + parts.join(', ') + '.';
+    flash();
+  } catch(e) {
+    msg.style.color = ''; msg.textContent = 'Could not clear the data.';
+  }
+  clearing = false; $('#clrGo').disabled = false; $('#clrGo').textContent = 'CLEAR';
+};
 $('#homeSave').onclick = saveHome;
 $('#home').addEventListener('keydown', e => { if(e.key === 'Enter') saveHome(); });
 // The page may stay open while a setting changes elsewhere (the SCAN button), so refresh when shown.

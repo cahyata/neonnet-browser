@@ -3,6 +3,7 @@
 // serves the neonnet.ui pages that list and edit them).
 #pragma once
 #include <string>
+#include <vector>
 
 namespace store {
 
@@ -30,6 +31,9 @@ long long AddBookmark(const std::wstring& url, const std::wstring& title);
 bool DeleteBookmark(long long id);
 bool EditBookmark(long long id, const std::wstring& title, const std::wstring& url);
 std::string BookmarksJson();
+
+// Distinct http(s) origins of the pages visited since sinceMs (unix ms), newest first, at most max.
+std::vector<std::wstring> OriginsSince(long long sinceMs, size_t max);
 
 // Address bar suggestions for the toolbar: JSON [{url, title, bookmark}], best first.
 std::string SuggestJson(const std::wstring& query, size_t limit);
