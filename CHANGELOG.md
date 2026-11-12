@@ -5,7 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 ## [1.1.1] - 2026-11-12
 
 ### Fixes
-- Automatic updates now install: the installer is started before the browser engine shuts down, because the engine could crash while closing and the update was never applied.
+- NeonNet no longer crashes when it is closed. The window was destroyed from inside the browser engine's close callback; it is now destroyed right after the callback returns.
+- Automatic updates now install. The crash on close stopped the update installer from ever starting, and the installer is now also started before the engine shuts down.
 
 ## [1.1.0] - 2026-11-12
 
