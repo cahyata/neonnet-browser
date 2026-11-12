@@ -544,6 +544,10 @@ static CefWindowInfo ChildInfo(const RECT& r) {
 static CefBrowserSettings BrowserSettings() {
     CefBrowserSettings s;
     s.background_color = CEF_BG;
+    // Our browsers are Chrome style, which brings Chromium's own bubbles. NeonNet shows the
+    // link under the mouse and the zoom level in its status bar, so these would be shown twice.
+    s.chrome_status_bubble = STATE_DISABLED;
+    s.chrome_zoom_bubble = STATE_DISABLED;
     return s;
 }
 
@@ -647,7 +651,7 @@ public:
         g.pendingPopups.push_back(id);
         windowInfo = ChildInfo(ContentRect());
         client = this;
-        settings.background_color = CEF_BG;
+        settings = BrowserSettings();
         SendState();
         return false;
     }
