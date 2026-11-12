@@ -53,7 +53,10 @@ static const cef_color_t CEF_BG = 0xFF12062C;
 
 static const wchar_t* UI_HOST = L"https://neonnet.ui/";
 static const wchar_t* NEWTAB = L"https://neonnet.ui/newtab.html";
-static const wchar_t* CHROME_UI = L"https://neonnet.ui/chrome.html";
+// The toolbar lives on its own host: Chromium keeps zoom per host, so on neonnet.ui it would
+// shrink or grow whenever the user zooms the new tab, history or downloads page.
+static const wchar_t* CHROME_UI_HOST = L"https://chrome.neonnet.ui/";
+static const wchar_t* CHROME_UI = L"https://chrome.neonnet.ui/chrome.html";
 static const wchar_t* HISTORY_PAGE = L"https://neonnet.ui/history.html";
 static const wchar_t* BOOKMARKS_PAGE = L"https://neonnet.ui/bookmarks.html";
 static const wchar_t* DOWNLOADS_PAGE = L"https://neonnet.ui/downloads.html";
@@ -949,7 +952,7 @@ public:
     CefRefPtr<CefResourceHandler> Create(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString&,
                                          CefRefPtr<CefRequest> request) override {
         std::wstring url = request->GetURL().ToWString();
-        std::wstring path = url.substr(wcslen(UI_HOST));
+        std::wstring path = url.substr(url.rfind(CHROME_UI_HOST, 0) == 0 ? wcslen(CHROME_UI_HOST) : wcslen(UI_HOST));
         std::wstring query;
         size_t q = path.find(L'?');
         if (q != std::wstring::npos) { query = path.substr(q + 1); path.resize(q); }
@@ -1690,6 +1693,7 @@ public:
         CefRequestContext::GetGlobalContext()->SetPreference("download_bubble.partial_view_enabled", noBubble, err);
 
         CefRegisterSchemeHandlerFactory("https", "neonnet.ui", new UiSchemeFactory());
+        CefRegisterSchemeHandlerFactory("https", "chrome.neonnet.ui", new UiSchemeFactory());
         g_client = new Client();
         g.creatingChrome = true;
         CefBrowserHost::CreateBrowserSync(ChildInfo(ChromeRect()), g_client.get(), CHROME_UI, BrowserSettings(), nullptr, nullptr);
@@ -1935,6 +1939,9 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     if (code >= 0) return code;   // a sub-process finished
 
     // ---- browser process from here ----
+    // The window must be created per-monitor DPI aware (fixed at creation). The CEF bootstrap
+    // and Chromium normally do this already; asking again is harmless and does not depend on them.
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                        (LPCWSTR)&RunMain, &g.hmod);
     int argc = 0;

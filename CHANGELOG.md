@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 - Choose the search engine (Google, DuckDuckGo, Bing, Brave or Ecosia) from the `≡` menu. It is used by the address bar and the new tab page.
 
 ### Fixes
+- Zooming a NeonNet page (new tab, history, bookmarks, downloads) no longer zooms the toolbar. Chromium keeps zoom per site, and the toolbar shared one with those pages, so it shrank or was cut off. The toolbar now has its own address (chrome.neonnet.ui).
+- NeonNet asks Windows for per-monitor DPI awareness itself, instead of relying on the engine to do it.
 - The `≡` menu could open far to the left of its button on some screens. It is now placed from the right edge of the window, so a wrong screen-scale value can no longer move it by hundreds of pixels.
 
 ## [1.1.3] - 2026-11-12

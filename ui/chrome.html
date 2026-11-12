@@ -127,12 +127,12 @@ body.find #find{display:flex}
 </div>
 <script>
 const $ = s => document.querySelector(s);
-// Commands go to the host as requests to https://neonnet.ui/cmd (served by the app itself).
+// Commands go to the host as requests to /cmd on this host (served by the app itself).
 // They are sent one at a time so the host sees them in order (typing in the find bar
 // followed by Enter must not arrive as Enter first).
 let queue = Promise.resolve();
 const send = (...a) => {
-  const u = 'https://neonnet.ui/cmd?m=' + encodeURIComponent(a.join('\n'));
+  const u = '/cmd?m=' + encodeURIComponent(a.join('\n'));
   queue = queue.then(() => fetch(u, {cache: 'no-store'})).catch(() => {});
 };
 const NEWTAB = 'https://neonnet.ui/newtab.html';

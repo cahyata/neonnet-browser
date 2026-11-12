@@ -126,6 +126,10 @@ Every response carries `X-Frame-Options: DENY`, so websites cannot load NeonNet'
   The API answers only a **main frame that shows a `https://neonnet.ui/` page** in a tab (403 otherwise). A website's `fetch`, even with `no-cors`, cannot read or change the lists. Changes made through the API post `WM_APP_STORE` to the UI thread, which saves and refreshes the star.
 - **Pages:** `history.html`, `bookmarks.html` and the new tab page fetch this API and build their lists with `textContent`. Links are only made for http, https and file URLs.
 
+## Toolbar host and zoom
+
+The toolbar (`chrome.html`) is served from `https://chrome.neonnet.ui/`, a second host handled by the same `UiSchemeFactory`, while the pages (new tab, history, bookmarks, downloads) stay on `https://neonnet.ui/`. Chromium stores zoom per host. On one shared host, zooming a page also zoomed the toolbar, which sits in a fixed-height area, so it shrank or was clipped. Its `/cmd` requests are relative, so they go to the same host. The `api/` calls still require a main frame on `https://neonnet.ui/`, so the toolbar host cannot use them.
+
 ## Downloads
 
 `OnBeforeDownload` and `OnDownloadUpdated` in `Client` feed `store::DownloadUpdate()`, which creates the entry the first time it sees a CEF download id (so a download is listed as soon as the save dialog opens) and then updates sizes, speed and state. The list is written to `downloads.txt` (`time TAB url TAB name TAB path TAB total TAB state`) like the others, but only when a state changes (start, finish, cancel): saving on every progress report would keep restarting the 2-second save timer. Entries loaded from disk that were still running become `DL_INTERRUPTED`. At most 500 entries are kept.
