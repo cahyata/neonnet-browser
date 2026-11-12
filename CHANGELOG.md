@@ -2,6 +2,11 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.2] - 2026-11-12
+
+### Changes
+- Version bump to test the automatic update from 1.1.1. No functional changes.
+
 ## [1.1.1] - 2026-11-12
 
 ### Fixes
