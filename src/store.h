@@ -32,6 +32,9 @@ bool DeleteBookmark(long long id);
 bool EditBookmark(long long id, const std::wstring& title, const std::wstring& url);
 std::string BookmarksJson();
 
+// Delete the history entries from sinceMs (unix ms) on; 0 deletes all. Returns how many were removed.
+int ClearHistorySince(long long sinceMs);
+
 // Distinct http(s) origins of the pages visited since sinceMs (unix ms), newest first, at most max.
 std::vector<std::wstring> OriginsSince(long long sinceMs, size_t max);
 

@@ -65,7 +65,7 @@ select option{background:var(--bg2);color:var(--cyan)}
   <h2>PRIVACY</h2>
   <div class="row stack">
     <div class="lab"><b>Clear browsing data</b>
-      <span>Deletes the data you tick, for the chosen period. Cookies and site data also sign you out of sites. The cache is always cleared completely. Your history has its own button on the history page.</span>
+      <span>Deletes the data you tick, for the chosen period. Cookies and site data also sign you out of sites. The cache is always cleared completely. Single history entries can be removed on the history page.</span>
       <div class="err" id="clrMsg"></div></div>
     <div class="pair">
       <select id="clrRange">
@@ -77,6 +77,7 @@ select option{background:var(--bg2);color:var(--cyan)}
       </select>
       <button class="tog on" id="clrCookies" title="Cookies and other site data (local storage, offline data, sign-ins)">COOKIES + SITE DATA</button>
       <button class="tog on" id="clrCache" title="Cached images and files">CACHE</button>
+      <button class="tog on" id="clrHistory" title="The pages you visited">HISTORY</button>
       <button class="btn" id="clrGo">CLEAR</button>
     </div>
   </div>
@@ -151,16 +152,17 @@ async function saveHome(){
   else load();
 }
 // Clear browsing data: the app deletes in the background; this page polls until it is done.
-for(const id of ['#clrCookies', '#clrCache']) $(id).onclick = () => $(id).classList.toggle('on');
+for(const id of ['#clrCookies', '#clrCache', '#clrHistory']) $(id).onclick = () => $(id).classList.toggle('on');
 let clearing = false;
 $('#clrGo').onclick = async () => {
   if(clearing) return;
-  const cookies = $('#clrCookies').classList.contains('on'), cache = $('#clrCache').classList.contains('on');
+  const cookies = $('#clrCookies').classList.contains('on'), cache = $('#clrCache').classList.contains('on'),
+        history = $('#clrHistory').classList.contains('on');
   const msg = $('#clrMsg');
-  if(!cookies && !cache){ msg.textContent = 'Tick at least one kind of data.'; return; }
+  if(!cookies && !cache && !history){ msg.style.color = ''; msg.textContent = 'Tick at least one kind of data.'; return; }
   msg.textContent = ''; clearing = true; $('#clrGo').disabled = true; $('#clrGo').textContent = 'CLEARING...';
   try {
-    const q = 'range=' + encodeURIComponent($('#clrRange').value) + '&cookies=' + (cookies ? 1 : 0) + '&cache=' + (cache ? 1 : 0);
+    const q = 'range=' + encodeURIComponent($('#clrRange').value) + '&cookies=' + (cookies ? 1 : 0) + '&cache=' + (cache ? 1 : 0) + '&history=' + (history ? 1 : 0);
     const r = await fetch('/api/cleardata/run?' + q, {cache:'no-store'});
     if(!r.ok) throw new Error('refused');
     let st = null;
@@ -173,6 +175,7 @@ $('#clrGo').onclick = async () => {
     const parts = [];
     if(cookies) parts.push(st.cookies + ' cookie' + (st.cookies === 1 ? '' : 's') + ', site data of ' + st.sites + ' site' + (st.sites === 1 ? '' : 's'));
     if(cache) parts.push('cache');
+    if(history) parts.push(st.history + ' history entr' + (st.history === 1 ? 'y' : 'ies'));
     msg.style.color = 'var(--green)'; msg.textContent = 'Cleared: ' + parts.join(', ') + '.';
     flash();
   } catch(e) {

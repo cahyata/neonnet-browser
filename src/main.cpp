@@ -159,7 +159,7 @@ struct App {
     // atomic because the IO thread answers /api/settings)
     std::atomic<int> engine{ 0 };
     // "Clear browsing data": 0 idle, 1 running, 2 done, with what the last run removed (read by the IO thread)
-    std::atomic<int> clearState{ 0 }, clearCookies{ 0 }, clearSites{ 0 };
+    std::atomic<int> clearState{ 0 }, clearCookies{ 0 }, clearSites{ 0 }, clearHistory{ 0 };
     // running downloads (UI thread only): CEF id -> handle used to cancel them
     std::map<unsigned, CefRefPtr<CefDownloadItemCallback>> dlCallbacks;
     // "Open in system player": CEF download id -> temporary file, while it downloads; and the
@@ -285,8 +285,8 @@ static void LaunchIncognito(const std::wstring& url);
 static std::wstring TempMediaPath(const std::wstring& name, const std::wstring& mime);
 static void OpenTempMedia(const std::wstring& path);
 // Clear browsing data (settings page). cutoffMs is the unix time (ms) from which data is removed, 0 = all time.
-struct ClearReq { long long cutoffMs = 0; bool cookies = false, cache = false; };
-struct ClearSites { long long cutoffMs = 0; int cookies = 0; std::set<std::wstring> hosts; };
+struct ClearReq { long long cutoffMs = 0; bool cookies = false, cache = false, history = false; };
+struct ClearSites { long long cutoffMs = 0; int cookies = 0; bool history = false; std::set<std::wstring> hosts; };
 
 // A video NeonNet cannot play. `callback` is set when Chromium already started a download for it;
 // otherwise the video was opened as a page and `browser` starts the download after the answer.
@@ -1283,21 +1283,22 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         else if (range == L"month") span = 28LL * 24 * 60 * 60 * 1000;
         else if (range == L"all") span = 0;
         bool cookies = QueryParam(query, L"cookies") == L"1", cache = QueryParam(query, L"cache") == L"1";
-        if (span < 0 || (!cookies && !cache))
+        bool history = QueryParam(query, L"history") == L"1";
+        if (span < 0 || (!cookies && !cache && !history))
             return new StringResource("{\"error\":\"invalid request\"}", "application/json", 400);
         if (g.clearState.load() == 1) return new StringResource("{\"error\":\"already running\"}", "application/json", 409);
         auto* req = new ClearReq;
-        req->cookies = cookies; req->cache = cache;
+        req->cookies = cookies; req->cache = cache; req->history = history;
         FILETIME ft; GetSystemTimeAsFileTime(&ft);
         long long nowMs = (((long long)ft.dwHighDateTime << 32 | ft.dwLowDateTime) / 10000) - 11644473600000LL;
         req->cutoffMs = span ? nowMs - span : 0;
-        g.clearState = 1; g.clearCookies = 0; g.clearSites = 0;
+        g.clearState = 1; g.clearCookies = 0; g.clearSites = 0; g.clearHistory = 0;
         if (!PostMessageW(g.hwnd, WM_APP_CLEARDATA, 0, (LPARAM)req)) { delete req; g.clearState = 0; }
         out = "{\"started\":true}";
     }
     else if (path == L"api/cleardata/status") {
         out = "{\"state\":" + std::to_string(g.clearState.load()) + ",\"cookies\":" + std::to_string(g.clearCookies.load()) +
-              ",\"sites\":" + std::to_string(g.clearSites.load()) + "}";
+              ",\"sites\":" + std::to_string(g.clearSites.load()) + ",\"history\":" + std::to_string(g.clearHistory.load()) + "}";
     }
     else if (path == L"api/downloads") out = store::DownloadsJson();
     else if (path == L"api/downloads/remove") changed = store::DownloadRemove(id);
@@ -2025,7 +2026,7 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
 
 class CookieClearer : public CefCookieVisitor {
 public:
-    explicit CookieClearer(long long cutoffMs) { s_.cutoffMs = cutoffMs; }
+    CookieClearer(long long cutoffMs, bool history) { s_.cutoffMs = cutoffMs; s_.history = history; }
     bool Visit(const CefCookie& c, int, int, bool& deleteCookie) override {
         long long createdMs = c.creation.val / 1000 - 11644473600000LL;   // microseconds since 1601
         if (s_.cutoffMs && createdMs < s_.cutoffMs) return true;
@@ -2046,9 +2047,16 @@ private:
     IMPLEMENT_REFCOUNTING(CookieClearer);
 };
 
-static void FinishClear(int cookies, int sites) {
-    g.clearCookies = cookies; g.clearSites = sites;
+static void FinishClear(int cookies, int sites, int history) {
+    g.clearCookies = cookies; g.clearSites = sites; g.clearHistory = history;
     g.clearState = 2;
+}
+
+// History from the cut-off on. Open tabs keep their (now missing) entry ids, which the store ignores.
+static int ClearHistoryData(long long cutoffMs) {
+    int n = store::ClearHistorySince(cutoffMs);
+    if (n) { ScheduleSave(); SendState(); }
+    return n;
 }
 
 static void StartClearData(std::unique_ptr<ClearReq> r) {
@@ -2064,9 +2072,10 @@ static void StartClearData(std::unique_ptr<ClearReq> r) {
         }
     }
     CefRefPtr<CefCookieManager> cm = r->cookies ? ctx->GetCookieManager(nullptr) : nullptr;
-    if (!cm) { FinishClear(0, 0); return; }
-    // the visitor's destructor posts WM_APP_CLEARSITES with the cut-off and what it removed
-    if (!cm->VisitAllCookies(new CookieClearer(r->cutoffMs))) FinishClear(0, 0);
+    if (!cm) { FinishClear(0, 0, r->history ? ClearHistoryData(r->cutoffMs) : 0); return; }
+    // the visitor's destructor posts WM_APP_CLEARSITES with the cut-off and what it removed; the
+    // history is cleared there, after the sites it names have been used to find site data
+    if (!cm->VisitAllCookies(new CookieClearer(r->cutoffMs, r->history))) FinishClear(0, 0, r->history ? ClearHistoryData(r->cutoffMs) : 0);
 }
 
 static void ClearSiteData(std::unique_ptr<ClearSites> s) {
@@ -2094,7 +2103,7 @@ static void ClearSiteData(std::unique_ptr<ClearSites> s) {
             n++;
         }
     }
-    FinishClear(s->cookies, n);
+    FinishClear(s->cookies, n, s->history ? ClearHistoryData(s->cutoffMs) : 0);
 }
 
 static void ShowContextMenu(std::unique_ptr<CtxMenu> m) {

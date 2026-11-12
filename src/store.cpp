@@ -351,6 +351,16 @@ void Forget(long long id, const std::wstring& url) {
         if (it->id == id && it->url == url) { history.erase(it); histDirty = true; return; }
 }
 
+// Delete the history entries from sinceMs on (0 = all of it). Returns how many were removed.
+int ClearHistorySince(long long sinceMs) {
+    Excl x;
+    size_t before = history.size();
+    history.erase(std::remove_if(history.begin(), history.end(), [&](const Entry& e) { return !sinceMs || e.time >= sinceMs; }), history.end());
+    int removed = (int)(before - history.size());
+    if (removed) histDirty = true;
+    return removed;
+}
+
 // Distinct http(s) origins (scheme://host[:port]) of the pages visited since sinceMs, newest first.
 std::vector<std::wstring> OriginsSince(long long sinceMs, size_t max) {
     Shared s;
