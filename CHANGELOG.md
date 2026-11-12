@@ -2,6 +2,11 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.3] - 2026-11-12
+
+### Fixes
+- The loading bar animation now runs only while a page loads. It used to run all the time, using about 14% of a CPU core and some GPU even when idle.
+
 ## [1.1.2] - 2026-11-12
 
 ### Changes
