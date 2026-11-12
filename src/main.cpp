@@ -64,6 +64,7 @@ static const UINT WM_APP_CMD = WM_APP + 1;      // lParam = new std::wstring (ch
 static const UINT WM_APP_OPEN = WM_APP + 2;     // lParam = new std::wstring (url from a 2nd instance)
 static const UINT WM_APP_UPDATE = WM_APP + 3;   // lParam = new UpdateMsg (from the updater thread)
 static const UINT WM_APP_STORE = WM_APP + 4;    // history/bookmarks changed by a neonnet.ui page
+static const UINT WM_APP_FINISH = WM_APP + 5;   // all browsers closed: destroy the window (posted, not called from OnBeforeClose)
 
 static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5;
 static const ULONGLONG UPDATE_INTERVAL_MS = 24ull * 60 * 60 * 1000;   // check at most once a day
@@ -550,7 +551,8 @@ static void CloseTab(int id) {
 static size_t OpenBrowsers();
 static void MaybeFinishClose() {
     if (g.closing && OpenBrowsers() == 0 && g.devtools == 0) {
-        DestroyWindow(g.hwnd);
+        // Post it: destroying the window from inside OnBeforeClose crashes libcef while the loop unwinds.
+        static bool posted = false; if (!posted) { posted = true; PostMessageW(g.hwnd, WM_APP_FINISH, 0, 0); }
     }
 }
 
@@ -1769,6 +1771,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_CLOSE: BeginClose(); return 0;
+    case WM_APP_FINISH: DestroyWindow(hwnd); return 0;
     case WM_DESTROY: CefQuitMessageLoop(); return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
