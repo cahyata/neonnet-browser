@@ -99,6 +99,7 @@ The tab strip and address bar are an ordinary HTML page (`ui/chrome.html`) in a 
 | `https://neonnet.ui/history.html` | `IDR_HISTORY` | History page (Ctrl+H) |
 | `https://neonnet.ui/bookmarks.html` | `IDR_BOOKMARKS` | Bookmarks page (Ctrl+Shift+O) |
 | `https://neonnet.ui/downloads.html` | `IDR_DOWNLOADS` | Downloads page (Ctrl+J) |
+| `https://neonnet.ui/settings.html` | `IDR_SETTINGS` | Settings page (Ctrl+,) |
 | `https://neonnet.ui/cmd?...` | | Command channel (answers 204) |
 | `https://neonnet.ui/api/...` | | History and bookmarks data (JSON) |
 
@@ -121,7 +122,8 @@ Every response carries `X-Frame-Options: DENY`, so websites cannot load NeonNet'
   | `downloads` | Up to 300 downloads, newest first (state, sizes, speed, `exists`, `openable`) |
   | `downloads/remove?id=`, `downloads/clear` | Remove one finished download from the list, or all finished ones |
   | `downloads/cancel?id=`, `downloads/open?id=`, `downloads/show?id=` | Posted to the UI thread as `WM_APP_DOWNLOAD` (see Downloads below) |
-  | `settings` | `{"search": "<search URL prefix>"}` for the new tab page |
+  | `settings` | Current settings (search engine, engine list and search URL, scanlines, automatic updates, installed copy, home page, ask-where-to-save, Downloads folder, versions) |
+  | `settings/set?key=&value=` | Change one setting. Keys: `search` (an engine id), `scan`, `autoUpdate`, `askDownload` (`0` or `1`), `home` (empty, or an http, https or file address under 500 characters). Anything else answers 400 |
 
   The API answers only a **main frame that shows a `https://neonnet.ui/` page** in a tab (403 otherwise). A website's `fetch`, even with `no-cors`, cannot read or change the lists. Changes made through the API post `WM_APP_STORE` to the UI thread, which saves and refreshes the star.
 - **Pages:** `history.html`, `bookmarks.html` and the new tab page fetch this API and build their lists with `textContent`. Links are only made for http, https and file URLs.
@@ -138,9 +140,17 @@ The toolbar (`chrome.html`) is served from `https://chrome.neonnet.ui/`, a secon
 
 `OnContextInitialized` also sets the Chromium preference `download_bubble.partial_view_enabled` to false (the "Don't show when downloads finish" option). Without it Chromium pops up its own unthemed download bubble after every download. A `disable-features=DownloadBubble` switch did not remove it; the preference does.
 
-## Search engine
+## Settings
 
-`SEARCH_ENGINES` in `main.cpp` lists the engines. The chosen index is `g.engine` (atomic, because the IO thread reads it for `/api/settings`) and is saved as the registry string `SearchEngine` (`google`, `duckduckgo`, ...). The `≡` menu item `Search engine` (`CMD_SEARCH`) switches to the next one. The state sent to the chrome UI carries `search`, the URL prefix that `chrome.html` appends the encoded query to; `newtab.html` reads it from `/api/settings`.
+Values live in the registry (`HKCU\Software\NeonNet`): `SearchEngine` (string, an id from `SEARCH_ENGINES`), `Scanlines` and `AutoUpdate` (DWORD), `HomePage` (string, absent = new tab page) and `AskDownload` (DWORD, absent = 1). `ServeApi()` runs on the IO thread, so `api/settings` reads only atomics (`g.engine`, `g.scan`) and the registry. `api/settings/set` validates the key and value there, then applies the change with `SendMessageTimeout(WM_APP_SETTING)` to the UI thread and waits (at most 2 seconds), so the page can read the new value straight back. `ApplySetting()` on the UI thread writes the registry and refreshes what depends on it: a changed engine goes to the toolbar in the state message (`search`, the URL prefix that `chrome.html` appends the encoded query to), scanlines reuse `CMD_SCAN`. `newtab.html` reads `searchUrl` from `api/settings`. `HomeUrl()` is used by the home button (`CMD_HOME`) and for the first tab. With `AskDownload` off, `OnBeforeDownload` calls `Continue(path, false)` with a path from `DownloadTarget()` in the Downloads folder (name sanitised, `" (n)"` added until the file is new).
+
+## Address bar suggestions
+
+The toolbar fetches `/suggest?q=` from its own host (`chrome.neonnet.ui`); the factory answers only the toolbar browser (403 for any other frame), and the text never leaves the process. `store::SuggestJson()` returns up to 8 entries: bookmarks and history entries that contain every word of the query (case-insensitive, in the address or title), merged by address, scored by: address starts with the typed text (+60), else host starts with the first word (+45) or contains it (+25); a title word starts with a typed word (+8); bookmark (+25); visits (1.2 each, up to 25); recency (up to +20, decaying over about 10 days). `chrome.html` debounces input by 40 ms, drops answers that arrive out of order, and builds the list with `textContent`.
+
+The list needs room over the page, so the toolbar browser grows: `chrome.html` measures the list and sends `dropdown <height in CSS px>` (0 when closed). `ChromeHostRect()` makes the toolbar window that tall and `Place()` raises it above the page windows. `ContentRect()` does not change, so the page below is not re-laid out. The window width does not change; a width change closes the list (a height change is expected, because the host causes it). Arrow keys, Enter and Esc are handled in the page itself.
+
+## Find in page
 
 ## Find in page
 

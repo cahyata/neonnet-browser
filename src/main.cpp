@@ -60,6 +60,7 @@ static const wchar_t* CHROME_UI = L"https://chrome.neonnet.ui/chrome.html";
 static const wchar_t* HISTORY_PAGE = L"https://neonnet.ui/history.html";
 static const wchar_t* BOOKMARKS_PAGE = L"https://neonnet.ui/bookmarks.html";
 static const wchar_t* DOWNLOADS_PAGE = L"https://neonnet.ui/downloads.html";
+static const wchar_t* SETTINGS_PAGE = L"https://neonnet.ui/settings.html";
 static const wchar_t* APP_DIR_NAME = L"NeonNet";
 static const wchar_t* REG_KEY = L"Software\\NeonNet";
 static const wchar_t* UNINSTALL_KEY = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\NeonNet";
@@ -71,6 +72,7 @@ static const UINT WM_APP_UPDATE = WM_APP + 3;   // lParam = new UpdateMsg (from 
 static const UINT WM_APP_STORE = WM_APP + 4;    // history/bookmarks changed by a neonnet.ui page
 static const UINT WM_APP_FINISH = WM_APP + 5;   // all browsers closed: destroy the window (posted, not called from OnBeforeClose)
 static const UINT WM_APP_DOWNLOAD = WM_APP + 6; // wParam = DlAction, lParam = download id (from the downloads page)
+static const UINT WM_APP_SETTING = WM_APP + 7;  // lParam = const std::pair<std::wstring, std::wstring>* (key, value; from the settings page)
 
 static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5;
 static const ULONGLONG UPDATE_INTERVAL_MS = 24ull * 60 * 60 * 1000;   // check at most once a day
@@ -81,7 +83,7 @@ enum Cmd {
     CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
     CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE,
     CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_HISTORY,
-    CMD_DOWNLOADS, CMD_SEARCH
+    CMD_DOWNLOADS, CMD_SETTINGS
 };
 enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW };
 
@@ -121,7 +123,8 @@ struct App {
     int creatingTab = 0;            // tab id while CreateBrowserSync runs
     bool creatingChrome = false;
     int active = 0, nextId = 1;
-    bool scan = true;
+    std::atomic<bool> scan{ true };   // atomic: the IO thread reads it for /api/settings
+    int dropNeed = 0;                 // address bar suggestions open: toolbar height needed, CSS px (0 = closed)
     bool fsUser = false, fsElement = false, fullscreen = false;
     WINDOWPLACEMENT fsPrev{ sizeof(WINDOWPLACEMENT) };
     std::wstring hoverText, download;
@@ -253,6 +256,8 @@ static void RegSetBin(const wchar_t* name, DWORD type, const void* data, DWORD s
     }
 }
 
+static std::wstring DownloadTarget(std::wstring name);   // below, next to ApplySetting
+
 // History and bookmarks are written to disk shortly after they change.
 static void ScheduleSave() { if (g.hwnd) SetTimer(g.hwnd, TIMER_SAVE, 2000, nullptr); }
 
@@ -284,6 +289,17 @@ static RECT ChromeRect() {
     RECT rc; GetClientRect(g.hwnd, &rc); int b = Frame();
     return { b, b, rc.right - b, b + S(CHROME_DIP + (g.findOpen ? FIND_DIP : 0)) };
 }
+// The toolbar browser grows downwards over the page while the address bar suggestions are
+// open, and is raised above the page for it. ContentRect() does not change, so the page
+// underneath is not re-laid out.
+static RECT ChromeHostRect() {
+    RECT r = ChromeRect();
+    if (g.dropNeed > 0 && !g.fullscreen) {
+        RECT rc; GetClientRect(g.hwnd, &rc);
+        r.bottom = std::min((int)rc.bottom - Frame(), std::max((int)r.bottom, (int)r.top + S(g.dropNeed)));
+    }
+    return r;
+}
 static RECT StatusRect() { RECT rc; GetClientRect(g.hwnd, &rc); int b = Frame(); return { b, rc.bottom - b - S(STATUS_DIP), rc.right - b, rc.bottom - b }; }
 static RECT ContentRect() {
     RECT rc; GetClientRect(g.hwnd, &rc);
@@ -300,13 +316,14 @@ static void UpdateRegion() {
     SetWindowRgn(g.hwnd, CreatePolygonRgn(pts, 6, WINDING), TRUE);
 }
 
-static void Place(CefRefPtr<CefBrowser> b, const RECT& r, bool visible) {
+static void Place(CefRefPtr<CefBrowser> b, const RECT& r, bool visible, bool raise = false) {
     if (!b) return;
     HWND w = b->GetHost()->GetWindowHandle();
     if (!w) return;
     bool wasVisible = IsWindowVisible(w) != FALSE;
     if (visible) {
-        SetWindowPos(w, nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        SetWindowPos(w, raise ? HWND_TOP : nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                     (raise ? 0 : SWP_NOZORDER) | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         if (!wasVisible) b->GetHost()->WasHidden(false);
     } else if (wasVisible) {
         ShowWindow(w, SW_HIDE);
@@ -316,7 +333,7 @@ static void Place(CefRefPtr<CefBrowser> b, const RECT& r, bool visible) {
 
 static void Layout() {
     if (!g.hwnd) return;
-    if (g.chrome) Place(g.chrome, ChromeRect(), !g.fullscreen);
+    if (g.chrome) Place(g.chrome, ChromeHostRect(), !g.fullscreen, g.dropNeed > 0);
     RECT content = ContentRect();
     for (auto& t : g.tabs) Place(t->browser, content, t->id == g.active);
     UpdateRegion();
@@ -764,6 +781,7 @@ public:
             case 'D': if (!repeat) cmd = CMD_BOOKMARK; break;
             case 'H': if (!repeat) cmd = CMD_HISTORY; break;
             case 'J': if (!repeat) cmd = CMD_DOWNLOADS; break;
+            case VK_OEM_COMMA: if (!repeat) cmd = CMD_SETTINGS; break;
             case 'O': if (shift && !repeat) cmd = CMD_BOOKMARKS; break;
             case 'W': case VK_F4: if (!repeat) cmd = CMD_CLOSETAB; break;
             case 'L': cmd = CMD_FOCUSURL; break;
@@ -802,7 +820,9 @@ public:
         // listed on the downloads page from the moment the save dialog opens
         if (store::DownloadUpdate(item->GetId(), item->GetURL().ToWString(), L"", suggested_name.ToWString(), 0, 0, 0, store::DL_ACTIVE))
             ScheduleSave();
-        callback->Continue("", true);   // ask where to save
+        std::wstring target = RegGetDword(L"AskDownload", 1) ? std::wstring() : DownloadTarget(suggested_name.ToWString());
+        if (target.empty()) callback->Continue("", true);   // ask where to save
+        else callback->Continue(target, false);              // settings: save to the Downloads folder
         return true;
     }
     void OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback> cb) override {
@@ -910,9 +930,43 @@ static std::wstring QueryParam(const std::wstring& query, const wchar_t* name) {
     return {};
 }
 
-// https://neonnet.ui/api/* : history and bookmarks for NeonNet's own pages (new tab,
-// history, bookmarks). Only a main frame that shows a neonnet.ui page may call it, so
-// websites can neither read nor change the lists.
+static std::wstring RegGetString(const wchar_t* name);
+static bool AutoUpdateEnabled();
+static bool IsInstalledCopy();
+
+static std::string JsonUtf8(const std::wstring& w) {
+    std::string s = CefString(w).ToString(), o = "\"";
+    for (char c : s) {
+        unsigned char u = (unsigned char)c;
+        if (c == '"') o += "\\\"";
+        else if (c == '\\') o += "\\\\";
+        else if (c == '<') o += "\\u003c";
+        else if (u < 0x20) { char b[8]; sprintf_s(b, "\\u%04x", u); o += b; }
+        else o += c;
+    }
+    return o + "\"";
+}
+
+// Settings for the settings page. Runs on the IO thread: only atomics and the registry.
+static std::string SettingsJson() {
+    auto b = [](bool v) { return v ? "true" : "false"; };
+    std::string o = "{\"searchUrl\":" + JsonUtf8(CurrentEngine().url) + ",\"search\":" + JsonUtf8(CurrentEngine().id) + ",\"engines\":[";
+    for (int i = 0; i < SEARCH_ENGINE_COUNT; i++) {
+        if (i) o += ",";
+        o += "{\"id\":" + JsonUtf8(SEARCH_ENGINES[i].id) + ",\"name\":" + JsonUtf8(SEARCH_ENGINES[i].name) + "}";
+    }
+    std::wstring chromium = std::to_wstring(cef_version_info(4)) + L"." + std::to_wstring(cef_version_info(5)) + L"." +
+                            std::to_wstring(cef_version_info(6)) + L"." + std::to_wstring(cef_version_info(7));
+    o += std::string("],\"scan\":") + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
+         ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
+         ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"version\":" + JsonUtf8(APP_VERSION) +
+         ",\"chromium\":" + JsonUtf8(chromium) + "}";
+    return o;
+}
+
+// https://neonnet.ui/api/* : history, bookmarks, downloads and settings for NeonNet's own
+// pages. Only a main frame that shows a neonnet.ui page may call it, so websites can neither
+// read nor change anything.
 static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const std::wstring& query) {
     std::string out = "{}";
     bool changed = false;
@@ -935,11 +989,22 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         WPARAM act = path == L"api/downloads/cancel" ? DLA_CANCEL : path == L"api/downloads/open" ? DLA_OPEN : DLA_SHOW;
         PostMessageW(g.hwnd, WM_APP_DOWNLOAD, act, (LPARAM)id);
     }
-    else if (path == L"api/settings") {
-        // JsonStr (UTF-16) is only used on the UI thread; the engine table is plain ASCII.
-        std::string url;
-        for (const wchar_t* c = CurrentEngine().url; *c; c++) url += (char)*c;
-        out = "{\"search\":\"" + url + "\"}";
+    else if (path == L"api/settings") out = SettingsJson();
+    else if (path == L"api/settings/set") {
+        std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
+        bool ok = false;
+        if (key == L"search") { for (const auto& e : SEARCH_ENGINES) if (val == e.id) ok = true; }
+        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload") ok = (val == L"0" || val == L"1");
+        else if (key == L"home") {
+            std::wstring low = val; for (auto& ch : low) ch = towlower(ch);
+            ok = val.empty() || (val.size() < 500 && (low.rfind(L"http://", 0) == 0 || low.rfind(L"https://", 0) == 0 || low.rfind(L"file:///", 0) == 0));
+        }
+        if (!ok) return new StringResource("{\"error\":\"invalid value\"}", "application/json", 400);
+        // Applied on the UI thread, and waited for, so that the page can read the result back.
+        std::pair<std::wstring, std::wstring> msg(key, val);
+        DWORD_PTR res = 0;
+        SendMessageTimeoutW(g.hwnd, WM_APP_SETTING, 0, (LPARAM)&msg, SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &res);
+        out = "{\"ok\":true}";
     }
     else return new StringResource("not found", "text/plain", 404);
     if (changed) PostMessageW(g.hwnd, WM_APP_STORE, 0, 0);
@@ -967,6 +1032,11 @@ public:
             }
             return new StringResource("", "text/plain", 204);
         }
+        if (path == L"suggest") {
+            // Address bar suggestions: only for the toolbar.
+            if (!(browser && browser->GetIdentifier() == g.chromeId.load())) return new StringResource("", "text/plain", 403);
+            return new StringResource(store::SuggestJson(QueryParam(query, L"q"), 8), "application/json", 200);
+        }
         if (path.rfind(L"api/", 0) == 0) {
             bool trusted = browser && browser->GetIdentifier() != g.chromeId.load() && frame && frame->IsMain() &&
                            frame->GetURL().ToWString().rfind(UI_HOST, 0) == 0;
@@ -979,6 +1049,7 @@ public:
         else if (path == L"history.html") id = IDR_HISTORY;
         else if (path == L"bookmarks.html") id = IDR_BOOKMARKS;
         else if (path == L"downloads.html") id = IDR_DOWNLOADS;
+        else if (path == L"settings.html") id = IDR_SETTINGS;
         std::string body;
         if (id && LoadUi(id, body)) return new StringResource(std::move(body), "text/html", 200);
         return new StringResource("not found", "text/plain", 404);
@@ -1020,6 +1091,12 @@ static std::wstring RegGetString(const wchar_t* name) {
     wchar_t buf[512] = {}; DWORD sz = sizeof(buf);
     if (RegGetValueW(HKEY_CURRENT_USER, REG_KEY, name, RRF_RT_REG_SZ, nullptr, buf, &sz) != ERROR_SUCCESS) return {};
     return buf;
+}
+
+// Home button and start-up page: the page chosen in the settings, else the new tab page.
+static std::wstring HomeUrl() {
+    std::wstring h = RegGetString(L"HomePage");
+    return h.empty() ? std::wstring(NEWTAB) : h;
 }
 
 static void PostUpdate(const UpdateMsg& m) {
@@ -1232,7 +1309,7 @@ static void ExecCmd(int cmd) {
     switch (cmd) {
     case CMD_NEWTAB: CreateTab(NEWTAB, true); break;
     case CMD_CLOSETAB: if (a) CloseTab(a->id); break;
-    case CMD_HOME: if (b) b->GetMainFrame()->LoadURL(NEWTAB); break;
+    case CMD_HOME: if (b) b->GetMainFrame()->LoadURL(HomeUrl()); break;
     case CMD_RELOAD:
         if (b) { if (!a->errorUrl.empty()) b->GetMainFrame()->LoadURL(a->errorUrl); else b->Reload(); }
         break;
@@ -1288,15 +1365,7 @@ static void ExecCmd(int cmd) {
     case CMD_BOOKMARKS: OpenPage(BOOKMARKS_PAGE); break;
     case CMD_HISTORY: OpenPage(HISTORY_PAGE); break;
     case CMD_DOWNLOADS: OpenPage(DOWNLOADS_PAGE); break;
-    case CMD_SEARCH: {
-        int n = (g.engine.load() + 1) % SEARCH_ENGINE_COUNT;
-        g.engine = n;
-        const SearchEngine& e = SEARCH_ENGINES[n];
-        RegSetBin(L"SearchEngine", REG_SZ, e.id, (DWORD)((wcslen(e.id) + 1) * sizeof(wchar_t)));
-        ShowNotice(L"SEARCH ENGINE: " + Upper(e.name));
-        SendState();
-        break;
-    }
+    case CMD_SETTINGS: OpenPage(SETTINGS_PAGE); break;
     }
     // zoom changes are async; refresh the status bar shortly after
     if (cmd == CMD_ZOOMIN || cmd == CMD_ZOOMOUT || cmd == CMD_ZOOMRESET) SetTimer(g.hwnd, TIMER_ZOOM, 150, nullptr);
@@ -1577,11 +1646,11 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
     add(CMD_ZOOMRESET, L"Reset zoom", L"Ctrl+0");
     sep();
     add(CMD_PRINT, L"Print", L"Ctrl+P");
-    add(CMD_SEARCH, L"Search engine", CurrentEngine().name);   // click to switch to the next one
     add(CMD_SCAN, L"Scanlines", L"", false, g.scan);
     add(CMD_FULLSCREEN, L"Fullscreen", L"F11", false, g.fullscreen);
     add(CMD_DEVTOOLS, L"Developer tools", L"F12");
     sep();
+    add(CMD_SETTINGS, L"Settings", L"Ctrl+,");
     if (g.upd == U_READY) add(CMD_UPDATE_RESTART, L"Restart to update to v" + g.updVersion);
     if (g.upd == U_AVAILABLE) add(CMD_UPDATE_PAGE, L"Download v" + g.updVersion);
     add(CMD_UPDATE_CHECK, L"Check for updates", L"", g.upd == U_CHECKING || g.upd == U_DOWNLOADING);
@@ -1618,6 +1687,12 @@ static void OnChromeCommand(const std::wstring& msg) {
     else if (cmd == L"reload") ExecCmd(CMD_RELOAD);
     else if (cmd == L"stop") ExecCmd(CMD_STOP);
     else if (cmd == L"newtab") ExecCmd(CMD_NEWTAB);
+    else if (cmd == L"home") ExecCmd(CMD_HOME);
+    else if (cmd == L"dropdown") {
+        // address bar suggestions: the toolbar height they need (CSS px, 0 = closed)
+        int n = std::max(0, std::min(_wtoi(arg.c_str()), 520));
+        if (n != g.dropNeed) { g.dropNeed = n; Layout(); }
+    }
     else if (cmd == L"close") CloseTab(_wtoi(arg.c_str()));
     else if (cmd == L"select") SelectTab(_wtoi(arg.c_str()), true);
     else if (cmd == L"scan") ExecCmd(CMD_SCAN);
@@ -1698,7 +1773,7 @@ public:
         g.creatingChrome = true;
         CefBrowserHost::CreateBrowserSync(ChildInfo(ChromeRect()), g_client.get(), CHROME_UI, BrowserSettings(), nullptr, nullptr);
         g.creatingChrome = false;
-        CreateTab(g.startUrl.empty() ? NEWTAB : g.startUrl, true);
+        CreateTab(g.startUrl.empty() ? HomeUrl() : g.startUrl, true);
         Layout();
     }
 
@@ -1777,6 +1852,45 @@ static void MakeFont() {
 
 // ---------------------------------------------------------------------------
 // Window procedure
+
+// A change made on the settings page (already validated on the IO thread). Runs on the UI thread.
+static void ApplySetting(const std::wstring& key, const std::wstring& val) {
+    if (key == L"search") {
+        for (int i = 0; i < SEARCH_ENGINE_COUNT; i++) {
+            if (val != SEARCH_ENGINES[i].id) continue;
+            g.engine = i;
+            RegSetBin(L"SearchEngine", REG_SZ, SEARCH_ENGINES[i].id, (DWORD)((wcslen(SEARCH_ENGINES[i].id) + 1) * sizeof(wchar_t)));
+            SendState();   // the toolbar needs the new search address
+        }
+    } else if (key == L"scan") {
+        if ((val == L"1") != g.scan.load()) ExecCmd(CMD_SCAN);
+    } else if (key == L"autoUpdate") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"AutoUpdate", REG_DWORD, &v, sizeof(v));
+    } else if (key == L"askDownload") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"AskDownload", REG_DWORD, &v, sizeof(v));
+    } else if (key == L"home") {
+        if (val.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, L"HomePage");
+        else RegSetBin(L"HomePage", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
+    }
+}
+
+// Where a download goes when the save dialog is turned off: the Downloads folder, with
+// " (1)", " (2)" ... added to the name when a file of that name exists.
+static std::wstring DownloadTarget(std::wstring name) {
+    for (auto& c : name) if (wcschr(L"\\/:*?\"<>|", c) || c < 0x20) c = L'_';
+    if (name.empty() || name == L"." || name == L"..") name = L"download";
+    std::wstring dir = KnownFolder(FOLDERID_Downloads);
+    if (dir.empty()) return {};
+    size_t dot = name.find_last_of(L'.');
+    std::wstring stem = dot == std::wstring::npos || dot == 0 ? name : name.substr(0, dot);
+    std::wstring ext = dot == std::wstring::npos || dot == 0 ? L"" : name.substr(dot);
+    std::wstring path = dir + L"\\" + name;
+    for (int i = 1; i < 1000 && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; i++)
+        path = dir + L"\\" + stem + L" (" + std::to_wstring(i) + L")" + ext;
+    return path;
+}
 
 // Cancel, open or show a download for the downloads page. Only the id comes from the page;
 // the file is looked up in the list, and programs and scripts are never opened.
@@ -1872,6 +1986,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APP_UPDATE: { std::unique_ptr<UpdateMsg> m((UpdateMsg*)lp); if (!g.closing) OnUpdateMsg(*m); return 0; }
     case WM_APP_STORE: ScheduleSave(); SendState(); return 0;
     case WM_APP_DOWNLOAD: DoDownloadAction((int)wp, (long long)lp); return 0;
+    case WM_APP_SETTING: {
+        auto* m = (const std::pair<std::wstring, std::wstring>*)lp;   // owned by the sender, which waits for us
+        if (m) ApplySetting(m->first, m->second);
+        return 0;
+    }
     case WM_SETFOCUS: FocusPage(); return 0;
     case WM_APP_CMD: { std::unique_ptr<std::wstring> m((std::wstring*)lp); if (!g.closing) OnChromeCommand(*m); return 0; }
     case WM_APP_OPEN: {

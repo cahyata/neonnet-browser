@@ -28,6 +28,9 @@ bool DeleteBookmark(long long id);
 bool EditBookmark(long long id, const std::wstring& title, const std::wstring& url);
 std::string BookmarksJson();
 
+// Address bar suggestions for the toolbar: JSON [{url, title, bookmark}], best first.
+std::string SuggestJson(const std::wstring& query, size_t limit);
+
 // Downloads. The list is saved like the others; a download that was still running when
 // NeonNet closed is listed as interrupted next time.
 enum DownloadState { DL_ACTIVE = 0, DL_COMPLETE = 1, DL_CANCELED = 2, DL_INTERRUPTED = 3 };

@@ -20,7 +20,9 @@ NeonNet ships its own Chromium engine. It does not need Edge, WebView2 or any ot
 - **Chromium sandbox enabled:** renderer and GPU processes run isolated.
 - **Per-user installer:** no admin rights needed, uninstall from Settings > Apps.
 - **Find in page, bookmarks and history:** Ctrl+F, Ctrl+D, Ctrl+H, and Ctrl+Shift+T to reopen a closed tab.
-- **Downloads page and search engine choice:** Ctrl+J lists every download with progress, cancel, open and show-in-folder; the `≡` menu switches the search engine.
+- **Downloads page:** Ctrl+J lists every download with progress, cancel, open and show-in-folder.
+- **Address bar suggestions:** matches from your bookmarks and history appear as you type, with inline completion.
+- **Settings page:** Ctrl+, for the search engine, home page, download behaviour, scanlines and automatic updates.
 - **Automatic updates:** new releases are downloaded in the background, checked against a SHA-256 checksum, and installed when NeonNet closes. Can be turned off.
 
 ## Download and install
@@ -67,6 +69,7 @@ neonnet-browser/
 │  ├─ newtab.html       new tab page
 │  ├─ history.html      history page
 │  ├─ downloads.html    downloads page
+│  ├─ settings.html     settings page
 │  └─ bookmarks.html    bookmarks page
 ├─ installer/
 │  ├─ setup.cpp         installer

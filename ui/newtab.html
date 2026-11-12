@@ -71,12 +71,12 @@ form button:hover{background:var(--cyan)}
     <a href="https://mail.google.com"><span>05</span>GMAIL</a>
     <a href="https://www.google.com/maps"><span>06</span>MAPS</a>
   </div>
-  <div id="more"><a href="https://neonnet.ui/bookmarks.html">&#9733; BOOKMARKS</a><a href="https://neonnet.ui/history.html">&#9201; HISTORY</a><a href="https://neonnet.ui/downloads.html">&#11015; DOWNLOADS</a></div>
+  <div id="more"><a href="https://neonnet.ui/bookmarks.html">&#9733; BOOKMARKS</a><a href="https://neonnet.ui/history.html">&#9201; HISTORY</a><a href="https://neonnet.ui/downloads.html">&#11015; DOWNLOADS</a><a href="https://neonnet.ui/settings.html">&#9881; SETTINGS</a></div>
 </main>
 <div id="scan"></div>
 <script>
 let searchBase = 'https://www.google.com/search?q=';
-fetch('/api/settings', {cache:'no-store'}).then(r => r.json()).then(s => { if(/^https:\/\//.test(s.search)) searchBase = s.search; }).catch(() => {});
+fetch('/api/settings', {cache:'no-store'}).then(r => r.json()).then(s => { if(/^https:\/\//.test(s.searchUrl)) searchBase = s.searchUrl; }).catch(() => {});
 function toUrl(v){
   v = v.trim(); if(!v) return null;
   if(/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return v;

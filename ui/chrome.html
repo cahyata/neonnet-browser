@@ -91,6 +91,19 @@ body.find #find{display:flex}
 .fb:hover{color:var(--bg);background:var(--yellow)}
 #fcase{height:22px;padding:0 6px;border:1px solid var(--muted);color:var(--muted)}
 #fcase.on{border-color:var(--cyan);color:var(--cyan)}
+
+/* address bar suggestions: the host makes this window taller while the list is open */
+#sug{position:absolute;z-index:20;display:none;background:var(--bg2);border:1px solid var(--cyan);border-top:1px solid var(--pink);
+  box-shadow:0 10px 24px rgba(0,0,0,.55)}
+#sug.on{display:block}
+.sg{display:flex;gap:10px;align-items:center;height:30px;padding:0 10px;cursor:pointer;white-space:nowrap}
+.sg .i{width:18px;text-align:center;flex:none;color:var(--muted)}
+.sg .tt{color:#e8d8ff;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;max-width:55%}
+.sg .uu{color:var(--muted);overflow:hidden;text-overflow:ellipsis;flex:1 1 0;min-width:0}
+.sg.bm .i{color:var(--yellow)}
+.sg.q .i{color:var(--pink)}
+.sg:hover,.sg.sel{background:rgba(0,229,255,.14)}
+.sg:hover .tt,.sg.sel .tt{color:var(--cyan)}
 </style>
 </head>
 <body>
@@ -125,6 +138,7 @@ body.find #find{display:flex}
   <button id="fcase" title="Match case">Aa</button>
   <button class="fb" id="fclose" title="Close (Esc)">[&#10005;]</button>
 </div>
+<div id="sug"></div>
 <script>
 const $ = s => document.querySelector(s);
 // Commands go to the host as requests to /cmd on this host (served by the app itself).
@@ -218,19 +232,103 @@ $('#top').addEventListener('mousedown', e => { if(e.button === 0 && e.detail ===
 $('#top').addEventListener('dblclick', e => { if(isDragArea(e.target)) send('max'); });
 
 const url = $('#url');
-url.addEventListener('focus', () => { editing = true; setTimeout(() => url.select(), 0); });
-url.addEventListener('blur', () => { editing = false; url.value = shownUrl(state.url); });
-url.addEventListener('keydown', e => {
-  if(e.key === 'Enter'){ go(); }
-  else if(e.key === 'Escape'){ url.value = shownUrl(state.url); url.blur(); send('focusPage'); }
+
+// ---- address bar suggestions ----------------------------------------------------------
+// While the list is open the host makes this window taller (send('dropdown', height)) and
+// raises it over the page. Arrow keys fill the address bar with the chosen entry; Enter
+// opens it; Esc closes the list and brings back what was typed.
+const sug = $('#sug');
+let sugItems = [], sugSel = -1, sugTyped = '', sugReq = 0, sugTimer = 0, sugOpen = false, sugNeed = 0;
+const bareUrl = u => u.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/+$/, '');
+
+function closeSug(){
+  clearTimeout(sugTimer); sugReq++;
+  if(!sugOpen) return;
+  sugOpen = false; sugSel = -1; sugItems = []; sug.classList.remove('on'); sug.textContent = '';
+  if(sugNeed){ sugNeed = 0; send('dropdown', 0); }
+}
+function pick(i){
+  const u = i < 0 ? toUrl(sugTyped) : sugItems[i].url;
+  if(u){ closeSug(); editing = false; url.blur(); send('navigate', u); }
+}
+function renderSug(){
+  sug.textContent = '';
+  const row = (cls, icon, title, sub, i) => {
+    const d = document.createElement('div'); d.className = 'sg ' + cls + (i === sugSel ? ' sel' : '');
+    const a = document.createElement('span'); a.className = 'i'; a.textContent = icon;
+    const t = document.createElement('span'); t.className = 'tt'; t.textContent = title;
+    d.append(a, t);
+    if(sub){ const s = document.createElement('span'); s.className = 'uu'; s.textContent = sub; d.appendChild(s); }
+    d.onmousedown = e => { e.preventDefault(); pick(i); };   // no blur: the click must still reach us
+    sug.appendChild(d);
+  };
+  const typed = sugTyped.trim();
+  const target = toUrl(typed);
+  const isSearch = target && target.startsWith(state.search || 'https://www.google.com/search?q=');
+  row('q', '>>', typed, isSearch ? 'search the web' : 'go to this address', -1);
+  sugItems.forEach((s, i) => row(s.bookmark ? 'bm' : '', s.bookmark ? '★' : '⏱', s.title || bareUrl(s.url), s.title ? bareUrl(s.url) : '', i));
+  const r =$('#addr').getBoundingClientRect();
+  sug.style.left = r.left + 'px'; sug.style.width = r.width + 'px'; sug.style.top = r.bottom + 'px';
+  sug.classList.add('on'); sugOpen = true;
+  const need = Math.ceil(sug.getBoundingClientRect().bottom) + 8;
+  if(need !== sugNeed){ sugNeed = need; send('dropdown', need); }
+}
+// "git" -> "hub.com/user" when the best suggestion starts with what was typed
+function completion(q, best){
+  if(!best || /\s/.test(q) || /^[a-z][a-z0-9+.-]*:/i.test(q) || !/^https:\/\//i.test(best.url)) return '';
+  const b = bareUrl(best.url);
+  return b.length > q.length && b.toLowerCase().startsWith(q.toLowerCase()) ? b.slice(q.length) : '';
+}
+function fetchSug(q, allowComplete){
+  const my = ++sugReq;
+  fetch('/suggest?q=' + encodeURIComponent(q), {cache: 'no-store'}).then(r => r.json()).then(list => {
+    if(my !== sugReq || !editing || url.value !== q) return;
+    sugItems = list; sugSel = -1; renderSug();
+    if(allowComplete && url.selectionStart === q.length && url.selectionEnd === q.length){
+      const c = completion(q, list[0]);
+      if(c){ url.value = q + c; url.setSelectionRange(q.length, url.value.length); }
+    }
+  }).catch(() => {});
+}
+function moveSug(d){
+  if(!sugOpen) return;
+  sugSel = Math.max(-1, Math.min(sugItems.length - 1, sugSel + d));
+  url.value = sugSel < 0 ? sugTyped : sugItems[sugSel].url;
+  url.setSelectionRange(url.value.length, url.value.length);
+  renderSug();
+}
+url.addEventListener('input', e => {
+  sugTyped = url.value; sugSel = -1;
+  clearTimeout(sugTimer);
+  if(!url.value.trim()){ closeSug(); return; }
+  const q = url.value, deleting = !!(e.inputType && e.inputType.startsWith('delete'));
+  sugTimer = setTimeout(() => fetchSug(q, !deleting), 40);
 });
-function go(){ const u = toUrl(url.value); if(u){ editing = false; url.blur(); send('navigate', u); } }
+// The host resizes this window itself to show the list, so only a change of width closes it.
+let lastW = window.innerWidth;
+window.addEventListener('resize', () => { if(window.innerWidth !== lastW){ lastW = window.innerWidth; closeSug(); } });
+
+url.addEventListener('focus', () => { editing = true; setTimeout(() => url.select(), 0); });
+url.addEventListener('blur', () => { editing = false; closeSug(); url.value = shownUrl(state.url); });
+url.addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); go(); }
+  else if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    e.preventDefault();
+    if(sugOpen) moveSug(e.key === 'ArrowDown' ? 1 : -1);
+    else if(url.value.trim()){ sugTyped = url.value; fetchSug(url.value, false); }
+  }
+  else if(e.key === 'Escape'){
+    if(sugOpen){ e.preventDefault(); url.value = sugTyped; closeSug(); }
+    else { url.value = shownUrl(state.url); url.blur(); send('focusPage'); }
+  }
+});
+function go(){ const u = toUrl(url.value); if(u){ closeSug(); editing = false; url.blur(); send('navigate', u); } }
 
 $('#go').onclick = go;
 $('#back').onclick = () => send('back');
 $('#fwd').onclick = () => send('fwd');
 $('#reload').onclick = () => send(state.loading ? 'stop' : 'reload');
-$('#home').onclick = () => send('navigate', NEWTAB);
+$('#home').onclick = () => send('home');
 $('#plus').onclick = () => send('newtab');
 $('#min').onclick = () => send('min');
 $('#max').onclick = () => send('max');

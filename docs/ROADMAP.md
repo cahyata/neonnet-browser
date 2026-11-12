@@ -13,10 +13,10 @@ Planned features for NeonNet, roughly in the order they are worth doing. Effort:
 
 ## Next: everyday use
 
-- [ ] **Address bar suggestions** from history and bookmarks (M). Type a few letters, get matching pages and an inline completion. Most visible gap versus other browsers.
+- [x] **Address bar suggestions** from history and bookmarks (M, in the next release). Type a few letters, get matching pages and an inline completion. Most visible gap versus other browsers.
 - [x] **Downloads page** (M, in the next release). Today a download only shows a status-bar line. Needs a list with progress, "open", "show in folder" and cancel, plus Ctrl+J.
 - [x] **Choose the search engine** (S, in the next release). Plain text typed in the address bar goes to one fixed engine. Add a setting (for example Google, DuckDuckGo, Bing, Brave).
-- [ ] **Settings page** (M). One place for home page, search engine, start-up behaviour, default download folder, scanlines and auto-update. Several of these are only in the menu or the registry now.
+- [x] **Settings page** (M, in the next release). One place for home page, search engine, start-up behaviour, default download folder, scanlines and auto-update. Several of these are only in the menu or the registry now.
 - [ ] **Clear browsing data** (S). Clear cookies, cache and site data (history already has its own button), with a time range.
 - [ ] **Permission prompts** (M). Camera, microphone, location and notification requests need an in-app prompt with allow/block and a remembered choice.
 

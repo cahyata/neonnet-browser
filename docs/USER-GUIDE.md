@@ -43,6 +43,17 @@ Moving and resizing:
 
 Press Esc to cancel typing and restore the current page's address.
 
+### Suggestions
+
+While you type, a list opens under the address bar with matching bookmarks (`★`) and pages from your history (`⏱`), best match first. The first row is always what Enter does with the text as typed (open it, or search for it).
+
+- **Up / Down:** move through the list. The address bar shows the chosen address; Enter opens it. Going up past the first entry brings back what you typed.
+- **Click** a row to open it.
+- **Esc:** closes the list and keeps your text. Esc again restores the page's address.
+- **Inline completion:** when the best match is a secure address that starts with what you typed, the rest is filled in and selected (`git` becomes `git`**`hub.com`**). Press Enter to accept it, or keep typing or press Backspace to ignore it.
+
+Matches must contain every word you typed, in the address or the title. Pages you visit often, recently, or have bookmarked rank higher. Suggestions come only from your own bookmarks and history on this computer; nothing you type is sent to a server for them. Text you submit as a search goes to your search engine, as before.
+
 ## Keyboard shortcuts
 
 | Keys | Action |
@@ -56,6 +67,7 @@ Press Esc to cancel typing and restore the current page's address.
 | Ctrl+Shift+O | Bookmarks |
 | Ctrl+H | History |
 | Ctrl+J | Downloads |
+| Ctrl+, | Settings |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+1 … Ctrl+8 | Go to tab 1–8 |
 | Ctrl+9 | Go to the last tab |
@@ -107,9 +119,19 @@ Every page you open is recorded with its title and time, for 90 days (up to 20,0
 
 Open it with Ctrl+H, the `≡` menu, or **HISTORY** on the new tab page. You can search it, remove single visits with `✕`, or click **CLEAR ALL** twice to remove everything. Clearing the history does not clear cookies or the cache.
 
-## Search engine
+## Settings
 
-Text that is not an address is searched with Google, DuckDuckGo, Bing, Brave or Ecosia. Open the `≡` menu and click **Search engine**: each click switches to the next one, and the status bar shows the new choice. It is remembered, and used by the address bar and the new tab page.
+Ctrl+, , the `≡` menu (**Settings**), or **SETTINGS** on the new tab page opens the settings page. Every change is saved and applied at once.
+
+| Setting | What it does |
+|---|---|
+| **Search engine** | Google, DuckDuckGo, Bing, Brave or Ecosia. Used for text that is not an address, in the address bar and on the new tab page. |
+| **Home page** | Opened at start-up (when NeonNet is started without an address) and by the home button. Empty means the NeonNet new tab page. Only `http://`, `https://` and `file:///` addresses are accepted. New tabs always show the new tab page. |
+| **Ask where to save each file** | On (default): a save dialog opens for every download. Off: files go straight into your Downloads folder, and a number is added when the name is taken (`report (1).pdf`). |
+| **Scanlines** | The same switch as the `SCAN` button. |
+| **Automatic updates** | See [Updates](#updates). Only the installed copy updates itself, so the switch is disabled in a copy started from another folder. |
+
+The page also shows the NeonNet and Chromium versions.
 
 ## Scanlines
 
@@ -162,7 +184,7 @@ Automatic updates only work for the installed copy (in `%LOCALAPPDATA%\Programs\
 | Profile (cookies, cache, sign-ins, site data) | `%LOCALAPPDATA%\NeonNet\Profile` |
 | History, bookmarks and downloads list | `%LOCALAPPDATA%\NeonNet\history.txt`, `bookmarks.txt` and `downloads.txt` (plain UTF-8 text) |
 | Downloaded updates (deleted after installing) | `%LOCALAPPDATA%\NeonNet\Updates` |
-| Settings (scanlines, search engine, window position, automatic updates) | Registry `HKEY_CURRENT_USER\Software\NeonNet` |
+| Settings (scanlines, search engine, home page, download behaviour, window position, automatic updates) | Registry `HKEY_CURRENT_USER\Software\NeonNet` |
 | Shortcuts | Start menu `NeonNet`, and the desktop if chosen |
 
 Session cookies (cookies without an expiry date) are cleared when NeonNet closes, as in Chrome's default setup. Normal sign-in cookies are kept.

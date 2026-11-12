@@ -6,7 +6,9 @@
 #include "store.h"
 
 #include <windows.h>
+#include <cmath>
 #include <deque>
+#include <unordered_map>
 #include <vector>
 #include <algorithm>
 
@@ -164,6 +166,28 @@ template <class C> bool WriteFile(const std::wstring& path, const C& items) {
 bool SafeUrl(const std::wstring& url) {
     std::wstring l = Lower(url);
     return l.rfind(L"http://", 0) == 0 || l.rfind(L"https://", 0) == 0 || l.rfind(L"file:///", 0) == 0;
+}
+
+// Case-insensitive search; needleLower must already be lower case.
+bool ContainsI(const std::wstring& hay, const std::wstring& needleLower) {
+    if (needleLower.empty()) return true;
+    if (hay.size() < needleLower.size()) return false;
+    for (size_t i = 0; i + needleLower.size() <= hay.size(); i++) {
+        size_t j = 0;
+        while (j < needleLower.size() && (wchar_t)towlower(hay[i + j]) == needleLower[j]) j++;
+        if (j == needleLower.size()) return true;
+    }
+    return false;
+}
+
+// Lower case, without the scheme, a leading "www." and trailing slashes: "github.com/user".
+std::wstring Bare(const std::wstring& url) {
+    std::wstring s = Lower(url);
+    size_t p = s.find(L"://");
+    if (p != std::wstring::npos && p < 12) s.erase(0, p + 3);
+    if (s.rfind(L"www.", 0) == 0) s.erase(0, 4);
+    while (!s.empty() && s.back() == L'/') s.pop_back();
+    return s;
 }
 
 // downloads.txt: time TAB url TAB name TAB path TAB total TAB state
@@ -385,6 +409,86 @@ std::string BookmarksJson() {
     for (size_t i = 0; i < bookmarks.size(); i++) {
         if (i) o += ',';
         EntryJson(o, bookmarks[i]);
+    }
+    return o + "]";
+}
+
+// Address bar suggestions: bookmarks and history entries that contain every word of the
+// query in their address or title, one row per address, best first. The score favours an
+// address that starts with the typed text, then bookmarks, then pages visited often and lately.
+std::string SuggestJson(const std::wstring& query, size_t limit) {
+    std::vector<std::wstring> tokens;
+    {
+        std::wstring q = Lower(query), cur;
+        for (wchar_t c : q) {
+            if (c == L' ' || c == L'\t') { if (!cur.empty()) { tokens.push_back(cur); cur.clear(); } }
+            else cur += c;
+        }
+        if (!cur.empty()) tokens.push_back(cur);
+    }
+    if (tokens.empty() || tokens.size() > 5 || query.size() > 200) return "[]";
+    std::wstring typed = Bare(query);
+
+    struct Cand { std::wstring url, title; bool bookmark = false; int count = 0; long long last = 0; double score = 0; };
+    std::vector<Cand> cands;
+    std::unordered_map<std::wstring, size_t> index;
+    auto matches = [&](const std::wstring& url, const std::wstring& title) {
+        for (const auto& t : tokens) if (!ContainsI(url, t) && !ContainsI(title, t)) return false;
+        return true;
+    };
+    auto slot = [&](const std::wstring& url) -> Cand& {
+        std::wstring key = url;
+        while (!key.empty() && key.back() == L'/') key.pop_back();
+        auto it = index.find(key);
+        if (it != index.end()) return cands[it->second];
+        index[key] = cands.size();
+        cands.emplace_back();
+        cands.back().url = url;
+        return cands.back();
+    };
+
+    Shared s;
+    for (const Entry& e : bookmarks) {
+        if (!matches(e.url, e.title)) continue;
+        Cand& c = slot(e.url);
+        c.bookmark = true;
+        if (!e.title.empty()) c.title = e.title;
+    }
+    for (const Entry& e : history) {
+        if (!matches(e.url, e.title)) continue;
+        Cand& c = slot(e.url);
+        c.count++;
+        if (e.time > c.last) { c.last = e.time; if (!e.title.empty() && c.title.empty()) c.title = e.title; }
+    }
+
+    long long now = UnixMs();
+    for (Cand& c : cands) {
+        std::wstring bare = Bare(c.url);
+        std::wstring host = bare.substr(0, bare.find(L'/'));
+        double sc = 0;
+        if (!typed.empty() && bare.rfind(typed, 0) == 0) sc += 60;
+        else if (host.rfind(tokens[0], 0) == 0) sc += 45;
+        else if (host.find(tokens[0]) != std::wstring::npos) sc += 25;
+        std::wstring spaced = L" " + c.title;
+        for (const auto& t : tokens) if (ContainsI(spaced, L" " + t)) { sc += 8; break; }
+        if (c.bookmark) sc += 25;
+        sc += std::min(c.count, 25) * 1.2;
+        if (c.last > 0) sc += 20.0 * std::exp(-((now - c.last) / 86400000.0) / 10.0);
+        c.score = sc;
+    }
+    size_t n = std::min(limit, cands.size());
+    std::partial_sort(cands.begin(), cands.begin() + n, cands.end(), [](const Cand& a, const Cand& b) { return a.score > b.score; });
+
+    std::string o = "[";
+    for (size_t i = 0; i < n; i++) {
+        if (i) o += ',';
+        o += "{\"bookmark\":";
+        o += cands[i].bookmark ? "true" : "false";
+        o += ",\"url\":";
+        Json(o, cands[i].url);
+        o += ",\"title\":";
+        Json(o, cands[i].title);
+        o += '}';
     }
     return o + "]";
 }

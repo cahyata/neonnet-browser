@@ -1,0 +1,138 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>SETTINGS</title>
+<style>
+:root{--bg:#12062c;--bg2:#0a0420;--row:#1b0b3d;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0;--green:#35ffa0}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
+main{max-width:760px;margin:0 auto;padding:28px 20px 60px}
+h1{margin:0;font:italic 900 40px Impact,"Arial Black",sans-serif;letter-spacing:3px;color:var(--cyan);text-shadow:3px 3px 0 var(--pink)}
+.sub{color:var(--yellow);letter-spacing:2px;margin:4px 0 8px}
+h2{font:bold 12px "Cascadia Mono","Consolas",monospace;color:var(--yellow);letter-spacing:2px;margin:26px 0 4px;
+  padding-bottom:4px;border-bottom:1px solid rgba(255,46,151,.5)}
+.row{display:flex;align-items:center;gap:16px;padding:12px 8px;border-bottom:1px solid rgba(138,111,192,.2);min-height:50px}
+.row:hover{background:var(--row)}
+.lab{flex:1;min-width:0}
+.lab b{display:block;color:var(--cyan);font-weight:bold}
+.lab span{display:block;color:var(--muted);margin-top:3px;font-size:12px}
+button,select,input{font:inherit}
+button{cursor:pointer;border:0}
+.tog{min-width:64px;height:28px;padding:0 10px;background:none;border:1px solid var(--muted);color:var(--muted);font-weight:bold;letter-spacing:1px}
+.tog.on{border-color:var(--green);color:var(--green)}
+.tog:hover:not(:disabled){background:var(--cyan);color:var(--bg);border-color:var(--cyan)}
+.tog:disabled{opacity:.4;cursor:default}
+select,.txt{height:32px;background:var(--bg2);color:var(--cyan);border:1px solid var(--cyan);padding:0 8px;outline:0;
+  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px))}
+select{min-width:180px;cursor:pointer}
+select option{background:var(--bg2);color:var(--cyan)}
+.txt{width:300px}
+.txt::placeholder{color:#5a4a8a}
+.btn{height:32px;padding:0 14px;background:none;border:1px solid var(--pink);color:var(--pink);font-weight:bold}
+.btn:hover{background:var(--pink);color:var(--bg)}
+.pair{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.err{color:var(--pink2);font-size:12px;min-height:16px;margin-top:3px}
+#saved{position:fixed;right:18px;bottom:16px;color:var(--bg);background:var(--green);padding:4px 12px;font-weight:bold;letter-spacing:1px;
+  opacity:0;transition:opacity .25s;pointer-events:none}
+#saved.show{opacity:1}
+.about{color:var(--muted);line-height:1.7;padding:10px 8px}
+.about b{color:var(--cyan);font-weight:normal}
+</style>
+</head>
+<body>
+<main>
+  <h1>SETTINGS</h1>
+  <div class="sub">&gt; SYSTEM CONFIG // CHANGES APPLY AT ONCE</div>
+
+  <h2>SEARCH</h2>
+  <div class="row">
+    <div class="lab"><b>Search engine</b><span>Used when you type words instead of an address, in the address bar and on the new tab page.</span></div>
+    <select id="engine"></select>
+  </div>
+
+  <h2>START</h2>
+  <div class="row">
+    <div class="lab"><b>Home page</b><span>Opened at start-up and by the home button. Empty means the NeonNet new tab page. New tabs always show the new tab page.</span>
+      <div class="err" id="homeErr"></div></div>
+    <div class="pair"><input class="txt" id="home" spellcheck="false" autocomplete="off" placeholder="https://... (empty = new tab page)">
+      <button class="btn" id="homeSave">SAVE</button></div>
+  </div>
+
+  <h2>DOWNLOADS</h2>
+  <div class="row">
+    <div class="lab"><b>Ask where to save each file</b><span id="dlHint"></span></div>
+    <button class="tog" id="askDownload">ON</button>
+  </div>
+
+  <h2>LOOK</h2>
+  <div class="row">
+    <div class="lab"><b>Scanlines</b><span>A thin CRT line effect over every page. Purely visual.</span></div>
+    <button class="tog" id="scan">ON</button>
+  </div>
+
+  <h2>UPDATES</h2>
+  <div class="row">
+    <div class="lab"><b>Automatic updates</b><span id="updHint"></span></div>
+    <button class="tog" id="autoUpdate">ON</button>
+  </div>
+
+  <h2>ABOUT</h2>
+  <div class="about" id="about"></div>
+</main>
+<div id="saved">SAVED</div>
+<script>
+const $ = s => document.querySelector(s);
+let cfg = null, flashTimer = 0;
+
+function flash(){ const s = $('#saved'); s.classList.add('show'); clearTimeout(flashTimer); flashTimer = setTimeout(() => s.classList.remove('show'), 1200); }
+function setTog(id, on){ const b = $(id); b.classList.toggle('on', !!on); b.textContent = on ? 'ON' : 'OFF'; }
+
+async function load(){
+  try { cfg = await (await fetch('/api/settings', {cache:'no-store'})).json(); } catch(e){ return; }
+  const sel = $('#engine'); sel.innerHTML = '';
+  for(const e of cfg.engines){ const o = document.createElement('option'); o.value = e.id; o.textContent = e.name; sel.appendChild(o); }
+  sel.value = cfg.search;
+  $('#home').value = cfg.home || '';
+  setTog('#askDownload', cfg.askDownload);
+  $('#dlHint').textContent = cfg.askDownload ? 'A save dialog opens for every download.'
+    : 'Files are saved straight into ' + cfg.downloadDir + ' (a number is added if the name is taken).';
+  setTog('#scan', cfg.scan);
+  setTog('#autoUpdate', cfg.autoUpdate);
+  $('#autoUpdate').disabled = !cfg.installed;
+  $('#updHint').textContent = cfg.installed ? 'Checks GitHub once a day and installs a new version when you restart.'
+    : 'Only the installed copy updates itself. This copy was started from another folder.';
+  const a = $('#about'); a.textContent = '';
+  const line = (k, v) => { const b = document.createElement('b'); b.textContent = k; a.append(b, document.createTextNode('  ' + v), document.createElement('br')); };
+  line('NeonNet', 'v' + cfg.version);
+  line('Chromium', cfg.chromium + ' (bundled)');
+  line('Your data', '%LOCALAPPDATA%\\NeonNet');
+}
+
+async function set(key, value){
+  try {
+    const r = await fetch('/api/settings/set?key=' + encodeURIComponent(key) + '&value=' + encodeURIComponent(value), {cache:'no-store'});
+    if(!r.ok) return false;
+    flash(); return true;
+  } catch(e){ return false; }
+}
+
+$('#engine').onchange = async () => { await set('search', $('#engine').value); load(); };
+for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate']]){
+  $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };
+}
+async function saveHome(){
+  const v = $('#home').value.trim();
+  if(v && !/^(https?:\/\/|file:\/\/\/)/i.test(v)){ $('#homeErr').textContent = 'The address must start with http://, https:// or file:///'; return; }
+  $('#homeErr').textContent = '';
+  if(!(await set('home', v))) $('#homeErr').textContent = 'That address was not accepted.';
+  else load();
+}
+$('#homeSave').onclick = saveHome;
+$('#home').addEventListener('keydown', e => { if(e.key === 'Enter') saveHome(); });
+// The page may stay open while a setting changes elsewhere (the SCAN button), so refresh when shown.
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') load(); });
+load();
+</script>
+</body>
+</html>
