@@ -39,7 +39,7 @@ Moving and resizing:
 | A full address (`https://...`) | Opened as is |
 | A domain (`github.com`, `wikipedia.org/wiki/Neon`) | Opened with `https://` |
 | `localhost:3000` or an IP address | Opened with `http://` |
-| Anything else (`weather tokyo`) | Searched on Google |
+| Anything else (`weather tokyo`) | Searched with your search engine (Google until you change it, see [Search engine](#search-engine)) |
 
 Press Esc to cancel typing and restore the current page's address.
 
@@ -55,6 +55,7 @@ Press Esc to cancel typing and restore the current page's address.
 | Ctrl+D | Bookmark the page, or remove its bookmark |
 | Ctrl+Shift+O | Bookmarks |
 | Ctrl+H | History |
+| Ctrl+J | Downloads |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+1 … Ctrl+8 | Go to tab 1–8 |
 | Ctrl+9 | Go to the last tab |
@@ -106,6 +107,10 @@ Every page you open is recorded with its title and time, for 90 days (up to 20,0
 
 Open it with Ctrl+H, the `≡` menu, or **HISTORY** on the new tab page. You can search it, remove single visits with `✕`, or click **CLEAR ALL** twice to remove everything. Clearing the history does not clear cookies or the cache.
 
+## Search engine
+
+Text that is not an address is searched with Google, DuckDuckGo, Bing, Brave or Ecosia. Open the `≡` menu and click **Search engine**: each click switches to the next one, and the status bar shows the new choice. It is remembered, and used by the address bar and the new tab page.
+
 ## Scanlines
 
 The `SCAN` button turns a thin CRT line effect over every page on or off. It is purely visual: it never blocks clicks, and your choice is remembered.
@@ -113,6 +118,17 @@ The `SCAN` button turns a thin CRT line effect over every page on or off. It is 
 ## Downloads
 
 NeonNet asks where to save each download. Progress appears in the status bar ("DOWNLOADING file-name 42%").
+
+Ctrl+J, the `≡` menu, or **DOWNLOADS** on the new tab page opens the downloads page. It lists every download, newest first, with size, speed, source and time. You can search it, and each row has buttons:
+
+- **CANCEL** stops a running download.
+- **OPEN** opens a finished file with its default program.
+- **FOLDER** shows the file in File Explorer.
+- `✕` removes the row from the list. The file itself is kept.
+
+**CLEAR LIST** (click twice) removes every finished row; running downloads stay. If a file was moved or deleted, its row says FILE MISSING.
+
+For safety, **OPEN** is not offered for programs and scripts (`.exe`, `.msi`, `.bat`, `.cmd`, `.ps1`, `.vbs`, `.js`, `.lnk`, `.dll` and similar). Use FOLDER and check the file first. A download that was still running when NeonNet closed is listed as INTERRUPTED the next time.
 
 ## Updates
 
@@ -144,9 +160,9 @@ Automatic updates only work for the installed copy (in `%LOCALAPPDATA%\Programs\
 |---|---|
 | Application | `%LOCALAPPDATA%\Programs\NeonNet` |
 | Profile (cookies, cache, sign-ins, site data) | `%LOCALAPPDATA%\NeonNet\Profile` |
-| History and bookmarks | `%LOCALAPPDATA%\NeonNet\history.txt` and `bookmarks.txt` (plain UTF-8 text) |
+| History, bookmarks and downloads list | `%LOCALAPPDATA%\NeonNet\history.txt`, `bookmarks.txt` and `downloads.txt` (plain UTF-8 text) |
 | Downloaded updates (deleted after installing) | `%LOCALAPPDATA%\NeonNet\Updates` |
-| Settings (scanlines, window position, automatic updates) | Registry `HKEY_CURRENT_USER\Software\NeonNet` |
+| Settings (scanlines, search engine, window position, automatic updates) | Registry `HKEY_CURRENT_USER\Software\NeonNet` |
 | Shortcuts | Start menu `NeonNet`, and the desktop if chosen |
 
 Session cookies (cookies without an expiry date) are cleared when NeonNet closes, as in Chrome's default setup. Normal sign-in cookies are kept.

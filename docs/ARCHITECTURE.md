@@ -86,7 +86,7 @@ The tab strip and address bar are an ordinary HTML page (`ui/chrome.html`) in a 
 | `drag` | | Start moving the window (`WM_NCLBUTTONDOWN` + `HTCAPTION`) |
 | `focusPage` | | Give focus back to the page |
 
-**App → UI:** `SendState()` runs `window.__nn({...})` in the chrome browser with the full state: tabs (id, title, loading), active tab, URL, canBack, canFwd, loading, scan, max, canStar, starred, find, findCase, findText. The UI re-renders from that state. Two smaller messages exist: `findResult` (match count and selected match) and `focusFind`.
+**App → UI:** `SendState()` runs `window.__nn({...})` in the chrome browser with the full state: tabs (id, title, loading), active tab, URL, canBack, canFwd, loading, scan, max, canStar, starred, find, findCase, findText, search. The UI re-renders from that state. Two smaller messages exist: `findResult` (match count and selected match) and `focusFind`.
 
 **Channel security:** `https://neonnet.ui/` is served by the app's own scheme handler, so these requests never reach the network. `/cmd` is only accepted from the chrome browser (checked by browser id). Web pages in tabs cannot send commands, even though they may load `https://neonnet.ui/newtab.html`.
 
@@ -98,6 +98,7 @@ The tab strip and address bar are an ordinary HTML page (`ui/chrome.html`) in a 
 | `https://neonnet.ui/newtab.html` | `IDR_NEWTAB` | New tabs and the home button |
 | `https://neonnet.ui/history.html` | `IDR_HISTORY` | History page (Ctrl+H) |
 | `https://neonnet.ui/bookmarks.html` | `IDR_BOOKMARKS` | Bookmarks page (Ctrl+Shift+O) |
+| `https://neonnet.ui/downloads.html` | `IDR_DOWNLOADS` | Downloads page (Ctrl+J) |
 | `https://neonnet.ui/cmd?...` | | Command channel (answers 204) |
 | `https://neonnet.ui/api/...` | | History and bookmarks data (JSON) |
 
@@ -117,9 +118,23 @@ Every response carries `X-Frame-Options: DENY`, so websites cannot load NeonNet'
   | `history/delete?id=`, `history/clear` | Remove one visit, or all |
   | `bookmarks` | All bookmarks, oldest first |
   | `bookmarks/delete?id=`, `bookmarks/edit?id=&title=&url=` | Change bookmarks; `edit` rejects anything that is not http, https or file |
+  | `downloads` | Up to 300 downloads, newest first (state, sizes, speed, `exists`, `openable`) |
+  | `downloads/remove?id=`, `downloads/clear` | Remove one finished download from the list, or all finished ones |
+  | `downloads/cancel?id=`, `downloads/open?id=`, `downloads/show?id=` | Posted to the UI thread as `WM_APP_DOWNLOAD` (see Downloads below) |
+  | `settings` | `{"search": "<search URL prefix>"}` for the new tab page |
 
   The API answers only a **main frame that shows a `https://neonnet.ui/` page** in a tab (403 otherwise). A website's `fetch`, even with `no-cors`, cannot read or change the lists. Changes made through the API post `WM_APP_STORE` to the UI thread, which saves and refreshes the star.
 - **Pages:** `history.html`, `bookmarks.html` and the new tab page fetch this API and build their lists with `textContent`. Links are only made for http, https and file URLs.
+
+## Downloads
+
+`OnBeforeDownload` and `OnDownloadUpdated` in `Client` feed `store::DownloadUpdate()`, which creates the entry the first time it sees a CEF download id (so a download is listed as soon as the save dialog opens) and then updates sizes, speed and state. The list is written to `downloads.txt` (`time TAB url TAB name TAB path TAB total TAB state`) like the others, but only when a state changes (start, finish, cancel): saving on every progress report would keep restarting the 2-second save timer. Entries loaded from disk that were still running become `DL_INTERRUPTED`. At most 500 entries are kept.
+
+`ServeApi()` runs on the IO thread, but cancelling needs the `CefDownloadItemCallback`, which `OnDownloadUpdated` keeps in `g.dlCallbacks` on the UI thread. So `downloads/cancel`, `open` and `show` only post `WM_APP_DOWNLOAD` with the entry id, and `DoDownloadAction()` does the work on the UI thread. The page never sends a path: the file is looked up by id in the list, must exist and be finished, and `OPEN` is refused for programs and scripts (`store::DownloadOpenable()`). `SHOW` runs `explorer.exe /select,"<path>"`. `downloads.html` polls `/api/downloads` once a second while it is visible and updates rows in place, so buttons stay clickable.
+
+## Search engine
+
+`SEARCH_ENGINES` in `main.cpp` lists the engines. The chosen index is `g.engine` (atomic, because the IO thread reads it for `/api/settings`) and is saved as the registry string `SearchEngine` (`google`, `duckduckgo`, ...). The `≡` menu item `Search engine` (`CMD_SEARCH`) switches to the next one. The state sent to the chrome UI carries `search`, the URL prefix that `chrome.html` appends the encoded query to; `newtab.html` reads it from `/api/settings`.
 
 ## Find in page
 

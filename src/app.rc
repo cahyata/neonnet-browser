@@ -6,6 +6,7 @@ IDR_CHROME  RCDATA  "..\\ui\\chrome.html"
 IDR_NEWTAB  RCDATA  "..\\ui\\newtab.html"
 IDR_HISTORY RCDATA  "..\\ui\\history.html"
 IDR_BOOKMARKS RCDATA "..\\ui\\bookmarks.html"
+IDR_DOWNLOADS RCDATA "..\\ui\\downloads.html"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION 1,1,3,0

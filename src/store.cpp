@@ -29,8 +29,17 @@ struct Excl { Excl() { AcquireSRWLockExclusive(&lock); } ~Excl() { ReleaseSRWLoc
 std::deque<Entry> history;     // oldest first
 std::vector<Entry> bookmarks;  // in the order they were added
 long long nextId = 1;
-bool histDirty = false, bmDirty = false;
-std::wstring histFile, bmFile;
+bool histDirty = false, bmDirty = false, dlDirty = false;
+std::wstring histFile, bmFile, dlFile;
+
+struct Download {
+    long long id = 0, time = 0, total = 0, received = 0, speed = 0;
+    unsigned cefId = 0;   // CEF's id for a running download; 0 for entries loaded from disk
+    int state = 0;
+    std::wstring url, path, name;
+};
+const size_t MAX_DOWNLOADS = 500;
+std::vector<Download> downloads;   // oldest first
 
 long long UnixMs() {
     FILETIME ft; GetSystemTimeAsFileTime(&ft);
@@ -157,15 +166,86 @@ bool SafeUrl(const std::wstring& url) {
     return l.rfind(L"http://", 0) == 0 || l.rfind(L"https://", 0) == 0 || l.rfind(L"file:///", 0) == 0;
 }
 
+// downloads.txt: time TAB url TAB name TAB path TAB total TAB state
+void ReadDownloads(const std::wstring& path) {
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return;
+    LARGE_INTEGER size{};
+    std::string data;
+    if (GetFileSizeEx(f, &size) && size.QuadPart > 0 && size.QuadPart < 64LL * 1024 * 1024) {
+        data.resize((size_t)size.QuadPart);
+        DWORD rd = 0;
+        if (!::ReadFile(f, data.data(), (DWORD)data.size(), &rd, nullptr)) rd = 0;
+        data.resize(rd);
+    }
+    CloseHandle(f);
+    size_t pos = 0;
+    while (pos < data.size()) {
+        size_t nl = data.find('\n', pos);
+        if (nl == std::string::npos) nl = data.size();
+        std::string line = data.substr(pos, nl - pos);
+        pos = nl + 1;
+        std::vector<std::string> p;
+        for (size_t s = 0;;) {
+            size_t t = line.find('\t', s);
+            p.push_back(line.substr(s, t == std::string::npos ? std::string::npos : t - s));
+            if (t == std::string::npos) break;
+            s = t + 1;
+        }
+        if (p.size() < 6) continue;
+        Download d;
+        d.time = _atoi64(p[0].c_str());
+        d.url = Unesc(p[1]); d.name = Unesc(p[2]); d.path = Unesc(p[3]);
+        d.total = _atoi64(p[4].c_str());
+        d.state = atoi(p[5].c_str());
+        if (d.state == DL_ACTIVE) d.state = DL_INTERRUPTED;
+        if (d.state < DL_ACTIVE || d.state > DL_INTERRUPTED || d.time <= 0 || d.name.empty()) continue;
+        d.received = d.state == DL_COMPLETE ? d.total : 0;
+        d.id = nextId++;
+        downloads.push_back(std::move(d));
+    }
+}
+
+bool WriteDownloads(const std::wstring& path, const std::vector<Download>& items) {
+    std::string data;
+    for (const Download& d : items)
+        data += std::to_string(d.time) + '\t' + Esc(d.url) + '\t' + Esc(d.name) + '\t' + Esc(d.path) + '\t' +
+                std::to_string(d.total) + '\t' + std::to_string(d.state) + '\n';
+    std::wstring tmp = path + L".tmp";
+    HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    DWORD wr = 0;
+    bool ok = ::WriteFile(f, data.data(), (DWORD)data.size(), &wr, nullptr) && wr == data.size();
+    CloseHandle(f);
+    if (ok) ok = MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+    if (!ok) DeleteFileW(tmp.c_str());
+    return ok;
+}
+
+std::wstring FileName(const std::wstring& path) {
+    size_t s = path.find_last_of(L"\\/");
+    return s == std::wstring::npos ? path : path.substr(s + 1);
+}
+
+void TrimDownloads() {
+    while (downloads.size() > MAX_DOWNLOADS) {
+        auto it = std::find_if(downloads.begin(), downloads.end(), [](const Download& d) { return d.state != DL_ACTIVE; });
+        if (it == downloads.end()) break;
+        downloads.erase(it);
+    }
+}
+
 }  // namespace
 
 void Load(const std::wstring& dir) {
     Excl x;
     histFile = dir + L"\\history.txt";
     bmFile = dir + L"\\bookmarks.txt";
-    history.clear(); bookmarks.clear();
+    dlFile = dir + L"\\downloads.txt";
+    history.clear(); bookmarks.clear(); downloads.clear();
     ReadFile(histFile, history);
     ReadFile(bmFile, bookmarks);
+    ReadDownloads(dlFile);
     long long cutoff = UnixMs() - HISTORY_DAYS * 24 * 60 * 60 * 1000;
     size_t before = history.size();
     while (!history.empty() && (history.front().time < cutoff || history.size() > MAX_HISTORY)) history.pop_front();
@@ -173,16 +253,21 @@ void Load(const std::wstring& dir) {
 }
 
 bool SaveIfDirty() {
-    std::deque<Entry> h; std::vector<Entry> b;
-    bool wantH, wantB;
+    std::deque<Entry> h; std::vector<Entry> b; std::vector<Download> dl;
+    bool wantH, wantB, wantD;
     {
         Excl x;
-        wantH = histDirty; wantB = bmDirty;
+        wantH = histDirty; wantB = bmDirty; wantD = dlDirty;
         if (wantH) h = history;
         if (wantB) b = bookmarks;
-        histDirty = bmDirty = false;
+        if (wantD) dl = downloads;
+        histDirty = bmDirty = dlDirty = false;
     }
     bool ok = true;
+    if (wantD && !dlFile.empty()) {
+        CreateDirectoryW(dlFile.substr(0, dlFile.find_last_of(L'\\')).c_str(), nullptr);
+        if (!WriteDownloads(dlFile, dl)) { ok = false; Excl x; dlDirty = true; }
+    }
     if (wantH && !histFile.empty()) {
         CreateDirectoryW(histFile.substr(0, histFile.find_last_of(L'\\')).c_str(), nullptr);
         if (!WriteFile(histFile, h)) { ok = false; Excl x; histDirty = true; }
@@ -302,6 +387,92 @@ std::string BookmarksJson() {
         EntryJson(o, bookmarks[i]);
     }
     return o + "]";
+}
+
+bool DownloadUpdate(unsigned cefId, const std::wstring& url, const std::wstring& path, const std::wstring& name,
+                    long long total, long long received, long long speed, int state) {
+    if (!cefId) return false;
+    Excl x;
+    Download* d = nullptr;
+    for (auto it = downloads.rbegin(); it != downloads.rend(); ++it)
+        if (it->cefId == cefId && it->state == DL_ACTIVE) { d = &*it; break; }
+    bool changed = false;
+    if (!d) {
+        downloads.emplace_back();
+        d = &downloads.back();
+        d->id = nextId++; d->time = UnixMs(); d->cefId = cefId; d->state = DL_ACTIVE;
+        changed = true; dlDirty = true;
+        TrimDownloads();
+        d = &downloads.back();
+    }
+    if (!url.empty() && d->url.empty()) d->url = Clean(url, 4096);
+    if (!path.empty()) { d->path = path; d->name = Clean(FileName(path), 260); }
+    if (!name.empty() && d->name.empty()) d->name = Clean(name, 260);
+    if (d->name.empty()) d->name = L"download";
+    if (total > 0) d->total = total;
+    d->received = received;
+    d->speed = speed;
+    if (d->state != state) { d->state = state; changed = true; dlDirty = true; }
+    if (state != DL_ACTIVE) d->cefId = 0;
+    return changed;
+}
+
+bool DownloadGet(long long id, std::wstring& path, int& state, unsigned& cefId) {
+    Shared s;
+    for (const Download& d : downloads) {
+        if (d.id != id) continue;
+        path = d.path; state = d.state; cefId = d.cefId;
+        return true;
+    }
+    return false;
+}
+
+// Programs, scripts and shortcuts are never opened from the downloads page; the user can
+// still show them in the folder and decide there.
+bool DownloadOpenable(const std::wstring& path) {
+    std::wstring name = Lower(FileName(path));
+    size_t dot = name.find_last_of(L'.');
+    if (dot == std::wstring::npos) return true;
+    static const wchar_t* bad[] = {
+        L".exe", L".msi", L".msp", L".com", L".scr", L".bat", L".cmd", L".ps1", L".psm1", L".vbs", L".vbe", L".js", L".jse",
+        L".wsf", L".wsh", L".hta", L".reg", L".lnk", L".url", L".dll", L".jar", L".cpl", L".msc", L".appx", L".msix",
+        L".appinstaller", L".application", L".gadget", L".inf", L".pif", L".sys", L".scf", L".ps1xml", L".psc1", L".chm" };
+    std::wstring ext = name.substr(dot);
+    for (const wchar_t* b : bad) if (ext == b) return false;
+    return true;
+}
+
+std::string DownloadsJson() {
+    std::string o = "[";
+    Shared s;
+    size_t n = 0;
+    for (auto it = downloads.rbegin(); it != downloads.rend() && n < 300; ++it, ++n) {
+        const Download& d = *it;
+        if (n) o += ',';
+        bool exists = d.state == DL_COMPLETE && !d.path.empty() && GetFileAttributesW(d.path.c_str()) != INVALID_FILE_ATTRIBUTES;
+        o += "{\"id\":" + std::to_string(d.id) + ",\"time\":" + std::to_string(d.time) + ",\"state\":" + std::to_string(d.state) +
+             ",\"total\":" + std::to_string(d.total) + ",\"received\":" + std::to_string(d.received) +
+             ",\"speed\":" + std::to_string(d.speed) + ",\"exists\":" + (exists ? "true" : "false") +
+             ",\"openable\":" + (exists && DownloadOpenable(d.path) ? "true" : "false") + ",\"name\":";
+        Json(o, d.name);
+        o += ",\"url\":";
+        Json(o, d.url);
+        o += '}';
+    }
+    return o + "]";
+}
+
+bool DownloadRemove(long long id) {
+    Excl x;
+    for (auto it = downloads.begin(); it != downloads.end(); ++it)
+        if (it->id == id && it->state != DL_ACTIVE) { downloads.erase(it); dlDirty = true; return true; }
+    return false;
+}
+
+void DownloadsClear() {
+    Excl x;
+    downloads.erase(std::remove_if(downloads.begin(), downloads.end(), [](const Download& d) { return d.state != DL_ACTIVE; }), downloads.end());
+    dlDirty = true;
 }
 
 }  // namespace store

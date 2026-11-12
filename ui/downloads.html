@@ -1,0 +1,165 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DOWNLOADS</title>
+<style>
+:root{--bg:#12062c;--bg2:#0a0420;--row:#1b0b3d;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0;--green:#35ffa0}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
+main{max-width:920px;margin:0 auto;padding:28px 20px 60px}
+h1{margin:0;font:italic 900 40px Impact,"Arial Black",sans-serif;letter-spacing:3px;color:var(--cyan);text-shadow:3px 3px 0 var(--pink)}
+.sub{color:var(--yellow);letter-spacing:2px;margin:4px 0 20px}
+.tools{display:flex;gap:10px;align-items:center;margin-bottom:18px}
+.search{flex:1;display:flex;align-items:center;height:36px;border:1px solid var(--cyan);background:var(--bg2);
+  clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))}
+.search span{color:var(--pink);padding:0 6px 0 12px}
+.search input{flex:1;height:100%;background:none;border:0;outline:0;color:var(--cyan);font:14px "Cascadia Mono","Consolas",monospace}
+.search input::placeholder{color:#5a4a8a}
+button{font:inherit;cursor:pointer;border:0}
+.danger{height:36px;padding:0 16px;background:none;border:1px solid var(--pink);color:var(--pink);font-weight:bold}
+.danger:hover,.danger.arm{background:var(--pink);color:var(--bg)}
+.row{display:flex;align-items:center;gap:12px;padding:10px 10px;border-bottom:1px solid rgba(138,111,192,.25)}
+.row:hover{background:var(--row)}
+.info{flex:1;min-width:0}
+.name{color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:bold}
+.row.dead .name{color:var(--muted);text-decoration:line-through}
+.meta{color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta b{font-weight:normal}
+.ok b{color:var(--green)} .bad b{color:var(--pink2)} .run b{color:var(--yellow)}
+.bar{height:4px;background:var(--bg2);margin-top:6px;border:1px solid rgba(0,229,255,.35)}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--pink),var(--cyan))}
+.acts{display:flex;gap:6px;flex:none}
+.acts button{height:28px;padding:0 10px;background:none;border:1px solid var(--cyan);color:var(--cyan);font-weight:bold;font-size:12px}
+.acts button:hover{background:var(--cyan);color:var(--bg)}
+.acts button.stop{border-color:var(--pink);color:var(--pink)}
+.acts button.stop:hover{background:var(--pink);color:var(--bg)}
+.acts .x{width:28px;padding:0;border-color:transparent;color:var(--muted);visibility:hidden}
+.row:hover .acts .x{visibility:visible}
+.acts .x:hover{background:var(--pink);color:var(--bg)}
+.empty{color:var(--muted);margin-top:40px;text-align:center;letter-spacing:1px}
+.note{color:var(--muted);margin-top:22px;font-size:12px}
+</style>
+</head>
+<body>
+<main>
+  <h1>DOWNLOADS</h1>
+  <div class="sub">&gt; INCOMING TRANSFERS // FILES STAY WHERE YOU SAVED THEM</div>
+  <div class="tools">
+    <div class="search"><span>&gt;&gt;</span><input id="q" spellcheck="false" autocomplete="off" placeholder="search downloads" autofocus></div>
+    <button class="danger" id="clear">CLEAR LIST</button>
+  </div>
+  <div id="list"></div>
+  <div class="note">Programs and scripts (.exe, .msi, .bat, .ps1 ...) cannot be opened from here. Use FOLDER and check them first.</div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const ST = {ACTIVE:0, DONE:1, CANCELED:2, FAILED:3};
+let items = [], sig = '', rows = new Map();
+
+function size(n){
+  if(!(n > 0)) return '0 B';
+  const u = ['B','KB','MB','GB','TB']; let i = 0;
+  while(n >= 1024 && i < u.length - 1){ n /= 1024; i++; }
+  return (n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)) + ' ' + u[i];
+}
+function host(u){ try { return new URL(u).host || u; } catch(e){ return u; } }
+function when(t){
+  const d = new Date(t), pad = n => String(n).padStart(2, '0');
+  const today = new Date(); today.setHours(0,0,0,0);
+  const day = new Date(d); day.setHours(0,0,0,0);
+  const diff = Math.round((today - day) / 86400000);
+  const hm = pad(d.getHours()) + ':' + pad(d.getMinutes());
+  return diff === 0 ? 'TODAY ' + hm : diff === 1 ? 'YESTERDAY ' + hm : d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}).toUpperCase() + ' ' + hm;
+}
+function status(it){
+  if(it.state === ST.ACTIVE){
+    const pct = it.total > 0 ? Math.min(100, Math.floor(it.received * 100 / it.total)) : -1;
+    return ['run', 'DOWNLOADING', size(it.received) + (it.total > 0 ? ' / ' + size(it.total) + ' (' + pct + '%)' : '') + (it.speed > 0 ? ' - ' + size(it.speed) + '/s' : '')];
+  }
+  if(it.state === ST.DONE) return it.exists ? ['ok', 'DONE', size(it.total)] : ['bad', 'FILE MISSING', 'moved or deleted'];
+  if(it.state === ST.CANCELED) return ['bad', 'CANCELED', ''];
+  return ['bad', 'INTERRUPTED', it.received > 0 ? size(it.received) + ' received' : ''];
+}
+async function act(path, id){ await fetch('/api/downloads/' + path + '?id=' + id, {cache:'no-store'}).catch(() => {}); }
+
+function build(it){
+  const row = document.createElement('div'); row.className = 'row';
+  const info = document.createElement('div'); info.className = 'info';
+  const name = document.createElement('div'); name.className = 'name'; name.textContent = it.name; name.title = it.name;
+  const meta = document.createElement('div'); meta.className = 'meta';
+  const bar = document.createElement('div'); bar.className = 'bar'; bar.innerHTML = '<i></i>';
+  info.append(name, meta, bar);
+  const acts = document.createElement('div'); acts.className = 'acts';
+  row.append(info, acts);
+  const r = {row, name, meta, bar, acts, key: ''};
+  return r;
+}
+
+function fill(r, it){
+  const [cls, label, extra] = status(it);
+  r.name.textContent = it.name; r.name.title = it.name;   // the real name is known only after the save dialog
+  r.row.classList.toggle('dead', it.state === ST.DONE && !it.exists);
+  r.meta.className = 'meta ' + cls;
+  r.meta.textContent = '';
+  const b = document.createElement('b'); b.textContent = label;
+  r.meta.append(b, document.createTextNode((extra ? ' - ' + extra : '') + ' - ' + host(it.url) + ' - ' + when(it.time)));
+  r.meta.title = it.url;
+  r.bar.style.display = it.state === ST.ACTIVE ? '' : 'none';
+  const pct = it.total > 0 ? Math.min(100, it.received * 100 / it.total) : 0;
+  r.bar.firstChild.style.width = pct + '%';
+  const key = [it.state, it.exists, it.openable].join();
+  if(r.key === key) return;
+  r.key = key; r.acts.textContent = '';
+  const btn = (text, cls, fn) => { const x = document.createElement('button'); x.textContent = text; if(cls) x.className = cls; x.onclick = fn; r.acts.appendChild(x); return x; };
+  if(it.state === ST.ACTIVE) btn('CANCEL', 'stop', () => act('cancel', it.id));
+  if(it.openable) btn('OPEN', '', () => act('open', it.id));
+  if(it.exists) btn('FOLDER', '', () => act('show', it.id));
+  if(it.state !== ST.ACTIVE) btn('✕', 'x', async () => { await act('remove', it.id); poll(); }).title = 'Remove from the list (the file is kept)';
+}
+
+function render(){
+  const q = $('#q').value.trim().toLowerCase();
+  const shown = items.filter(it => !q || it.name.toLowerCase().includes(q) || it.url.toLowerCase().includes(q));
+  const list = $('#list');
+  const ids = shown.map(i => i.id).join();
+  if(ids !== sig){
+    sig = ids; list.textContent = '';
+    if(!shown.length){
+      const e = document.createElement('div'); e.className = 'empty';
+      e.textContent = q ? 'NO MATCHES FOR "' + q.toUpperCase() + '"' : 'NOTHING DOWNLOADED YET.';
+      list.appendChild(e);
+    } else for(const it of shown){
+      let r = rows.get(it.id); if(!r){ r = build(it); rows.set(it.id, r); }
+      list.appendChild(r.row);
+    }
+    for(const k of [...rows.keys()]) if(!items.some(i => i.id === k)) rows.delete(k);
+  }
+  for(const it of shown){ const r = rows.get(it.id); if(r) fill(r, it); }
+}
+
+let busy = false;
+async function poll(){
+  if(busy) return; busy = true;
+  try { items = await (await fetch('/api/downloads', {cache:'no-store'})).json(); render(); } catch(e){}
+  busy = false;
+}
+$('#q').addEventListener('input', () => { sig = ''; render(); });
+setInterval(() => { if(document.visibilityState === 'visible') poll(); }, 1000);
+
+// Two clicks to clear: the first one arms the button for three seconds. Running downloads stay.
+let armed = 0;
+$('#clear').onclick = async () => {
+  const b = $('#clear');
+  if(!armed){
+    b.classList.add('arm'); b.textContent = 'CONFIRM?';
+    armed = setTimeout(() => { armed = 0; b.classList.remove('arm'); b.textContent = 'CLEAR LIST'; }, 3000);
+    return;
+  }
+  clearTimeout(armed); armed = 0; b.classList.remove('arm'); b.textContent = 'CLEAR LIST';
+  await act('clear', 0); sig = ''; poll();
+};
+poll();
+</script>
+</body>
+</html>

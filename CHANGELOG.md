@@ -2,6 +2,12 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Features
+- Downloads page (Ctrl+J, the `≡` menu, or the new tab page): every download with progress, speed and source; cancel, open and show in folder; search; remove rows or clear the list. The list is kept between runs. Programs and scripts cannot be opened from the page.
+- Choose the search engine (Google, DuckDuckGo, Bing, Brave or Ecosia) from the `≡` menu. It is used by the address bar and the new tab page.
+
 ## [1.1.3] - 2026-11-12
 
 ### Fixes

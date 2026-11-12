@@ -5,6 +5,7 @@
 #define IDR_NEWTAB     202
 #define IDR_HISTORY    203
 #define IDR_BOOKMARKS  204
+#define IDR_DOWNLOADS  205
 
 #define APP_VERSION    L"1.1.3"
 #define APP_PUBLISHER  L"NeonNet"

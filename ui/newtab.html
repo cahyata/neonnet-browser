@@ -71,16 +71,18 @@ form button:hover{background:var(--cyan)}
     <a href="https://mail.google.com"><span>05</span>GMAIL</a>
     <a href="https://www.google.com/maps"><span>06</span>MAPS</a>
   </div>
-  <div id="more"><a href="https://neonnet.ui/bookmarks.html">&#9733; BOOKMARKS</a><a href="https://neonnet.ui/history.html">&#9201; HISTORY</a></div>
+  <div id="more"><a href="https://neonnet.ui/bookmarks.html">&#9733; BOOKMARKS</a><a href="https://neonnet.ui/history.html">&#9201; HISTORY</a><a href="https://neonnet.ui/downloads.html">&#11015; DOWNLOADS</a></div>
 </main>
 <div id="scan"></div>
 <script>
+let searchBase = 'https://www.google.com/search?q=';
+fetch('/api/settings', {cache:'no-store'}).then(r => r.json()).then(s => { if(/^https:\/\//.test(s.search)) searchBase = s.search; }).catch(() => {});
 function toUrl(v){
   v = v.trim(); if(!v) return null;
   if(/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return v;
   if(/^localhost(:\d+)?(\/.*)?$/i.test(v) || /^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/.*)?$/.test(v)) return 'http://' + v;
   if(!/\s/.test(v) && /^[^\s\/]+\.[a-z]{2,}(:\d+)?([\/?#].*)?$/i.test(v)) return 'https://' + v;
-  return 'https://www.google.com/search?q=' + encodeURIComponent(v);
+  return searchBase + encodeURIComponent(v);
 }
 document.getElementById('f').addEventListener('submit', e => {
   e.preventDefault();

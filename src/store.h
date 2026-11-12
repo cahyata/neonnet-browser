@@ -28,4 +28,17 @@ bool DeleteBookmark(long long id);
 bool EditBookmark(long long id, const std::wstring& title, const std::wstring& url);
 std::string BookmarksJson();
 
+// Downloads. The list is saved like the others; a download that was still running when
+// NeonNet closed is listed as interrupted next time.
+enum DownloadState { DL_ACTIVE = 0, DL_COMPLETE = 1, DL_CANCELED = 2, DL_INTERRUPTED = 3 };
+// Creates the entry for cefId on first use, then updates it. Empty strings keep the old value.
+// Returns true when the entry is new or its state changed (so the caller should save).
+bool DownloadUpdate(unsigned cefId, const std::wstring& url, const std::wstring& path, const std::wstring& name,
+                    long long total, long long received, long long speed, int state);
+bool DownloadGet(long long id, std::wstring& path, int& state, unsigned& cefId);
+bool DownloadOpenable(const std::wstring& path);         // false for programs and scripts
+std::string DownloadsJson();                              // newest first
+bool DownloadRemove(long long id);                        // not while it is running
+void DownloadsClear();                                    // removes everything that is not running
+
 }  // namespace store

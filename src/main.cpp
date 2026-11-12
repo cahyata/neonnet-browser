@@ -17,6 +17,7 @@
 #include <atomic>
 #include <cmath>
 #include <deque>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -55,6 +56,7 @@ static const wchar_t* NEWTAB = L"https://neonnet.ui/newtab.html";
 static const wchar_t* CHROME_UI = L"https://neonnet.ui/chrome.html";
 static const wchar_t* HISTORY_PAGE = L"https://neonnet.ui/history.html";
 static const wchar_t* BOOKMARKS_PAGE = L"https://neonnet.ui/bookmarks.html";
+static const wchar_t* DOWNLOADS_PAGE = L"https://neonnet.ui/downloads.html";
 static const wchar_t* APP_DIR_NAME = L"NeonNet";
 static const wchar_t* REG_KEY = L"Software\\NeonNet";
 static const wchar_t* UNINSTALL_KEY = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\NeonNet";
@@ -65,6 +67,7 @@ static const UINT WM_APP_OPEN = WM_APP + 2;     // lParam = new std::wstring (ur
 static const UINT WM_APP_UPDATE = WM_APP + 3;   // lParam = new UpdateMsg (from the updater thread)
 static const UINT WM_APP_STORE = WM_APP + 4;    // history/bookmarks changed by a neonnet.ui page
 static const UINT WM_APP_FINISH = WM_APP + 5;   // all browsers closed: destroy the window (posted, not called from OnBeforeClose)
+static const UINT WM_APP_DOWNLOAD = WM_APP + 6; // wParam = DlAction, lParam = download id (from the downloads page)
 
 static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5;
 static const ULONGLONG UPDATE_INTERVAL_MS = 24ull * 60 * 60 * 1000;   // check at most once a day
@@ -74,8 +77,10 @@ enum Cmd {
     CMD_FULLSCREEN, CMD_DEVTOOLS, CMD_ABOUT, CMD_RELOAD, CMD_STOP, CMD_BACK, CMD_FWD,
     CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
     CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE,
-    CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_HISTORY
+    CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_HISTORY,
+    CMD_DOWNLOADS, CMD_SEARCH
 };
+enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW };
 
 // Updater states (see "Auto update" below)
 enum UpdState { U_IDLE, U_CHECKING, U_DOWNLOADING, U_READY, U_AVAILABLE, U_UPTODATE, U_FAILED };
@@ -130,10 +135,30 @@ struct App {
     // find in page
     bool findOpen = false, findCase = false;
     std::wstring findText;
+    // search engine used for text typed in the address bar (index into SEARCH_ENGINES;
+    // atomic because the IO thread answers /api/settings)
+    std::atomic<int> engine{ 0 };
+    // running downloads (UI thread only): CEF id -> handle used to cancel them
+    std::map<unsigned, CefRefPtr<CefDownloadItemCallback>> dlCallbacks;
     // recently closed tabs, newest last
     std::vector<ClosedTab> closed;
 };
 static App g;
+
+// Search engines for text typed in the address bar. `id` is what is saved in the registry.
+struct SearchEngine { const wchar_t* id; const wchar_t* name; const wchar_t* url; };
+static const SearchEngine SEARCH_ENGINES[] = {
+    { L"google",     L"Google",     L"https://www.google.com/search?q=" },
+    { L"duckduckgo", L"DuckDuckGo", L"https://duckduckgo.com/?q=" },
+    { L"bing",       L"Bing",       L"https://www.bing.com/search?q=" },
+    { L"brave",      L"Brave",      L"https://search.brave.com/search?q=" },
+    { L"ecosia",     L"Ecosia",     L"https://www.ecosia.org/search?q=" },
+};
+static const int SEARCH_ENGINE_COUNT = (int)(sizeof(SEARCH_ENGINES) / sizeof(SEARCH_ENGINES[0]));
+static const SearchEngine& CurrentEngine() {
+    int i = g.engine.load();
+    return SEARCH_ENGINES[i >= 0 && i < SEARCH_ENGINE_COUNT ? i : 0];
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -330,6 +355,7 @@ static void SendState() {
     j += std::wstring(L",\"find\":") + (g.findOpen ? L"true" : L"false");
     j += std::wstring(L",\"findCase\":") + (g.findCase ? L"true" : L"false");
     j += L",\"findText\":" + JsonStr(g.findText);
+    j += L",\"search\":" + JsonStr(CurrentEngine().url);
     j += L"}";
     RunInChrome(L"window.__nn&&window.__nn(" + j + L")");
 }
@@ -734,6 +760,7 @@ public:
             case 'G': cmd = shift ? CMD_FINDPREV : CMD_FINDNEXT; break;
             case 'D': if (!repeat) cmd = CMD_BOOKMARK; break;
             case 'H': if (!repeat) cmd = CMD_HISTORY; break;
+            case 'J': if (!repeat) cmd = CMD_DOWNLOADS; break;
             case 'O': if (shift && !repeat) cmd = CMD_BOOKMARKS; break;
             case 'W': case VK_F4: if (!repeat) cmd = CMD_CLOSETAB; break;
             case 'L': cmd = CMD_FOCUSURL; break;
@@ -767,15 +794,29 @@ public:
     }
 
     // --- downloads ---
-    bool OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem>, const CefString&,
+    bool OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, const CefString& suggested_name,
                           CefRefPtr<CefBeforeDownloadCallback> callback) override {
+        // listed on the downloads page from the moment the save dialog opens
+        if (store::DownloadUpdate(item->GetId(), item->GetURL().ToWString(), L"", suggested_name.ToWString(), 0, 0, 0, store::DL_ACTIVE))
+            ScheduleSave();
         callback->Continue("", true);   // ask where to save
         return true;
     }
-    void OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback>) override {
-        std::wstring name = item->GetFullPath().ToWString();
+    void OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback> cb) override {
+        std::wstring path = item->GetFullPath().ToWString();
+        std::wstring name = path;
         size_t slash = name.find_last_of(L"\\/");
         if (slash != std::wstring::npos) name = name.substr(slash + 1);
+        int state = item->IsComplete() ? store::DL_COMPLETE : item->IsCanceled() ? store::DL_CANCELED :
+                    item->IsInterrupted() ? store::DL_INTERRUPTED : store::DL_ACTIVE;
+        unsigned id = item->GetId();
+        if (state == store::DL_ACTIVE) { if (cb) g.dlCallbacks[id] = cb; }
+        else g.dlCallbacks.erase(id);
+        // the state is saved when it changes, not on every progress report (that would keep
+        // postponing the save timer)
+        if (store::DownloadUpdate(id, item->GetURL().ToWString(), path, L"", item->GetTotalBytes(), item->GetReceivedBytes(),
+                                  item->GetCurrentSpeed(), state))
+            ScheduleSave();
         if (item->IsComplete()) g.download = L"DOWNLOADED " + name;
         else if (item->IsCanceled() || item->IsInterrupted()) g.download.clear();
         else if (item->IsInProgress() && !name.empty())
@@ -883,6 +924,20 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
             return new StringResource("{\"error\":\"invalid address\"}", "application/json", 400);
         changed = true;
     }
+    else if (path == L"api/downloads") out = store::DownloadsJson();
+    else if (path == L"api/downloads/remove") changed = store::DownloadRemove(id);
+    else if (path == L"api/downloads/clear") { store::DownloadsClear(); changed = true; }
+    else if (path == L"api/downloads/cancel" || path == L"api/downloads/open" || path == L"api/downloads/show") {
+        // The page sends only an id; what to open is looked up here, never taken from the request.
+        WPARAM act = path == L"api/downloads/cancel" ? DLA_CANCEL : path == L"api/downloads/open" ? DLA_OPEN : DLA_SHOW;
+        PostMessageW(g.hwnd, WM_APP_DOWNLOAD, act, (LPARAM)id);
+    }
+    else if (path == L"api/settings") {
+        // JsonStr (UTF-16) is only used on the UI thread; the engine table is plain ASCII.
+        std::string url;
+        for (const wchar_t* c = CurrentEngine().url; *c; c++) url += (char)*c;
+        out = "{\"search\":\"" + url + "\"}";
+    }
     else return new StringResource("not found", "text/plain", 404);
     if (changed) PostMessageW(g.hwnd, WM_APP_STORE, 0, 0);
     return new StringResource(std::move(out), "application/json", 200);
@@ -920,6 +975,7 @@ public:
         else if (path == L"newtab.html" || path.empty()) id = IDR_NEWTAB;
         else if (path == L"history.html") id = IDR_HISTORY;
         else if (path == L"bookmarks.html") id = IDR_BOOKMARKS;
+        else if (path == L"downloads.html") id = IDR_DOWNLOADS;
         std::string body;
         if (id && LoadUi(id, body)) return new StringResource(std::move(body), "text/html", 200);
         return new StringResource("not found", "text/plain", 404);
@@ -1228,6 +1284,16 @@ static void ExecCmd(int cmd) {
     case CMD_BOOKMARK: ToggleBookmark(); break;
     case CMD_BOOKMARKS: OpenPage(BOOKMARKS_PAGE); break;
     case CMD_HISTORY: OpenPage(HISTORY_PAGE); break;
+    case CMD_DOWNLOADS: OpenPage(DOWNLOADS_PAGE); break;
+    case CMD_SEARCH: {
+        int n = (g.engine.load() + 1) % SEARCH_ENGINE_COUNT;
+        g.engine = n;
+        const SearchEngine& e = SEARCH_ENGINES[n];
+        RegSetBin(L"SearchEngine", REG_SZ, e.id, (DWORD)((wcslen(e.id) + 1) * sizeof(wchar_t)));
+        ShowNotice(L"SEARCH ENGINE: " + Upper(e.name));
+        SendState();
+        break;
+    }
     }
     // zoom changes are async; refresh the status bar shortly after
     if (cmd == CMD_ZOOMIN || cmd == CMD_ZOOMOUT || cmd == CMD_ZOOMRESET) SetTimer(g.hwnd, TIMER_ZOOM, 150, nullptr);
@@ -1500,6 +1566,7 @@ static void ShowMenu(int cssX, int cssY) {
     add(CMD_BOOKMARK, starred ? L"Remove bookmark" : L"Bookmark this page", L"Ctrl+D", !canStar);
     add(CMD_BOOKMARKS, L"Bookmarks", L"Ctrl+Shift+O");
     add(CMD_HISTORY, L"History", L"Ctrl+H");
+    add(CMD_DOWNLOADS, L"Downloads", L"Ctrl+J");
     add(CMD_FIND, L"Find in page", L"Ctrl+F");
     sep();
     add(CMD_ZOOMIN, L"Zoom in", L"Ctrl++");
@@ -1507,6 +1574,7 @@ static void ShowMenu(int cssX, int cssY) {
     add(CMD_ZOOMRESET, L"Reset zoom", L"Ctrl+0");
     sep();
     add(CMD_PRINT, L"Print", L"Ctrl+P");
+    add(CMD_SEARCH, L"Search engine", CurrentEngine().name);   // click to switch to the next one
     add(CMD_SCAN, L"Scanlines", L"", false, g.scan);
     add(CMD_FULLSCREEN, L"Fullscreen", L"F11", false, g.fullscreen);
     add(CMD_DEVTOOLS, L"Developer tools", L"F12");
@@ -1685,6 +1753,25 @@ static void MakeFont() {
 // ---------------------------------------------------------------------------
 // Window procedure
 
+// Cancel, open or show a download for the downloads page. Only the id comes from the page;
+// the file is looked up in the list, and programs and scripts are never opened.
+static void DoDownloadAction(int act, long long id) {
+    std::wstring path; int state = 0; unsigned cefId = 0;
+    if (!store::DownloadGet(id, path, state, cefId)) return;
+    if (act == DLA_CANCEL) {
+        auto it = g.dlCallbacks.find(cefId);
+        if (state == store::DL_ACTIVE && it != g.dlCallbacks.end()) it->second->Cancel();
+        return;
+    }
+    if (state != store::DL_COMPLETE || path.empty() || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+    if (act == DLA_OPEN) {
+        if (store::DownloadOpenable(path)) ShellExecuteW(g.hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    } else if (act == DLA_SHOW) {
+        std::wstring args = L"/select,\"" + path + L"\"";
+        ShellExecuteW(g.hwnd, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+    }
+}
+
 static void SavePlacement() {
     if (g.fullscreen) return;
     WINDOWPLACEMENT wp{ sizeof(wp) };
@@ -1759,6 +1846,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_APP_UPDATE: { std::unique_ptr<UpdateMsg> m((UpdateMsg*)lp); if (!g.closing) OnUpdateMsg(*m); return 0; }
     case WM_APP_STORE: ScheduleSave(); SendState(); return 0;
+    case WM_APP_DOWNLOAD: DoDownloadAction((int)wp, (long long)lp); return 0;
     case WM_SETFOCUS: FocusPage(); return 0;
     case WM_APP_CMD: { std::unique_ptr<std::wstring> m((std::wstring*)lp); if (!g.closing) OnChromeCommand(*m); return 0; }
     case WM_APP_OPEN: {
@@ -1840,6 +1928,10 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     store::Load(KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME);
     EnableDarkMenus();
     g.scan = RegGetDword(L"Scanlines", 1) != 0;
+    {
+        std::wstring eid = RegGetString(L"SearchEngine");
+        for (int i = 0; i < SEARCH_ENGINE_COUNT; i++) if (eid == SEARCH_ENGINES[i].id) g.engine = i;
+    }
 
     WNDCLASSEXW wc{ sizeof(wc) };
     wc.lpfnWndProc = WndProc;

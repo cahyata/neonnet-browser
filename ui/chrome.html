@@ -144,7 +144,7 @@ function toUrl(v){
   if(/^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^(about|data|edge|view-source):/i.test(v)) return v;
   if(/^localhost(:\d+)?(\/.*)?$/i.test(v) || /^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/.*)?$/.test(v)) return 'http://' + v;
   if(!/\s/.test(v) && /^[^\s\/]+\.[a-z]{2,}(:\d+)?([\/?#].*)?$/i.test(v)) return 'https://' + v;
-  return 'https://www.google.com/search?q=' + encodeURIComponent(v);
+  return (state.search || 'https://www.google.com/search?q=') + encodeURIComponent(v);
 }
 function shownUrl(u){ return (!u || u.startsWith(NEWTAB)) ? '' : u; }
 
