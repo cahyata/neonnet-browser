@@ -1265,7 +1265,6 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
     long long id = _wtoi64(QueryParam(query, L"id").c_str());
     if (path == L"api/history") out = store::HistoryJson(QueryParam(query, L"q"), 1500);
     else if (path == L"api/history/delete") changed = store::DeleteHistory(id);
-    else if (path == L"api/history/clear") { store::ClearHistory(); changed = true; }
     else if (path == L"api/bookmarks") out = store::BookmarksJson();
     else if (path == L"api/bookmarks/delete") changed = store::DeleteBookmark(id);
     else if (path == L"api/bookmarks/edit") {

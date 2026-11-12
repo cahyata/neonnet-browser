@@ -18,7 +18,8 @@ h1{margin:0;font:italic 900 40px Impact,"Arial Black",sans-serif;letter-spacing:
 .search input::placeholder{color:#5a4a8a}
 button{font:inherit;cursor:pointer;border:0}
 .danger{height:36px;padding:0 16px;background:none;border:1px solid var(--pink);color:var(--pink);font-weight:bold}
-.danger:hover,.danger.arm{background:var(--pink);color:var(--bg)}
+.danger:hover{background:var(--pink);color:var(--bg)}
+a.danger{display:inline-flex;align-items:center;text-decoration:none;white-space:nowrap}
 h2{font:bold 12px "Cascadia Mono","Consolas",monospace;color:var(--yellow);letter-spacing:2px;margin:22px 0 6px;
   padding-bottom:4px;border-bottom:1px solid rgba(255,46,151,.5)}
 .row{display:flex;align-items:center;gap:12px;padding:6px 8px;min-height:32px}
@@ -40,7 +41,7 @@ h2{font:bold 12px "Cascadia Mono","Consolas",monospace;color:var(--yellow);lette
   <div class="sub">&gt; ACCESS LOG // LAST 90 DAYS</div>
   <div class="tools">
     <div class="search"><span>&gt;&gt;</span><input id="q" spellcheck="false" autocomplete="off" placeholder="search history" autofocus></div>
-    <button class="danger" id="clear">CLEAR ALL</button>
+    <a class="danger" id="clear" href="https://neonnet.ui/settings.html?clear=history#privacy" title="Choose what to delete and for how long">CLEAR BROWSING DATA</a>
   </div>
   <div id="list"></div>
 </main>
@@ -97,20 +98,7 @@ async function load(){
 let timer = 0;
 $('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 150); });
 
-// Two clicks to clear: the first one arms the button for three seconds.
-let armed = 0;
-$('#clear').onclick = async () => {
-  const b = $('#clear');
-  if(!armed){
-    b.classList.add('arm'); b.textContent = 'CONFIRM?';
-    armed = setTimeout(() => { armed = 0; b.classList.remove('arm'); b.textContent = 'CLEAR ALL'; }, 3000);
-    return;
-  }
-  clearTimeout(armed); armed = 0; b.classList.remove('arm'); b.textContent = 'CLEAR ALL';
-  await fetch('/api/history/clear', {cache:'no-store'}).catch(() => {});
-  load();
-};
-
+// Clearing the history, with a period, is part of "Clear browsing data" on the settings page.
 load();
 </script>
 </body>

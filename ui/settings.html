@@ -62,7 +62,7 @@ select option{background:var(--bg2);color:var(--cyan)}
       <button class="btn" id="homeSave">SAVE</button></div>
   </div>
 
-  <h2>PRIVACY</h2>
+  <h2 id="privacy">PRIVACY</h2>
   <div class="row stack">
     <div class="lab"><b>Clear browsing data</b>
       <span>Deletes the data you tick, for the chosen period. Cookies and site data also sign you out of sites. The cache is always cleared completely. Single history entries can be removed on the history page.</span>
@@ -153,6 +153,10 @@ async function saveHome(){
 }
 // Clear browsing data: the app deletes in the background; this page polls until it is done.
 for(const id of ['#clrCookies', '#clrCache', '#clrHistory']) $(id).onclick = () => $(id).classList.toggle('on');
+// Arriving from the history page (?clear=history): only the history is ticked, so cookies and the cache are not touched by mistake.
+if(new URLSearchParams(location.search).get('clear') === 'history'){
+  $('#clrCookies').classList.remove('on'); $('#clrCache').classList.remove('on');
+}
 let clearing = false;
 $('#clrGo').onclick = async () => {
   if(clearing) return;

@@ -144,7 +144,7 @@ Ctrl+Shift+T reopens the most recently closed tab at its old position. Press it 
 
 Every page you open is recorded with its title and time, for 90 days (up to 20,000 visits). Pages that failed to load are left out.
 
-Open it with Ctrl+H, the `≡` menu, or **HISTORY** on the new tab page. You can search it, remove single visits with `✕`, or click **CLEAR ALL** twice to remove everything. Clearing the history does not clear cookies or the cache.
+Open it with Ctrl+H, the `≡` menu, or **HISTORY** on the new tab page. You can search it, remove single visits with `✕`, or click **CLEAR BROWSING DATA**, which opens the privacy section of the settings page with only the history ticked. There you choose the period (last hour to all time). Clearing the history does not clear cookies or the cache unless you tick them too.
 
 ## Settings
 

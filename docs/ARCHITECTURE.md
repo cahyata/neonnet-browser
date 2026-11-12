@@ -116,7 +116,7 @@ Every response carries `X-Frame-Options: DENY`, so websites cannot load NeonNet'
   | Path | Answer |
   |---|---|
   | `history?q=` | Up to 1,500 visits, newest first, filtered by title or URL |
-  | `history/delete?id=`, `history/clear` | Remove one visit, or all |
+  | `history/delete?id=` | Remove one visit. Removing history by period is `cleardata/run` (see "Clear browsing data"); the history page links to it |
   | `bookmarks` | All bookmarks, oldest first |
   | `bookmarks/delete?id=`, `bookmarks/edit?id=&title=&url=` | Change bookmarks; `edit` rejects anything that is not http, https or file |
   | `downloads` | Up to 300 downloads, newest first (state, sizes, speed, `exists`, `openable`) |
