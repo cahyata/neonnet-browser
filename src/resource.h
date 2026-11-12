@@ -6,7 +6,7 @@
 #define IDR_HISTORY    203
 #define IDR_BOOKMARKS  204
 
-#define APP_VERSION    L"1.0.0"
+#define APP_VERSION    L"1.1.0"
 #define APP_PUBLISHER  L"NeonNet"
 
 // GitHub repository (owner/name) whose latest release the auto-updater checks.
