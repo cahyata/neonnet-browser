@@ -32,6 +32,7 @@ std::deque<Entry> history;     // oldest first
 std::vector<Entry> bookmarks;  // in the order they were added
 long long nextId = 1;
 bool histDirty = false, bmDirty = false, dlDirty = false;
+bool incognito = false;        // nothing is recorded or saved (see LoadBookmarksReadOnly)
 std::wstring histFile, bmFile, dlFile;
 
 struct Download {
@@ -276,6 +277,16 @@ void Load(const std::wstring& dir) {
     histDirty = history.size() != before;
 }
 
+// Incognito: the bookmarks of the normal profile can be read (so they still show up in the
+// address bar and on the new tab page), but nothing is ever written, and no history is kept.
+void LoadBookmarksReadOnly(const std::wstring& dir) {
+    Excl x;
+    incognito = true;
+    histFile.clear(); bmFile.clear(); dlFile.clear();   // SaveIfDirty() writes nothing without a file name
+    history.clear(); bookmarks.clear(); downloads.clear();
+    ReadFile(dir + L"\\bookmarks.txt", bookmarks);
+}
+
 bool SaveIfDirty() {
     std::deque<Entry> h; std::vector<Entry> b; std::vector<Download> dl;
     bool wantH, wantB, wantD;
@@ -308,7 +319,7 @@ bool Recordable(const std::wstring& url) {
 }
 
 long long Visit(long long prevId, const std::wstring& url) {
-    if (!Recordable(url)) return 0;
+    if (incognito || !Recordable(url)) return 0;
     Excl x;
     histDirty = true;
     if (!history.empty() && history.back().url == url && (prevId == history.back().id || prevId == 0)) {
@@ -373,7 +384,7 @@ long long FindBookmark(const std::wstring& url) {
 }
 
 long long AddBookmark(const std::wstring& url, const std::wstring& title) {
-    if (!Recordable(url)) return 0;
+    if (incognito || !Recordable(url)) return 0;
     Excl x;
     for (const Entry& e : bookmarks) if (e.url == url) return e.id;
     Entry e; e.id = nextId++; e.time = UnixMs(); e.url = url;
@@ -385,13 +396,14 @@ long long AddBookmark(const std::wstring& url, const std::wstring& title) {
 
 bool DeleteBookmark(long long id) {
     Excl x;
+    if (incognito) return false;
     for (auto it = bookmarks.begin(); it != bookmarks.end(); ++it)
         if (it->id == id) { bookmarks.erase(it); bmDirty = true; return true; }
     return false;
 }
 
 bool EditBookmark(long long id, const std::wstring& title, const std::wstring& url) {
-    if (!Recordable(url)) return false;
+    if (incognito || !Recordable(url)) return false;
     Excl x;
     for (Entry& e : bookmarks) {
         if (e.id != id) continue;

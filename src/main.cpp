@@ -50,6 +50,7 @@ static const COLORREF C_PINK = RGB(0xff, 0x2e, 0x97);
 static const COLORREF C_CYAN = RGB(0x00, 0xe5, 0xff);
 static const COLORREF C_YELLOW = RGB(0xff, 0xd6, 0x00);
 static const COLORREF C_MUTED = RGB(0x8a, 0x6f, 0xc0);
+static const COLORREF C_GREEN = RGB(0x35, 0xff, 0xa0);   // accent of an incognito window
 static const cef_color_t CEF_BG = 0xFF12062C;
 
 static const wchar_t* UI_HOST = L"https://neonnet.ui/";
@@ -86,7 +87,7 @@ enum Cmd {
     CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
     CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE,
     CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_HISTORY,
-    CMD_DOWNLOADS, CMD_SETTINGS
+    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO
 };
 enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW };
 
@@ -134,6 +135,10 @@ struct App {
     std::wstring alert;   // urgent status bar message (unsupported video / DRM), shown above everything else
     std::wstring startUrl;
     bool closing = false;
+    // Incognito window (own process, started with --neonnet-incognito): in-memory browser
+    // profile, no history, no saved window placement, no updates. Set once before CEF starts.
+    bool incognito = false;
+    CefRefPtr<CefRequestContext> reqCtx;   // incognito: the in-memory context every tab uses (null = normal profile)
     int devtools = 0;
     // auto update
     UpdState upd = U_IDLE;
@@ -160,6 +165,7 @@ struct App {
     std::vector<ClosedTab> closed;
 };
 static App g;
+static COLORREF Accent() { return g.incognito ? C_GREEN : C_PINK; }   // window frame, status bar line, menu marks
 
 // Search engines for text typed in the address bar. `id` is what is saved in the registry.
 struct SearchEngine { const wchar_t* id; const wchar_t* name; const wchar_t* url; };
@@ -374,7 +380,8 @@ static void RunInChrome(const std::wstring& js) {
 
 static void SendState() {
     Tab* a = Active();
-    if (a) SetWindowTextW(g.hwnd, ((a->title.empty() ? std::wstring(L"New tab") : a->title) + L" - NeonNet").c_str());
+    if (a) SetWindowTextW(g.hwnd, ((a->title.empty() ? std::wstring(L"New tab") : a->title) +
+                                   (g.incognito ? L" - NeonNet (Incognito)" : L" - NeonNet")).c_str());
     if (!g.chrome) return;
     std::wstring j = L"{\"type\":\"state\",\"tabs\":[";
     for (size_t i = 0; i < g.tabs.size(); i++) {
@@ -389,9 +396,10 @@ static void SendState() {
     j += std::wstring(L",\"canFwd\":") + (a && a->canFwd && a->errorUrl.empty() ? L"true" : L"false");
     j += std::wstring(L",\"loading\":") + (a && a->loading ? L"true" : L"false");
     j += std::wstring(L",\"scan\":") + (g.scan ? L"true" : L"false");
+    j += std::wstring(L",\"incognito\":") + (g.incognito ? L"true" : L"false");
     j += std::wstring(L",\"max\":") + (IsZoomed(g.hwnd) ? L"true" : L"false");
     std::wstring cur = a ? DisplayUrl(a) : L"";
-    j += std::wstring(L",\"canStar\":") + (store::Recordable(cur) ? L"true" : L"false");
+    j += std::wstring(L",\"canStar\":") + (!g.incognito && store::Recordable(cur) ? L"true" : L"false");
     j += std::wstring(L",\"starred\":") + (store::FindBookmark(cur) ? L"true" : L"false");
     j += std::wstring(L",\"find\":") + (g.findOpen ? L"true" : L"false");
     j += std::wstring(L",\"findCase\":") + (g.findCase ? L"true" : L"false");
@@ -584,7 +592,7 @@ static void CreateTab(const std::wstring& url, bool activate, int at) {
 
     g.creatingTab = id;
     CefRefPtr<CefBrowser> b = CefBrowserHost::CreateBrowserSync(ChildInfo(ContentRect()), MainClient(),
-        url.empty() ? NEWTAB : url, BrowserSettings(), nullptr, nullptr);
+        url.empty() ? NEWTAB : url, BrowserSettings(), nullptr, g.reqCtx);
     g.creatingTab = 0;
     Tab* t = FindTab(id);
     if (!b) { if (t) CloseTab(id); return; }
@@ -826,6 +834,7 @@ public:
             case 'F': cmd = CMD_FIND; break;
             case 'G': cmd = shift ? CMD_FINDPREV : CMD_FINDNEXT; break;
             case 'D': if (!repeat) cmd = CMD_BOOKMARK; break;
+            case 'N': if (shift && !repeat) cmd = CMD_INCOGNITO; break;
             case 'H': if (!repeat) cmd = CMD_HISTORY; break;
             case 'J': if (!repeat) cmd = CMD_DOWNLOADS; break;
             case VK_OEM_COMMA: if (!repeat) cmd = CMD_SETTINGS; break;
@@ -1086,7 +1095,7 @@ static std::string SettingsJson() {
     }
     std::wstring chromium = std::to_wstring(cef_version_info(4)) + L"." + std::to_wstring(cef_version_info(5)) + L"." +
                             std::to_wstring(cef_version_info(6)) + L"." + std::to_wstring(cef_version_info(7));
-    o += std::string("],\"scan\":") + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
+    o += std::string("],\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
          ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
          ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
@@ -1322,7 +1331,7 @@ static void ShowNotice(const std::wstring& text) {
 }
 
 static void StartUpdateCheck(bool manual) {
-    if (g.closing || g.upd == U_CHECKING || g.upd == U_DOWNLOADING) return;
+    if (g.closing || g.incognito || g.upd == U_CHECKING || g.upd == U_DOWNLOADING) return;
     if (g.upd == U_READY) { if (manual) ShowNotice(L"UPDATE v" + g.updVersion + L" IS READY - USE THE MENU TO RESTART"); return; }
     if (g.updThread) { WaitForSingleObject(g.updThread, 0); CloseHandle(g.updThread); g.updThread = nullptr; }
     g.upd = U_CHECKING;
@@ -1363,6 +1372,7 @@ static void MaybeAutoCheck() {
 
 // At startup: remove installers left from earlier updates and report the last update.
 static void UpdateStartup() {
+    if (g.incognito) return;   // the normal window cleans up and reports updates
     WIN32_FIND_DATAW fd;
     std::wstring dir = UpdatesDir();
     HANDLE f = FindFirstFileW((dir + L"\\NeonNet-Setup-*").c_str(), &fd);
@@ -1442,11 +1452,21 @@ static void OpenPage(const std::wstring& page) {
     CreateTab(page, true);
 }
 
+// An incognito window is a second NeonNet process with its own in-memory profile (like Chrome's
+// separate incognito window, but isolated by process). Starting it again while it is open
+// does not start a third one: CEF hands the request to the running one, which opens a new tab.
+static void LaunchIncognito() {
+    wchar_t exe[MAX_PATH]; DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    if (!n || n >= MAX_PATH) return;
+    ShellExecuteW(nullptr, L"open", exe, L"--neonnet-incognito", nullptr, SW_SHOWNORMAL);
+}
+
 static void ExecCmd(int cmd) {
     Tab* a = Active();
     CefRefPtr<CefBrowser> b = a ? a->browser : nullptr;
     switch (cmd) {
     case CMD_NEWTAB: CreateTab(NEWTAB, true); break;
+    case CMD_INCOGNITO: if (g.incognito) CreateTab(NEWTAB, true); else LaunchIncognito(); break;
     case CMD_CLOSETAB: if (a) CloseTab(a->id); break;
     case CMD_HOME: if (b) b->GetMainFrame()->LoadURL(HomeUrl()); break;
     case CMD_RELOAD:
@@ -1587,7 +1607,7 @@ static void PaintMenu(HWND hwnd, MenuState& st, HDC hdc) {
         COLORREF kc = it.disabled ? C_DIM : hot ? C_BG : C_MUTED;
         if (it.checked) {
             RECT cr{ r.left + S(12), r.top, r.left + S(30), r.bottom };
-            SetTextColor(mem, hot ? C_BG : C_PINK);
+            SetTextColor(mem, hot ? C_BG : Accent());
             DrawTextW(mem, L"\x25A0", -1, &cr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         }
         RECT tr{ r.left + S(32), r.top, r.right - S(16), r.bottom };
@@ -1615,7 +1635,7 @@ static void PaintMenu(HWND hwnd, MenuState& st, HDC hdc) {
     }
 
     // frame: pink outline following the clipped corners (top-right and bottom-left)
-    HPEN pink = CreatePen(PS_SOLID, 1, C_PINK);
+    HPEN pink = CreatePen(PS_SOLID, 1, Accent());
     HGDIOBJ op = SelectObject(mem, pink);
     POINT pts[7] = { {0, 0}, {w - c - 1, 0}, {w - 1, c}, {w - 1, h - 1}, {c, h - 1}, {0, h - c - 1}, {0, 0} };
     Polyline(mem, pts, 7);
@@ -1769,14 +1789,15 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
     auto sep = [&] { m.push_back(MenuItem()); };
     Tab* a = Active();
     bool starred = a && store::FindBookmark(DisplayUrl(a)) != 0;
-    bool canStar = a && store::Recordable(DisplayUrl(a));
+    bool canStar = !g.incognito && a && store::Recordable(DisplayUrl(a));
     add(CMD_NEWTAB, L"New tab", L"Ctrl+T");
     add(CMD_CLOSETAB, L"Close tab", L"Ctrl+W");
     add(CMD_REOPEN, L"Reopen closed tab", L"Ctrl+Shift+T", g.closed.empty());
+    add(CMD_INCOGNITO, g.incognito ? L"New incognito tab" : L"New incognito window", L"Ctrl+Shift+N");
     sep();
     add(CMD_BOOKMARK, starred ? L"Remove bookmark" : L"Bookmark this page", L"Ctrl+D", !canStar);
     add(CMD_BOOKMARKS, L"Bookmarks", L"Ctrl+Shift+O");
-    add(CMD_HISTORY, L"History", L"Ctrl+H");
+    add(CMD_HISTORY, L"History", L"Ctrl+H", g.incognito);   // nothing is recorded in an incognito window
     add(CMD_DOWNLOADS, L"Downloads", L"Ctrl+J");
     add(CMD_FIND, L"Find in page", L"Ctrl+F");
     sep();
@@ -1790,10 +1811,12 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
     add(CMD_DEVTOOLS, L"Developer tools", L"F12");
     sep();
     add(CMD_SETTINGS, L"Settings", L"Ctrl+,");
-    if (g.upd == U_READY) add(CMD_UPDATE_RESTART, L"Restart to update to v" + g.updVersion);
-    if (g.upd == U_AVAILABLE) add(CMD_UPDATE_PAGE, L"Download v" + g.updVersion);
-    add(CMD_UPDATE_CHECK, L"Check for updates", L"", g.upd == U_CHECKING || g.upd == U_DOWNLOADING);
-    if (IsInstalledCopy()) add(CMD_UPDATE_AUTO, L"Automatic updates", L"", false, AutoUpdateEnabled());
+    if (!g.incognito) {   // updates are handled by the normal window
+        if (g.upd == U_READY) add(CMD_UPDATE_RESTART, L"Restart to update to v" + g.updVersion);
+        if (g.upd == U_AVAILABLE) add(CMD_UPDATE_PAGE, L"Download v" + g.updVersion);
+        add(CMD_UPDATE_CHECK, L"Check for updates", L"", g.upd == U_CHECKING || g.upd == U_DOWNLOADING);
+        if (IsInstalledCopy()) add(CMD_UPDATE_AUTO, L"Automatic updates", L"", false, AutoUpdateEnabled());
+    }
     add(CMD_ABOUT, L"About NeonNet");
 
     RECT c = ChromeRect();
@@ -1976,6 +1999,16 @@ public:
 
         CefRegisterSchemeHandlerFactory("https", "neonnet.ui", new UiSchemeFactory());
         CefRegisterSchemeHandlerFactory("https", "chrome.neonnet.ui", new UiSchemeFactory());
+        if (g.incognito) {
+            // Empty cache_path: an incognito context. Cookies, cache, local storage and everything
+            // else the pages store live in memory and are gone when the window closes. Scheme
+            // handlers and preferences are per context, so NeonNet's own pages need them here too.
+            CefRequestContextSettings rs;
+            g.reqCtx = CefRequestContext::CreateContext(rs, nullptr);
+            g.reqCtx->SetPreference("download_bubble.partial_view_enabled", noBubble, err);
+            g.reqCtx->RegisterSchemeHandlerFactory("https", "neonnet.ui", new UiSchemeFactory());
+            g.reqCtx->RegisterSchemeHandlerFactory("https", "chrome.neonnet.ui", new UiSchemeFactory());
+        }
         g_client = new Client();
         g.creatingChrome = true;
         CefBrowserHost::CreateBrowserSync(ChildInfo(ChromeRect()), g_client.get(), CHROME_UI, BrowserSettings(), nullptr, nullptr);
@@ -2008,7 +2041,7 @@ static void Paint(HDC hdc) {
 
     if (!g.fullscreen) {
         RECT st = StatusRect();
-        HPEN pink = CreatePen(PS_SOLID, 1, C_PINK);
+        HPEN pink = CreatePen(PS_SOLID, 1, Accent());
         HGDIOBJ oldPen = SelectObject(mem, pink);
         MoveToEx(mem, st.left, st.top, nullptr); LineTo(mem, st.right, st.top);
         if (!IsZoomed(g.hwnd)) {
@@ -2032,6 +2065,7 @@ static void Paint(HDC hdc) {
         else if (g.upd == U_READY) { left = L"UPDATE v" + g.updVersion + L" READY - INSTALLS WHEN NEONNET CLOSES"; lc = C_YELLOW; }
         else if (g.upd == U_AVAILABLE) { left = L"NEONNET v" + g.updVersion + L" IS AVAILABLE - SEE THE MENU"; lc = C_YELLOW; }
         else if (a && !a->errorUrl.empty()) { left = L"SIGNAL LOST"; lc = C_PINK; }
+        else if (g.incognito) { left = L"INCOGNITO - HISTORY AND COOKIES ARE NOT SAVED"; lc = C_GREEN; }
         else left = L"LINK STABLE";
 
         SYSTEMTIME t; GetLocalTime(&t);
@@ -2113,7 +2147,8 @@ static std::wstring MediaDir(bool create) {
     std::wstring base = KnownFolder(FOLDERID_LocalAppData);
     if (base.empty()) return {};
     base += std::wstring(L"\\") + APP_DIR_NAME + L"\\Temp";
-    std::wstring dir = base + L"\\media";
+    // an incognito window has its own folder: the normal window's sweep must not delete its copies
+    std::wstring dir = base + (g.incognito ? L"\\media-incognito" : L"\\media");
     if (create) { CreateDirectoryW(base.c_str(), nullptr); CreateDirectoryW(dir.c_str(), nullptr); }
     return dir;
 }
@@ -2254,7 +2289,7 @@ static void DoDownloadAction(int act, long long id) {
 }
 
 static void SavePlacement() {
-    if (g.fullscreen) return;
+    if (g.fullscreen || g.incognito) return;   // an incognito window must not move the normal window
     WINDOWPLACEMENT wp{ sizeof(wp) };
     if (GetWindowPlacement(g.hwnd, &wp)) RegSetBin(L"Placement", REG_BINARY, &wp, sizeof(wp));
 }
@@ -2398,7 +2433,48 @@ static void EnableDarkMenus() {
 // ---------------------------------------------------------------------------
 // Entry point (browser process and all sub-processes)
 
+// Delete a folder and everything in it (best effort; files still in use are left for the next start).
+static void PurgeDir(const std::wstring& dir) {
+    if (dir.size() < 20) return;   // never a drive root or a short path by mistake
+    std::wstring from = dir; from.push_back(L'\0');
+    SHFILEOPSTRUCTW op{};
+    op.wFunc = FO_DELETE;
+    op.pFrom = from.c_str();
+    op.fFlags = FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT;
+    SHFileOperationW(&op);
+}
+
+static std::wstring IncognitoDir() { return KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME + L"\\Incognito"; }
+
+// CefShutdown() may end the process without returning, so an incognito window cannot clean up
+// after it. It starts this helper instead: a copy of NeonNet that waits for the window's process
+// to exit, deletes the session folder and quits. (A crash leaves the folder behind; the next
+// incognito window deletes it at start-up.)
+static void StartIncognitoCleanup() {
+    wchar_t exe[MAX_PATH]; DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    if (!n || n >= MAX_PATH) return;
+    std::wstring cmd = L"\"" + std::wstring(exe) + L"\" --neonnet-purge-incognito=" + std::to_wstring(GetCurrentProcessId());
+    STARTUPINFOW si{ sizeof(si) }; PROCESS_INFORMATION pi{};
+    if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW | DETACHED_PROCESS, nullptr, nullptr, &si, &pi)) {
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    }
+}
+
 static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
+    {   // helper mode: wait for an incognito window's process to end, then delete its session folder
+        const wchar_t* key = L"--neonnet-purge-incognito=";
+        const wchar_t* at = wcsstr(GetCommandLineW(), key);
+        if (at) {
+            DWORD pid = (DWORD)_wtoi(at + wcslen(key));
+            if (HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, pid)) { WaitForSingleObject(h, 60000); CloseHandle(h); }
+            for (int i = 0; i < 10; i++) {   // the engine's own processes may need a moment to let go of files
+                PurgeDir(IncognitoDir());
+                if (GetFileAttributesW(IncognitoDir().c_str()) == INVALID_FILE_ATTRIBUTES) break;
+                Sleep(1000);
+            }
+            return 0;
+        }
+    }
     CefMainArgs main_args(hinst);
     CefRefPtr<NeonApp> app(new NeonApp());   // sub-processes need it too (renderer hooks)
     int code = CefExecuteProcess(main_args, app.get(), sandbox_info);
@@ -2414,12 +2490,19 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     for (int i = 1; argv && i < argc; i++) {
         if (_wcsicmp(argv[i], L"--uninstall") == 0) { LocalFree(argv); return Uninstall(); }
+        if (_wcsicmp(argv[i], L"--neonnet-incognito") == 0) g.incognito = true;
         if (argv[i][0] != L'-' && g.startUrl.empty()) g.startUrl = NormalizeArgUrl(argv[i]);
     }
     if (argv) LocalFree(argv);
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    store::Load(KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME);
+    if (g.incognito) {
+        store::LoadBookmarksReadOnly(KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME);
+        // its own taskbar button, not grouped with the normal window
+        SetCurrentProcessExplicitAppUserModelID(L"NeonNet.Incognito");
+    } else {
+        store::Load(KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME);
+    }
     EnableDarkMenus();
     g.scan = RegGetDword(L"Scanlines", 1) != 0;
     {
@@ -2437,7 +2520,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     RegisterClassExW(&wc);
 
     g.dpi = GetDpiForSystem();
-    g.hwnd = CreateWindowExW(0, wc.lpszClassName, L"NeonNet", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+    g.hwnd = CreateWindowExW(0, wc.lpszClassName, g.incognito ? L"NeonNet (Incognito)" : L"NeonNet", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                              CW_USEDEFAULT, CW_USEDEFAULT, S(1280), S(820), nullptr, nullptr, g.hmod, nullptr);
     if (!g.hwnd) return 1;
     g.dpi = GetDpiForWindow(g.hwnd);
@@ -2453,6 +2536,19 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     if (!sandbox_info) settings.no_sandbox = true;
     CefString(&settings.root_cache_path) = data;
     CefString(&settings.cache_path) = data + L"\\Default";
+    HANDLE incogMutex = nullptr; bool incogOwner = false;
+    std::wstring incogDir = IncognitoDir();
+    if (g.incognito) {
+        // No cache_path: Chromium keeps cookies, cache and storage in memory only. root_cache_path
+        // still has to be a folder of its own, so that this process does not share the normal
+        // profile (and its single-instance lock) but does share one incognito session: a second
+        // incognito window is handed to the running one as a new tab.
+        CefString(&settings.root_cache_path) = incogDir;
+        CefString(&settings.cache_path) = L"";
+        incogMutex = CreateMutexW(nullptr, FALSE, L"Local\\NeonNetIncognitoSession");
+        incogOwner = incogMutex && GetLastError() != ERROR_ALREADY_EXISTS;
+        if (incogOwner) PurgeDir(incogDir);   // left over from a crash
+    }
     // Must stay off: with session cookies persisted CEF switches Chromium to "restore last
     // session" and re-opens old tabs as stray Chrome-style windows on every start.
     settings.persist_session_cookies = false;
@@ -2468,7 +2564,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     WINDOWPLACEMENT wp{ sizeof(wp) };
     DWORD sz = sizeof(wp);
     bool restored = false;
-    if (RegGetValueW(HKEY_CURRENT_USER, REG_KEY, L"Placement", RRF_RT_REG_BINARY, nullptr, &wp, &sz) == ERROR_SUCCESS &&
+    if (!g.incognito && RegGetValueW(HKEY_CURRENT_USER, REG_KEY, L"Placement", RRF_RT_REG_BINARY, nullptr, &wp, &sz) == ERROR_SUCCESS &&
         sz == sizeof(wp) && wp.length == sizeof(wp)) {
         if (wp.showCmd != SW_SHOWMAXIMIZED) wp.showCmd = SW_SHOWNORMAL;
         SetWindowPlacement(g.hwnd, &wp);
@@ -2483,11 +2579,15 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
 
     CefRunMessageLoop();
     g_client = nullptr;
+    g.reqCtx = nullptr;
     store::SaveIfDirty();
     // Start the installer before CefShutdown(): it waits for this process to exit, and it must
     // not depend on CefShutdown() returning normally.
     UpdateShutdown();
+    if (incogOwner) StartIncognitoCleanup();   // the whole incognito session goes with the window
     CefShutdown();
+    if (incogOwner) PurgeDir(incogDir);        // normally never reached, see StartIncognitoCleanup()
+    if (incogMutex) CloseHandle(incogMutex);
     if (g.font) DeleteObject(g.font);
     CoUninitialize();
     return 0;

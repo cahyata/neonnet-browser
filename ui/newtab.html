@@ -5,6 +5,11 @@
 <title>NEW TAB</title>
 <style>
 :root{--bg:#12062c;--bg2:#0a0420;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0}
+:root.incog{--pink:#35ffa0;--pink2:#9dffd0}
+#ghost{display:none;width:min(620px,100%);margin-top:16px;padding:12px 16px;border:1px solid var(--pink);background:rgba(10,4,32,.92);
+  color:#e8d8ff;line-height:1.6;font-size:12px}
+#ghost b{color:var(--pink)}
+:root.incog #ghost{display:block}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
 #sky{position:absolute;inset:0 0 30% 0;background:linear-gradient(#12062c 0%,#2a0f55 55%,#5a1670 100%);overflow:hidden}
@@ -71,12 +76,25 @@ form button:hover{background:var(--cyan)}
     <a href="https://mail.google.com"><span>05</span>GMAIL</a>
     <a href="https://www.google.com/maps"><span>06</span>MAPS</a>
   </div>
+  <div id="ghost">
+    <b>&gt; GHOST MODE</b><br>
+    NeonNet does not save your history, cookies or site data from this window, and forgets them when it closes.
+    Files you download and bookmarks stay where they are.<br>
+    Websites, your network and your internet provider can still see where you go.
+  </div>
   <div id="more"><a href="https://neonnet.ui/bookmarks.html">&#9733; BOOKMARKS</a><a href="https://neonnet.ui/history.html">&#9201; HISTORY</a><a href="https://neonnet.ui/downloads.html">&#11015; DOWNLOADS</a><a href="https://neonnet.ui/settings.html">&#9881; SETTINGS</a></div>
 </main>
 <div id="scan"></div>
 <script>
 let searchBase = 'https://www.google.com/search?q=';
-fetch('/api/settings', {cache:'no-store'}).then(r => r.json()).then(s => { if(/^https:\/\//.test(s.searchUrl)) searchBase = s.searchUrl; }).catch(() => {});
+fetch('/api/settings', {cache:'no-store'}).then(r => r.json()).then(s => {
+  if(/^https:\/\//.test(s.searchUrl)) searchBase = s.searchUrl;
+  if(s.incognito){
+    document.documentElement.classList.add('incog');
+    document.querySelector('h1').textContent = 'GHOST MODE';
+    document.title = 'INCOGNITO';
+  }
+}).catch(() => {});
 function toUrl(v){
   v = v.trim(); if(!v) return null;
   if(/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return v;

@@ -2,6 +2,11 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Features
+- Incognito window (Ctrl+Shift+N, or **New incognito window** in the `≡` menu). It is a separate window with a green frame and an INCOGNITO badge, and its own in-memory profile: cookies, cache, local storage and sign-ins are not written to disk and are gone when the window closes. No history is recorded, and bookmarks are shown but cannot be changed. Downloaded files are kept as usual. Several incognito tabs share one session, and the normal window is not affected. Automatic updates are handled by the normal window.
+
 ## [1.3.0] - 2026-11-12
 
 ### Features

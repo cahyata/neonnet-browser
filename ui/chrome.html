@@ -9,6 +9,10 @@
   --pink:#ff2e97; --pink2:#ff7bc0; --cyan:#00e5ff; --yellow:#ffd600; --muted:#8a6fc0;
   --cut:12px;
 }
+/* incognito window: the pink accent becomes green, and the brand carries a badge */
+:root.incog{--pink:#35ffa0;--pink2:#9dffd0}
+#incog{display:none;margin-left:8px;padding:0 6px;border:1px solid var(--pink);color:var(--pink);font-size:10px;letter-spacing:1px;vertical-align:1px}
+:root.incog #incog{display:inline-block}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:#e8d8ff;
   font:12px "Cascadia Mono","Consolas","Courier New",monospace;user-select:none}
@@ -108,7 +112,7 @@ body.find #find{display:flex}
 </head>
 <body>
 <div id="top">
-  <div id="brand">&#9632; NEON<b>//</b>NET</div>
+  <div id="brand">&#9632; NEON<b>//</b>NET<span id="incog">INCOGNITO</span></div>
   <div id="tabs"></div>
   <button id="plus" title="New tab (Ctrl+T)">+</button>
   <div id="spacer"></div>
@@ -194,6 +198,7 @@ function render(){
   $('#reload').title = state.loading ? 'Stop (Esc)' : 'Reload (F5)';
   $('#bar').classList.toggle('on', !!state.loading);
   $('#scanb').classList.toggle('on', !!state.scan);
+  document.documentElement.classList.toggle('incog', !!state.incognito);
   document.documentElement.style.setProperty('--scan', state.scan ? 'block' : 'none');
   document.documentElement.style.setProperty('--cutline', state.max ? 'none' : 'block');
   $('#win').style.marginRight = state.max ? '0' : '';

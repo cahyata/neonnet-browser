@@ -62,6 +62,7 @@ Matches must contain every word you typed, in the address or the title. Pages yo
 | Ctrl+T | New tab |
 | Ctrl+W or Ctrl+F4 | Close tab |
 | Ctrl+Shift+T | Reopen the last closed tab |
+| Ctrl+Shift+N | New incognito window (in an incognito window: a new tab) |
 | Ctrl+F | Find in page |
 | F3, Ctrl+G / Shift+F3, Ctrl+Shift+G | Next / previous match |
 | Ctrl+D | Bookmark the page, or remove its bookmark |
@@ -104,6 +105,17 @@ NeonNet does not include the H.264 and AAC codecs, because they need patent lice
 - **Temporary copy:** the player gets a copy in `%LOCALAPPDATA%\NeonNet\Temp\media`. NeonNet deletes it about two minutes after opening it, once no program holds it open: a player that is still showing the video keeps the file locked, so it stays until you close it. Anything left over is removed the next time NeonNet starts. If no program can open the file, it is moved to your Downloads folder instead.
 - **Files you download on purpose** (a Download button, or a server that marks the file as an attachment) are saved as usual, without a question.
 - **DRM:** when a site asks for DRM (Widevine and similar), the status bar shows `THIS SITE NEEDS DRM`. Protected video cannot be opened in a player either; it only exists encrypted.
+
+## Incognito window
+
+Ctrl+Shift+N, or **New incognito window** in the `≡` menu, opens a second NeonNet window with a green frame and an INCOGNITO badge.
+
+- **Not saved:** cookies, cache, local storage and sign-ins live in memory only, so you are signed out of everything and nothing is left when the window closes. No browsing history is recorded.
+- **Kept:** files you download stay on disk (the downloads page lists them until the window closes). Settings you change, such as the search engine, are shared with the normal window.
+- **Bookmarks** are shown, so the address bar and new tab page still suggest them, but they cannot be added, changed or removed from an incognito window. The history menu entry is turned off.
+- **Several incognito tabs share one session.** Pressing Ctrl+Shift+N again, or starting NeonNet with the incognito option while it is open, adds a tab to the open incognito window. The normal window and its cookies are never touched, and the two do not see each other's sign-ins.
+- **Updates** are checked by the normal window only.
+- **What it does not do:** websites, your network and your internet provider can still see what you visit.
 
 ## Find in page
 

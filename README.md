@@ -20,6 +20,7 @@ NeonNet ships its own Chromium engine. It does not need Edge, WebView2 or any ot
 - **Chromium sandbox enabled:** renderer and GPU processes run isolated.
 - **Per-user installer:** no admin rights needed, uninstall from Settings > Apps.
 - **Find in page, bookmarks and history:** Ctrl+F, Ctrl+D, Ctrl+H, and Ctrl+Shift+T to reopen a closed tab.
+- **Incognito window:** Ctrl+Shift+N opens a window whose cookies, cache and sign-ins live in memory only and disappear when it closes. No history is recorded.
 - **Downloads page:** Ctrl+J lists every download with progress, cancel, open and show-in-folder.
 - **Address bar suggestions:** matches from your bookmarks and history appear as you type, with inline completion.
 - **Settings page:** Ctrl+, for the search engine, home page, download behaviour, scanlines and automatic updates.

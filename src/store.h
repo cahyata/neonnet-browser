@@ -8,6 +8,9 @@ namespace store {
 
 void Load(const std::wstring& dir);   // dir = %LOCALAPPDATA%\NeonNet
 bool SaveIfDirty();                   // returns false if a file could not be written
+// Incognito window: reads the bookmarks only. History is not recorded, bookmarks cannot be
+// changed, and nothing is written to disk (downloads are listed in memory until the window closes).
+void LoadBookmarksReadOnly(const std::wstring& dir);
 
 // http, https and file URLs; never NeonNet's own pages.
 bool Recordable(const std::wstring& url);
