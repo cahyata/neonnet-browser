@@ -1052,7 +1052,17 @@ public:
         else if (path == L"settings.html") id = IDR_SETTINGS;
         std::string body;
         if (id && LoadUi(id, body)) return new StringResource(std::move(body), "text/html", 200);
-        return new StringResource("not found", "text/plain", 404);
+        // Unknown neonnet:// page: a themed page with a proper title (the tab would otherwise
+        // be named after the address). Nothing from the request is echoed back.
+        static const char NOT_FOUND[] =
+            "<!doctype html><html><head><meta charset=\"utf-8\"><title>NOT FOUND</title><style>"
+            "html,body{margin:0;height:100%;background:#12062c;color:#e8d8ff;font:14px Consolas,'Courier New',monospace}"
+            "main{max-width:640px;margin:0 auto;padding:12vh 20px}"
+            "h1{margin:0;font:italic 900 56px Impact,'Arial Black',sans-serif;letter-spacing:3px;color:#00e5ff;text-shadow:3px 3px 0 #ff2e97}"
+            "p{color:#8a6fc0;letter-spacing:1px}a{color:#ffd600;text-decoration:none}a:hover{text-decoration:underline}"
+            "</style></head><body><main><h1>404</h1><p>&gt; NO SUCH PAGE ON THIS NODE</p>"
+            "<p><a href=\"https://neonnet.ui/newtab.html\">&gt; BACK TO THE GRID</a></p></main></body></html>";
+        return new StringResource(NOT_FOUND, "text/html", 404);
     }
     IMPLEMENT_REFCOUNTING(UiSchemeFactory);
 };
