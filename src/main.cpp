@@ -1912,6 +1912,9 @@ static const char* MEDIA_HOOK_JS =
     "(function(){var r=window.__nn;try{delete window.__nn;}catch(e){}"
     "if(typeof r!=='function')return;var sent={};"
     "function tell(k,x){if(sent[k])return;sent[k]=1;try{if(x)r(k,x);else r(k);}catch(e){}}"
+    // ck: when the user last clicked a media element. A video with preload=none only fails after it is played.
+    "var ck=0;function openv(v){var s=v.querySelector('source'),u=v.currentSrc||v.src||(s&&s.src)||'';"
+    "if(/^https?:\\/\\//i.test(u))try{r('openplayer',u);}catch(x){}}"
     "try{var P=Navigator.prototype,o=P.requestMediaKeySystemAccess;"
     "if(typeof o==='function'){P.requestMediaKeySystemAccess=function(ks){var p=o.apply(this,arguments);"
     "try{if(/widevine|playready|fairplay/i.test(String(ks)))p.then(null,function(){tell('drm');});}catch(e){}return p;};}}catch(e){}"
@@ -1919,7 +1922,7 @@ static const char* MEDIA_HOOK_JS =
     // a media element failed itself, or its last <source> failed (then the element has no error object, only networkState 3)
     "if((t.tagName==='VIDEO'||t.tagName==='AUDIO')&&t.error&&t.error.code===4)v=t;"
     "else if(t.tagName==='SOURCE'&&!t.nextElementSibling&&t.parentNode&&t.parentNode.networkState===3)v=t.parentNode;"
-    "if(!v)return;var ct=String(document.contentType||'');"
+    "if(!v)return;if(ck&&Date.now()-ck<8000){ck=0;openv(v);return;}var ct=String(document.contentType||'');"
     // a page that is nothing but the video (a direct link to a file)
     "if(window===window.top&&/^(video|audio)\\//i.test(ct)&&v.parentNode===document.body&&document.body.childElementCount===1)tell('mediadoc',ct);"
     "else tell('media');},true);}catch(e){}"
@@ -1927,9 +1930,8 @@ static const char* MEDIA_HOOK_JS =
     // The browser process checks the address again and ignores a second click while a copy is being made.
     "try{document.addEventListener('click',function(e){var t=e.target;"
     "if(!t||(t.tagName!=='VIDEO'&&t.tagName!=='AUDIO'))return;"
-    "var failed=(t.error&&t.error.code===4)||(t.networkState===3&&t.readyState===0);if(!failed)return;"
-    "var s=t.querySelector('source'),u=t.currentSrc||t.src||(s&&s.src)||'';"
-    "if(/^https?:\\/\\//i.test(u))try{r('openplayer',u);}catch(x){}},true);}catch(e){}"
+    "var failed=(t.error&&t.error.code===4)||(t.networkState===3&&t.readyState===0);"
+    "if(failed)openv(t);else ck=Date.now();},true);}catch(e){}"
     "})();";
 
 class NeonApp : public CefApp, public CefBrowserProcessHandler, public CefRenderProcessHandler {
