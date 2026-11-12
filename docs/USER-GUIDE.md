@@ -22,7 +22,8 @@ Windows SmartScreen may warn that the app is unrecognized, because the installer
 | Part | What it does |
 |---|---|
 | Top row | Logo, tab list (numbered 01, 02, ...), `+` button, and the minimize, maximize and close buttons |
-| Navigation row | `[◀]` back, `[▶]` forward, `[⟳]` reload (turns into `[✕]` stop while loading), `[⌂]` home, address bar, `GO`, `SCAN`, `≡` menu |
+| Navigation row | `[◀]` back, `[▶]` forward, `[⟳]` reload (turns into `[✕]` stop while loading), `[⌂]` home, address bar with the `☆` bookmark star, `GO`, `SCAN`, `≡` menu |
+| Find bar | Shown under the navigation row while you search the page (see [Find in page](#find-in-page)) |
 | Thin line under the address bar | Animated pink-cyan bar while a page is loading |
 | Status bar | Left: status (LINK STABLE, LOADING..., SIGNAL LOST, the hovered link address, or download progress). Right: zoom (when not 100%), SCAN ON and the clock |
 
@@ -48,6 +49,12 @@ Press Esc to cancel typing and restore the current page's address.
 |---|---|
 | Ctrl+T | New tab |
 | Ctrl+W or Ctrl+F4 | Close tab |
+| Ctrl+Shift+T | Reopen the last closed tab |
+| Ctrl+F | Find in page |
+| F3, Ctrl+G / Shift+F3, Ctrl+Shift+G | Next / previous match |
+| Ctrl+D | Bookmark the page, or remove its bookmark |
+| Ctrl+Shift+O | Bookmarks |
+| Ctrl+H | History |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+1 … Ctrl+8 | Go to tab 1–8 |
 | Ctrl+9 | Go to the last tab |
@@ -63,13 +70,41 @@ Press Esc to cancel typing and restore the current page's address.
 
 ## The `≡` menu
 
-New tab, close tab, zoom, print, scanlines on/off, fullscreen, developer tools, the update options (see [Updates](#updates)), and **About NeonNet** (Chromium version and the shortcut list).
+New tab, close tab, reopen closed tab, bookmark this page, bookmarks, history, find in page, zoom, print, scanlines on/off, fullscreen, developer tools, the update options (see [Updates](#updates)), and **About NeonNet** (Chromium version and the shortcut list).
+
+Use the mouse, or the arrow keys and Enter. Esc, a click outside the menu, or another click on `≡` closes it.
 
 ## Right-click on a page
 
 The standard Chromium menu (back, reload, copy, paste and so on), plus:
 - **Open link in new tab:** shown when you right-click a link.
 - **Inspect:** opens the developer tools at the clicked element.
+
+## Find in page
+
+Ctrl+F opens the find bar under the address bar. Matches are highlighted as you type, and the counter shows which match is selected (`3/17`, or `0/0` in pink when nothing matches).
+
+- **Enter** or `[▼]`: next match. **Shift+Enter** or `[▲]`: previous match.
+- **Aa:** match upper and lower case exactly.
+- **Esc** or `[✕]`: close the bar.
+
+The find bar belongs to the tab it was opened in and closes when you switch to another tab. Ctrl+F or F3 brings it back with the last search.
+
+## Reopening closed tabs
+
+Ctrl+Shift+T reopens the most recently closed tab at its old position. Press it again for the one before, up to 25 tabs back. This works while NeonNet is open; the list starts empty at each start. The page reloads, but its back/forward history is not restored.
+
+## Bookmarks
+
+- **Add or remove:** press Ctrl+D or click `☆` in the address bar. The star turns yellow (`★`) on bookmarked pages. NeonNet's own pages cannot be bookmarked.
+- **Bookmarks page:** Ctrl+Shift+O, the `≡` menu, or **BOOKMARKS** on the new tab page. Search, open, **EDIT** (title and address) or **DELETE** a bookmark there.
+- **New tab page:** once you have bookmarks, your nine newest replace the default quick links.
+
+## History
+
+Every page you open is recorded with its title and time, for 90 days (up to 20,000 visits). Pages that failed to load are left out.
+
+Open it with Ctrl+H, the `≡` menu, or **HISTORY** on the new tab page. You can search it, remove single visits with `✕`, or click **CLEAR ALL** twice to remove everything. Clearing the history does not clear cookies or the cache.
 
 ## Scanlines
 
@@ -108,7 +143,8 @@ Automatic updates only work for the installed copy (in `%LOCALAPPDATA%\Programs\
 | What | Location |
 |---|---|
 | Application | `%LOCALAPPDATA%\Programs\NeonNet` |
-| Profile (history, cookies, cache, sign-ins) | `%LOCALAPPDATA%\NeonNet\Profile` |
+| Profile (cookies, cache, sign-ins, site data) | `%LOCALAPPDATA%\NeonNet\Profile` |
+| History and bookmarks | `%LOCALAPPDATA%\NeonNet\history.txt` and `bookmarks.txt` (plain UTF-8 text) |
 | Downloaded updates (deleted after installing) | `%LOCALAPPDATA%\NeonNet\Updates` |
 | Settings (scanlines, window position, automatic updates) | Registry `HKEY_CURRENT_USER\Software\NeonNet` |
 | Shortcuts | Start menu `NeonNet`, and the desktop if chosen |
@@ -119,7 +155,7 @@ Session cookies (cookies without an expiry date) are cleared when NeonNet closes
 
 Open **Settings > Apps > Installed apps > NeonNet Browser > Uninstall**. You are asked two things:
 1. To confirm the uninstall.
-2. Whether to also delete your browsing data (history, cookies, sign-ins). The default is **No**, so the data is still there if you install again later.
+2. Whether to also delete your browsing data (history, bookmarks, cookies, sign-ins). The default is **No**, so the data is still there if you install again later.
 
 ## FAQ
 

@@ -31,6 +31,7 @@
 #include "include/cef_scheme.h"
 #include "resource.h"
 #include "updater.h"
+#include "store.h"
 #include <windowsx.h>   // after CEF headers: its macros (GetFirstChild...) clash with cef_dom.h
 
 // ---------------------------------------------------------------------------
@@ -40,6 +41,7 @@ static const int BORDER_DIP = 5;
 static const int CHROME_DIP = 84;
 static const int STATUS_DIP = 24;
 static const int CUT_DIP = 16;
+static const int FIND_DIP = 34;   // find bar row, added under the chrome UI while open
 
 static const COLORREF C_BG = RGB(0x12, 0x06, 0x2c);
 static const COLORREF C_PINK = RGB(0xff, 0x2e, 0x97);
@@ -51,6 +53,8 @@ static const cef_color_t CEF_BG = 0xFF12062C;
 static const wchar_t* UI_HOST = L"https://neonnet.ui/";
 static const wchar_t* NEWTAB = L"https://neonnet.ui/newtab.html";
 static const wchar_t* CHROME_UI = L"https://neonnet.ui/chrome.html";
+static const wchar_t* HISTORY_PAGE = L"https://neonnet.ui/history.html";
+static const wchar_t* BOOKMARKS_PAGE = L"https://neonnet.ui/bookmarks.html";
 static const wchar_t* APP_DIR_NAME = L"NeonNet";
 static const wchar_t* REG_KEY = L"Software\\NeonNet";
 static const wchar_t* UNINSTALL_KEY = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\NeonNet";
@@ -59,15 +63,17 @@ static const wchar_t* SHORTCUT_NAME = L"NeonNet.lnk";
 static const UINT WM_APP_CMD = WM_APP + 1;      // lParam = new std::wstring (chrome UI command)
 static const UINT WM_APP_OPEN = WM_APP + 2;     // lParam = new std::wstring (url from a 2nd instance)
 static const UINT WM_APP_UPDATE = WM_APP + 3;   // lParam = new UpdateMsg (from the updater thread)
+static const UINT WM_APP_STORE = WM_APP + 4;    // history/bookmarks changed by a neonnet.ui page
 
-static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4;
+static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5;
 static const ULONGLONG UPDATE_INTERVAL_MS = 24ull * 60 * 60 * 1000;   // check at most once a day
 
 enum Cmd {
     CMD_NEWTAB = 1, CMD_CLOSETAB, CMD_ZOOMIN, CMD_ZOOMOUT, CMD_ZOOMRESET, CMD_SCAN,
     CMD_FULLSCREEN, CMD_DEVTOOLS, CMD_ABOUT, CMD_RELOAD, CMD_STOP, CMD_BACK, CMD_FWD,
     CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
-    CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE
+    CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE,
+    CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_HISTORY
 };
 
 // Updater states (see "Auto update" below)
@@ -89,7 +95,10 @@ struct Tab {
     bool loading = true;
     bool canBack = false, canFwd = false;
     bool errorPending = false;
+    long long histId = 0;   // history entry of the page shown
 };
+
+struct ClosedTab { std::wstring url; int index; };
 
 struct App {
     HMODULE hmod = nullptr;   // NeonNet.dll (resources live here)
@@ -117,6 +126,11 @@ struct App {
     bool updRelaunch = false;
     std::atomic<bool> updCancel{ false };
     HANDLE updThread = nullptr;
+    // find in page
+    bool findOpen = false, findCase = false;
+    std::wstring findText;
+    // recently closed tabs, newest last
+    std::vector<ClosedTab> closed;
 };
 static App g;
 
@@ -210,6 +224,9 @@ static void RegSetBin(const wchar_t* name, DWORD type, const void* data, DWORD s
     }
 }
 
+// History and bookmarks are written to disk shortly after they change.
+static void ScheduleSave() { if (g.hwnd) SetTimer(g.hwnd, TIMER_SAVE, 2000, nullptr); }
+
 static Tab* FindTab(int id) { for (auto& t : g.tabs) if (t->id == id) return t.get(); return nullptr; }
 static Tab* TabOf(CefRefPtr<CefBrowser> b) {
     if (!b) return nullptr;
@@ -234,7 +251,10 @@ static bool LoadUi(int id, std::string& out) {
 // Geometry
 
 static int Frame() { return (IsZoomed(g.hwnd) || g.fullscreen) ? 0 : S(BORDER_DIP); }
-static RECT ChromeRect() { RECT rc; GetClientRect(g.hwnd, &rc); int b = Frame(); return { b, b, rc.right - b, b + S(CHROME_DIP) }; }
+static RECT ChromeRect() {
+    RECT rc; GetClientRect(g.hwnd, &rc); int b = Frame();
+    return { b, b, rc.right - b, b + S(CHROME_DIP + (g.findOpen ? FIND_DIP : 0)) };
+}
 static RECT StatusRect() { RECT rc; GetClientRect(g.hwnd, &rc); int b = Frame(); return { b, rc.bottom - b - S(STATUS_DIP), rc.right - b, rc.bottom - b }; }
 static RECT ContentRect() {
     RECT rc; GetClientRect(g.hwnd, &rc);
@@ -303,6 +323,12 @@ static void SendState() {
     j += std::wstring(L",\"loading\":") + (a && a->loading ? L"true" : L"false");
     j += std::wstring(L",\"scan\":") + (g.scan ? L"true" : L"false");
     j += std::wstring(L",\"max\":") + (IsZoomed(g.hwnd) ? L"true" : L"false");
+    std::wstring cur = a ? DisplayUrl(a) : L"";
+    j += std::wstring(L",\"canStar\":") + (store::Recordable(cur) ? L"true" : L"false");
+    j += std::wstring(L",\"starred\":") + (store::FindBookmark(cur) ? L"true" : L"false");
+    j += std::wstring(L",\"find\":") + (g.findOpen ? L"true" : L"false");
+    j += std::wstring(L",\"findCase\":") + (g.findCase ? L"true" : L"false");
+    j += L",\"findText\":" + JsonStr(g.findText);
     j += L"}";
     RunInChrome(L"window.__nn&&window.__nn(" + j + L")");
 }
@@ -312,6 +338,45 @@ static void FocusUrl() {
     if (!g.chrome) return;
     g.chrome->GetHost()->SetFocus(true);
     RunInChrome(L"window.__nn&&window.__nn({type:'focusUrl'})");
+}
+
+// ---------------------------------------------------------------------------
+// Find in page: the find bar is a third row of the chrome UI, shown while g.findOpen.
+
+static void FindResult(int count, int active) {
+    RunInChrome(L"window.__nn&&window.__nn({type:'findResult',count:" + std::to_wstring(count) +
+                L",active:" + std::to_wstring(active) + L"})");
+}
+
+static void DoFind(bool forward) {
+    Tab* a = Active();
+    if (!a || !a->browser) return;
+    if (g.findText.empty()) { a->browser->GetHost()->StopFinding(true); FindResult(0, 0); return; }
+    // Always findNext=true: a search started with false only highlights the matches
+    // without selecting one, so the first "next" would select match 1 again. A changed
+    // text or match-case setting restarts the search either way.
+    a->browser->GetHost()->Find(g.findText, forward, g.findCase, true);
+}
+
+static void Layout();
+static void OpenFind() {
+    bool was = g.findOpen;
+    g.findOpen = true;
+    if (!was) { Layout(); SendState(); }
+    if (g.chrome) {
+        g.chrome->GetHost()->SetFocus(true);
+        RunInChrome(L"window.__nn&&window.__nn({type:'focusFind'})");
+    }
+    if (!was && !g.findText.empty()) DoFind(true);
+}
+
+static void CloseFind() {
+    if (!g.findOpen) return;
+    g.findOpen = false;
+    if (Tab* a = Active()) if (a->browser) a->browser->GetHost()->StopFinding(true);
+    Layout();
+    SendState();
+    FocusPage();
 }
 
 // ---------------------------------------------------------------------------
@@ -399,12 +464,21 @@ static void UpdateFullscreen() { SetFullscreen(g.fsUser || g.fsElement); }
 // Tabs
 
 static void ExecCmd(int cmd);
-static void CreateTab(const std::wstring& url, bool activate);
+static void CreateTab(const std::wstring& url, bool activate, int at = -1);
 static void CloseTab(int id);
 static CefRefPtr<CefClient> MainClient();
 
+// The find bar belongs to the tab it was opened in: it closes when another tab becomes
+// active. Callers update the layout afterwards.
+static void HideFind() {
+    if (!g.findOpen) return;
+    if (Tab* a = Active()) if (a->browser) a->browser->GetHost()->StopFinding(true);
+    g.findOpen = false;
+}
+
 static void SelectTab(int id, bool focus) {
     if (!FindTab(id)) return;
+    if (id != g.active) HideFind();
     g.active = id;
     if (g.fsElement) { g.fsElement = false; UpdateFullscreen(); }
     g.hoverText.clear();
@@ -426,14 +500,15 @@ static CefBrowserSettings BrowserSettings() {
     return s;
 }
 
-static void CreateTab(const std::wstring& url, bool activate) {
+// at: position in the tab strip, or -1 for right after the active tab.
+static void CreateTab(const std::wstring& url, bool activate, int at) {
     auto tab = std::make_unique<Tab>();
     int id = tab->id = g.nextId++;
     tab->url = url;
-    int at = IndexOf(g.active);
-    if (at < 0) g.tabs.push_back(std::move(tab));
-    else g.tabs.insert(g.tabs.begin() + at + 1, std::move(tab));
-    if (activate) g.active = id;
+    int cur = IndexOf(g.active);
+    int pos = at >= 0 ? std::min(at, (int)g.tabs.size()) : (cur < 0 ? (int)g.tabs.size() : cur + 1);
+    g.tabs.insert(g.tabs.begin() + pos, std::move(tab));
+    if (activate) { HideFind(); g.active = id; }
 
     g.creatingTab = id;
     CefRefPtr<CefBrowser> b = CefBrowserHost::CreateBrowserSync(ChildInfo(ContentRect()), MainClient(),
@@ -452,6 +527,13 @@ static void CloseTab(int id) {
     if (i < 0) return;
     std::unique_ptr<Tab> t = std::move(g.tabs[i]);
     g.tabs.erase(g.tabs.begin() + i);
+    if (!g.closing) {
+        std::wstring u = DisplayUrl(t.get());
+        if (!u.empty() && u.rfind(NEWTAB, 0) != 0 && u.rfind(L"data:", 0) != 0) {
+            g.closed.push_back({ u, i });
+            if (g.closed.size() > 25) g.closed.erase(g.closed.begin());
+        }
+    }
     if (t->browser) {
         HWND w = t->browser->GetHost()->GetWindowHandle();
         if (w) ShowWindow(w, SW_HIDE);
@@ -488,8 +570,9 @@ static size_t OpenBrowsers() { return g_all.size(); }
 
 class Client : public CefClient, public CefLifeSpanHandler, public CefDisplayHandler, public CefLoadHandler,
                public CefKeyboardHandler, public CefDownloadHandler, public CefContextMenuHandler,
-               public CefRequestHandler {
+               public CefRequestHandler, public CefFindHandler {
 public:
+    CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
@@ -511,6 +594,7 @@ public:
         int at = IndexOf(g.active);
         if (at < 0) g.tabs.push_back(std::move(tab));
         else g.tabs.insert(g.tabs.begin() + at + 1, std::move(tab));
+        HideFind();
         g.active = id;
         g.pendingPopups.push_back(id);
         windowInfo = ChildInfo(ContentRect());
@@ -556,11 +640,18 @@ public:
         MaybeFinishClose();
     }
 
+    // --- find ---
+    void OnFindResult(CefRefPtr<CefBrowser> browser, int, int count, const CefRect&, int activeMatchOrdinal, bool) override {
+        Tab* t = TabOf(browser);
+        if (t && t->id == g.active && g.findOpen) FindResult(count, std::max(0, activeMatchOrdinal));
+    }
+
     // --- display ---
     void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override {
         if (Tab* t = TabOf(browser)) {
             t->title = title.ToWString();
             if (t->title.rfind(L"data:text/html", 0) == 0) t->title = L"SIGNAL LOST";
+            if (t->histId) { store::SetTitle(t->histId, t->title); ScheduleSave(); }
             SendState();
         }
     }
@@ -570,6 +661,10 @@ public:
             t->url = url.ToWString();
             if (t->errorPending) t->errorPending = false;
             else t->errorUrl.clear();
+            if (t->errorUrl.empty()) {
+                t->histId = store::Visit(t->histId, t->url);
+                if (t->histId) ScheduleSave();
+            }
             SendState();
         }
     }
@@ -609,6 +704,8 @@ public:
         if (url.rfind(UI_HOST, 0) == 0 || url.rfind(L"data:", 0) == 0) return;
         t->errorUrl = url;
         t->errorPending = true;
+        store::Forget(t->histId, url);   // failed loads stay out of the history
+        t->histId = 0;
         frame->LoadURL(ErrorPageUrl(url, (int)errorCode));
     }
 
@@ -630,7 +727,12 @@ public:
         int vk = e.windows_key_code, cmd = 0;
         if (ctrl && !alt) {
             switch (vk) {
-            case 'T': if (!repeat) cmd = CMD_NEWTAB; break;
+            case 'T': if (!repeat) cmd = shift ? CMD_REOPEN : CMD_NEWTAB; break;
+            case 'F': cmd = CMD_FIND; break;
+            case 'G': cmd = shift ? CMD_FINDPREV : CMD_FINDNEXT; break;
+            case 'D': if (!repeat) cmd = CMD_BOOKMARK; break;
+            case 'H': if (!repeat) cmd = CMD_HISTORY; break;
+            case 'O': if (shift && !repeat) cmd = CMD_BOOKMARKS; break;
             case 'W': case VK_F4: if (!repeat) cmd = CMD_CLOSETAB; break;
             case 'L': cmd = CMD_FOCUSURL; break;
             case 'R': cmd = CMD_RELOAD; break;
@@ -651,6 +753,7 @@ public:
             else if (vk == VK_HOME) cmd = CMD_HOME;
         } else if (!ctrl && !alt) {
             if (vk == VK_F5) cmd = CMD_RELOAD;
+            else if (vk == VK_F3) cmd = shift ? CMD_FINDPREV : CMD_FINDNEXT;
             else if (vk == VK_F11 && !repeat) cmd = CMD_FULLSCREEN;
             else if (vk == VK_F12 && !repeat) cmd = CMD_DEVTOOLS;
             else if (vk == VK_F6) cmd = CMD_FOCUSURL;
@@ -723,11 +826,14 @@ public:
     bool Open(CefRefPtr<CefRequest>, bool& handle_request, CefRefPtr<CefCallback>) override { handle_request = true; return true; }
     void GetResponseHeaders(CefRefPtr<CefResponse> response, int64_t& length, CefString&) override {
         response->SetStatus(status_);
-        response->SetStatusText(status_ == 200 ? "OK" : status_ == 204 ? "No Content" : "Not Found");
+        response->SetStatusText(status_ == 200 ? "OK" : status_ == 204 ? "No Content" : status_ == 403 ? "Forbidden" :
+                                status_ == 400 ? "Bad Request" : "Not Found");
         response->SetMimeType(mime_);
         response->SetCharset("utf-8");
         CefResponse::HeaderMap h;
         h.insert(std::make_pair("Cache-Control", "no-store"));
+        h.insert(std::make_pair("X-Frame-Options", "DENY"));   // NeonNet pages never load inside other sites
+        h.insert(std::make_pair("X-Content-Type-Options", "nosniff"));
         response->SetHeaderMap(h);
         length = (int64_t)data_.size();
     }
@@ -747,10 +853,43 @@ private:
     IMPLEMENT_REFCOUNTING(StringResource);
 };
 
+static std::wstring QueryParam(const std::wstring& query, const wchar_t* name) {
+    std::wstring key = std::wstring(name) + L"=";
+    for (size_t p = 0; p < query.size();) {
+        size_t amp = query.find(L'&', p);
+        if (amp == std::wstring::npos) amp = query.size();
+        if (query.compare(p, key.size(), key) == 0) return PercentDecode(query.substr(p + key.size(), amp - p - key.size()));
+        p = amp + 1;
+    }
+    return {};
+}
+
+// https://neonnet.ui/api/* : history and bookmarks for NeonNet's own pages (new tab,
+// history, bookmarks). Only a main frame that shows a neonnet.ui page may call it, so
+// websites can neither read nor change the lists.
+static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const std::wstring& query) {
+    std::string out = "{}";
+    bool changed = false;
+    long long id = _wtoi64(QueryParam(query, L"id").c_str());
+    if (path == L"api/history") out = store::HistoryJson(QueryParam(query, L"q"), 1500);
+    else if (path == L"api/history/delete") changed = store::DeleteHistory(id);
+    else if (path == L"api/history/clear") { store::ClearHistory(); changed = true; }
+    else if (path == L"api/bookmarks") out = store::BookmarksJson();
+    else if (path == L"api/bookmarks/delete") changed = store::DeleteBookmark(id);
+    else if (path == L"api/bookmarks/edit") {
+        if (!store::EditBookmark(id, QueryParam(query, L"title"), QueryParam(query, L"url")))
+            return new StringResource("{\"error\":\"invalid address\"}", "application/json", 400);
+        changed = true;
+    }
+    else return new StringResource("not found", "text/plain", 404);
+    if (changed) PostMessageW(g.hwnd, WM_APP_STORE, 0, 0);
+    return new StringResource(std::move(out), "application/json", 200);
+}
+
 class UiSchemeFactory : public CefSchemeHandlerFactory {
 public:
     // Runs on the IO thread.
-    CefRefPtr<CefResourceHandler> Create(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, const CefString&,
+    CefRefPtr<CefResourceHandler> Create(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString&,
                                          CefRefPtr<CefRequest> request) override {
         std::wstring url = request->GetURL().ToWString();
         std::wstring path = url.substr(wcslen(UI_HOST));
@@ -768,9 +907,17 @@ public:
             }
             return new StringResource("", "text/plain", 204);
         }
+        if (path.rfind(L"api/", 0) == 0) {
+            bool trusted = browser && browser->GetIdentifier() != g.chromeId.load() && frame && frame->IsMain() &&
+                           frame->GetURL().ToWString().rfind(UI_HOST, 0) == 0;
+            if (!trusted) return new StringResource("", "text/plain", 403);
+            return ServeApi(path, query);
+        }
         int id = 0;
         if (path == L"chrome.html") id = IDR_CHROME;
         else if (path == L"newtab.html" || path.empty()) id = IDR_NEWTAB;
+        else if (path == L"history.html") id = IDR_HISTORY;
+        else if (path == L"bookmarks.html") id = IDR_BOOKMARKS;
         std::string body;
         if (id && LoadUi(id, body)) return new StringResource(std::move(body), "text/html", 200);
         return new StringResource("not found", "text/plain", 404);
@@ -985,11 +1132,37 @@ static void ShowAbout() {
         L" (bundled, via the Chromium Embedded Framework).\nThird-party licenses: CREDITS.html in the install folder.\n\n"
         L"Shortcuts\n"
         L"  Ctrl+T  new tab          Ctrl+W  close tab\n"
+        L"  Ctrl+Shift+T  reopen closed tab\n"
+        L"  Ctrl+F  find in page     F3  find next\n"
+        L"  Ctrl+D  bookmark page    Ctrl+Shift+O  bookmarks\n"
+        L"  Ctrl+H  history\n"
         L"  Ctrl+L  address bar      Ctrl+Tab  next tab\n"
         L"  F5      reload           Alt+Left/Right  back/forward\n"
         L"  Ctrl +/-/0  zoom         F11  fullscreen\n"
         L"  Ctrl+P  print            F12  developer tools";
     MessageBoxW(g.hwnd, v.c_str(), L"About NeonNet", MB_OK | MB_ICONINFORMATION);
+}
+
+static void ToggleBookmark() {
+    Tab* a = Active();
+    if (!a) return;
+    std::wstring u = DisplayUrl(a);
+    if (!store::Recordable(u)) { ShowNotice(L"THIS PAGE CANNOT BE BOOKMARKED"); return; }
+    if (long long id = store::FindBookmark(u)) { store::DeleteBookmark(id); ShowNotice(L"BOOKMARK REMOVED"); }
+    else { store::AddBookmark(u, a->title); ShowNotice(L"BOOKMARKED: " + Upper(a->title.empty() ? u : a->title)); }
+    ScheduleSave();
+    SendState();
+}
+
+// Shows one of NeonNet's own pages: reuses a tab that already has it, or the active
+// tab when it is an empty new tab, otherwise opens a new tab.
+static void OpenPage(const std::wstring& page) {
+    for (auto& t : g.tabs) {
+        if (t->url.rfind(page, 0) == 0 && t->browser) { SelectTab(t->id, true); t->browser->Reload(); return; }
+    }
+    Tab* a = Active();
+    if (a && a->browser && a->url.rfind(NEWTAB, 0) == 0) { a->browser->GetMainFrame()->LoadURL(page); FocusPage(); return; }
+    CreateTab(page, true);
 }
 
 static void ExecCmd(int cmd) {
@@ -1038,36 +1211,314 @@ static void ExecCmd(int cmd) {
     }
     case CMD_UPDATE_RESTART: g.updRelaunch = true; PostMessageW(g.hwnd, WM_CLOSE, 0, 0); break;
     case CMD_UPDATE_PAGE: if (!g.updPage.empty()) CreateTab(g.updPage, true); break;
+    case CMD_FIND: OpenFind(); break;
+    case CMD_FINDNEXT: case CMD_FINDPREV:
+        if (!g.findOpen) OpenFind();
+        else DoFind(cmd == CMD_FINDNEXT);
+        break;
+    case CMD_REOPEN:
+        if (!g.closed.empty()) {
+            ClosedTab c = g.closed.back();
+            g.closed.pop_back();
+            CreateTab(c.url, true, c.index);
+        }
+        break;
+    case CMD_BOOKMARK: ToggleBookmark(); break;
+    case CMD_BOOKMARKS: OpenPage(BOOKMARKS_PAGE); break;
+    case CMD_HISTORY: OpenPage(HISTORY_PAGE); break;
     }
     // zoom changes are async; refresh the status bar shortly after
     if (cmd == CMD_ZOOMIN || cmd == CMD_ZOOMOUT || cmd == CMD_ZOOMRESET) SetTimer(g.hwnd, TIMER_ZOOM, 150, nullptr);
 }
 
+// ---------------------------------------------------------------------------
+// The ≡ menu: a popup window painted in the NeonNet theme (a native menu cannot be
+// recolored or given clipped corners). RunMenu() runs its own message loop, like
+// TrackPopupMenu, and returns the chosen command or 0.
+
+struct MenuItem {
+    int cmd = 0;              // 0 = separator
+    std::wstring text, keys;
+    bool disabled = false, checked = false;
+};
+
+struct MenuState {
+    std::vector<MenuItem> items;
+    std::vector<RECT> rows;
+    HFONT font = nullptr;
+    int hot = -1, result = 0;
+    bool done = false, tracking = false;
+};
+
+static const COLORREF C_MENU_BG = RGB(0x0a, 0x04, 0x20);
+static const COLORREF C_TEXT = RGB(0xe8, 0xd8, 0xff);
+static const COLORREF C_DIM = RGB(0x4d, 0x3a, 0x73);
+static const COLORREF C_SEP = RGB(0x5c, 0x1c, 0x5e);
+static const int MENU_CUT_DIP = 10;
+static ULONGLONG g_menuClosedAt = 0;
+
+static bool Selectable(const MenuState& st, int i) {
+    return i >= 0 && i < (int)st.items.size() && st.items[i].cmd && !st.items[i].disabled;
+}
+
+static int MenuHit(const MenuState& st, POINT p) {
+    for (size_t i = 0; i < st.rows.size(); i++)
+        if (PtInRect(&st.rows[i], p) && Selectable(st, (int)i)) return (int)i;
+    return -1;
+}
+
+static void PaintMenu(HWND hwnd, MenuState& st, HDC hdc) {
+    RECT rc; GetClientRect(hwnd, &rc);
+    int w = rc.right, h = rc.bottom, c = S(MENU_CUT_DIP);
+    HDC mem = CreateCompatibleDC(hdc);
+    HBITMAP bmp = CreateCompatibleBitmap(hdc, w, h);
+    HGDIOBJ oldBmp = SelectObject(mem, bmp);
+    HBRUSH bg = CreateSolidBrush(C_MENU_BG); FillRect(mem, &rc, bg); DeleteObject(bg);
+    SelectObject(mem, st.font);
+    SetBkMode(mem, TRANSPARENT);
+
+    // header
+    RECT hr{ S(14), S(6), w - S(14), S(26) };
+    SetTextColor(mem, C_YELLOW);
+    DrawTextW(mem, L"> SYSTEM MENU", -1, &hr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    for (size_t i = 0; i < st.items.size(); i++) {
+        const MenuItem& it = st.items[i];
+        RECT r = st.rows[i];
+        if (!it.cmd) {
+            HPEN pen = CreatePen(PS_SOLID, 1, C_SEP);
+            HGDIOBJ op = SelectObject(mem, pen);
+            int y = (r.top + r.bottom) / 2;
+            MoveToEx(mem, r.left + S(10), y, nullptr); LineTo(mem, r.right - S(10), y);
+            SelectObject(mem, op); DeleteObject(pen);
+            continue;
+        }
+        bool hot = (int)i == st.hot;
+        if (hot) {
+            // highlighted row with a clipped right edge, like the tabs
+            RECT f{ r.left + S(4), r.top, r.right - S(4), r.bottom };
+            int k = S(7);
+            POINT pts[5] = { {f.left, f.top}, {f.right - k, f.top}, {f.right, f.top + k}, {f.right, f.bottom}, {f.left, f.bottom} };
+            HBRUSH hb = CreateSolidBrush(C_CYAN);
+            HRGN rg = CreatePolygonRgn(pts, 5, WINDING);
+            FillRgn(mem, rg, hb);
+            DeleteObject(rg); DeleteObject(hb);
+        }
+        COLORREF tc = it.disabled ? C_DIM : hot ? C_BG : C_TEXT;
+        COLORREF kc = it.disabled ? C_DIM : hot ? C_BG : C_MUTED;
+        if (it.checked) {
+            RECT cr{ r.left + S(12), r.top, r.left + S(30), r.bottom };
+            SetTextColor(mem, hot ? C_BG : C_PINK);
+            DrawTextW(mem, L"\x25A0", -1, &cr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        }
+        RECT tr{ r.left + S(32), r.top, r.right - S(16), r.bottom };
+        SetTextColor(mem, tc);
+        DrawTextW(mem, it.text.c_str(), -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SetTextColor(mem, kc);
+        DrawTextW(mem, it.keys.c_str(), -1, &tr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    }
+
+    // scanlines, like the rest of the UI
+    if (g.scan) {
+        BITMAPINFO bi{}; bi.bmiHeader = { sizeof(BITMAPINFOHEADER), 1, 1, 1, 32, BI_RGB };
+        void* bits = nullptr;
+        HBITMAP dot = CreateDIBSection(mem, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (dot && bits) {
+            *(DWORD*)bits = 0x2E000000;   // black, alpha 0.18 (premultiplied)
+            HDC dd = CreateCompatibleDC(mem);
+            HGDIOBJ od = SelectObject(dd, dot);
+            BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+            int step = std::max(3, S(3));
+            for (int y = 2; y < h; y += step) GdiAlphaBlend(mem, 0, y, w, 1, dd, 0, 0, 1, 1, bf);
+            SelectObject(dd, od); DeleteDC(dd);
+        }
+        if (dot) DeleteObject(dot);
+    }
+
+    // frame: pink outline following the clipped corners (top-right and bottom-left)
+    HPEN pink = CreatePen(PS_SOLID, 1, C_PINK);
+    HGDIOBJ op = SelectObject(mem, pink);
+    POINT pts[7] = { {0, 0}, {w - c - 1, 0}, {w - 1, c}, {w - 1, h - 1}, {c, h - 1}, {0, h - c - 1}, {0, 0} };
+    Polyline(mem, pts, 7);
+    SelectObject(mem, op); DeleteObject(pink);
+
+    BitBlt(hdc, 0, 0, w, h, mem, 0, 0, SRCCOPY);
+    SelectObject(mem, oldBmp); DeleteObject(bmp); DeleteDC(mem);
+}
+
+static void MenuMoveHot(HWND hwnd, MenuState& st, int dir) {
+    int n = (int)st.items.size();
+    int i = st.hot;
+    for (int k = 0; k < n; k++) {
+        i = (i < 0) ? (dir > 0 ? 0 : n - 1) : (i + dir + n) % n;
+        if (Selectable(st, i)) { st.hot = i; break; }
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+static LRESULT CALLBACK MenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    auto* st = (MenuState*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    switch (msg) {
+    case WM_NCCREATE:
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW*)lp)->lpCreateParams);
+        break;
+    case WM_ERASEBKGND: return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT ps; HDC hdc = BeginPaint(hwnd, &ps);
+        if (st) PaintMenu(hwnd, *st, hdc);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_MOUSEMOVE: {
+        if (!st) break;
+        if (!st->tracking) {
+            TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd, 0 };
+            st->tracking = TrackMouseEvent(&tme) != FALSE;
+        }
+        int hot = MenuHit(*st, { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) });
+        if (hot != st->hot) { st->hot = hot; InvalidateRect(hwnd, nullptr, FALSE); }
+        return 0;
+    }
+    case WM_MOUSELEAVE:
+        if (st) { st->tracking = false; st->hot = -1; InvalidateRect(hwnd, nullptr, FALSE); }
+        return 0;
+    case WM_LBUTTONUP:
+        if (st) {
+            int i = MenuHit(*st, { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) });
+            if (i >= 0) { st->result = st->items[i].cmd; st->done = true; }
+        }
+        return 0;
+    case WM_KEYDOWN:
+        if (!st) break;
+        if (wp == VK_DOWN || wp == VK_TAB) MenuMoveHot(hwnd, *st, 1);
+        else if (wp == VK_UP) MenuMoveHot(hwnd, *st, -1);
+        else if (wp == VK_HOME) { st->hot = -1; MenuMoveHot(hwnd, *st, 1); }
+        else if (wp == VK_END) { st->hot = -1; MenuMoveHot(hwnd, *st, -1); }
+        else if ((wp == VK_RETURN || wp == VK_SPACE) && Selectable(*st, st->hot)) { st->result = st->items[st->hot].cmd; st->done = true; }
+        else if (wp == VK_ESCAPE || wp == VK_MENU || wp == VK_F10) st->done = true;
+        return 0;
+    case WM_SYSKEYDOWN:
+        if (st) st->done = true;
+        return 0;
+    case WM_ACTIVATE:
+        if (LOWORD(wp) == WA_INACTIVE && st) st->done = true;   // clicked somewhere else
+        return 0;
+    case WM_MOUSEACTIVATE: return MA_ACTIVATE;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+// rightTop: screen point where the menu's top-right corner goes.
+static int RunMenu(std::vector<MenuItem> items, POINT rightTop) {
+    static bool registered = false;
+    if (!registered) {
+        WNDCLASSEXW wc{ sizeof(wc) };
+        wc.style = CS_DROPSHADOW;
+        wc.lpfnWndProc = MenuProc;
+        wc.hInstance = g.hmod;
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.lpszClassName = L"NeonNetMenu";
+        registered = RegisterClassExW(&wc) != 0;
+    }
+    MenuState st;
+    st.items = std::move(items);
+    st.font = CreateFontW(-S(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                          CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
+
+    // measure
+    HDC dc = GetDC(g.hwnd);
+    HGDIOBJ of = SelectObject(dc, st.font);
+    int textW = 0, keysW = 0;
+    for (auto& it : st.items) {
+        SIZE s;
+        if (GetTextExtentPoint32W(dc, it.text.c_str(), (int)it.text.size(), &s)) textW = std::max(textW, (int)s.cx);
+        if (!it.keys.empty() && GetTextExtentPoint32W(dc, it.keys.c_str(), (int)it.keys.size(), &s)) keysW = std::max(keysW, (int)s.cx);
+    }
+    SelectObject(dc, of);
+    ReleaseDC(g.hwnd, dc);
+    int w = S(32) + textW + S(40) + keysW + S(16);
+    int y = S(30);
+    for (auto& it : st.items) {
+        int rh = it.cmd ? S(28) : S(11);
+        st.rows.push_back({ 0, y, w, y + rh });
+        y += rh;
+    }
+    int h = y + S(8);
+
+    // keep it on the monitor
+    MONITORINFO mi{ sizeof(mi) };
+    GetMonitorInfoW(MonitorFromPoint(rightTop, MONITOR_DEFAULTTONEAREST), &mi);
+    int x = std::max((int)mi.rcWork.left, (int)std::min(rightTop.x, mi.rcWork.right) - w);
+    int top = std::min(rightTop.y, mi.rcWork.bottom - h);
+
+    HWND hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"NeonNetMenu", L"", WS_POPUP,
+                                x, top, w, h, g.hwnd, nullptr, g.hmod, &st);
+    if (!hwnd) { DeleteObject(st.font); return 0; }
+    int c = S(MENU_CUT_DIP);
+    POINT rp[6] = { {0, 0}, {w - c, 0}, {w, c}, {w, h}, {c, h}, {0, h - c} };
+    SetWindowRgn(hwnd, CreatePolygonRgn(rp, 6, WINDING), FALSE);
+    ShowWindow(hwnd, SW_SHOW);
+    SetForegroundWindow(hwnd);
+    SetFocus(hwnd);
+
+    MSG m;
+    while (!st.done && !g.closing) {
+        BOOL r = GetMessageW(&m, nullptr, 0, 0);
+        if (r <= 0) { if (r == 0) PostQuitMessage((int)m.wParam); break; }
+        // keys typed while the menu is open belong to the menu
+        if (m.message >= WM_KEYFIRST && m.message <= WM_KEYLAST && m.hwnd != hwnd) m.hwnd = hwnd;
+        TranslateMessage(&m);
+        DispatchMessageW(&m);
+    }
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+    DestroyWindow(hwnd);
+    DeleteObject(st.font);
+    g_menuClosedAt = GetTickCount64();
+    if (!g.closing) SetForegroundWindow(g.hwnd);
+    return st.result;
+}
+
 static void ShowMenu(int cssX, int cssY) {
-    HMENU m = CreatePopupMenu();
-    AppendMenuW(m, MF_STRING, CMD_NEWTAB, L"New tab\tCtrl+T");
-    AppendMenuW(m, MF_STRING, CMD_CLOSETAB, L"Close tab\tCtrl+W");
-    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(m, MF_STRING, CMD_ZOOMIN, L"Zoom in\tCtrl++");
-    AppendMenuW(m, MF_STRING, CMD_ZOOMOUT, L"Zoom out\tCtrl+-");
-    AppendMenuW(m, MF_STRING, CMD_ZOOMRESET, L"Reset zoom\tCtrl+0");
-    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(m, MF_STRING, CMD_PRINT, L"Print...\tCtrl+P");
-    AppendMenuW(m, MF_STRING | (g.scan ? MF_CHECKED : 0), CMD_SCAN, L"Scanlines");
-    AppendMenuW(m, MF_STRING | (g.fullscreen ? MF_CHECKED : 0), CMD_FULLSCREEN, L"Fullscreen\tF11");
-    AppendMenuW(m, MF_STRING, CMD_DEVTOOLS, L"Developer tools\tF12");
-    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-    if (g.upd == U_READY) AppendMenuW(m, MF_STRING, CMD_UPDATE_RESTART, (L"Restart to update to v" + g.updVersion).c_str());
-    if (g.upd == U_AVAILABLE) AppendMenuW(m, MF_STRING, CMD_UPDATE_PAGE, (L"Download v" + g.updVersion + L"...").c_str());
-    bool busy = g.upd == U_CHECKING || g.upd == U_DOWNLOADING;
-    AppendMenuW(m, MF_STRING | (busy ? MF_GRAYED : 0), CMD_UPDATE_CHECK, L"Check for updates");
-    if (IsInstalledCopy()) AppendMenuW(m, MF_STRING | (AutoUpdateEnabled() ? MF_CHECKED : 0), CMD_UPDATE_AUTO, L"Automatic updates");
-    AppendMenuW(m, MF_STRING, CMD_ABOUT, L"About NeonNet");
+    // A click on ≡ while the menu is open first closes it (the menu loses focus);
+    // that same click must not open it again.
+    if (GetTickCount64() - g_menuClosedAt < 250) return;
+    std::vector<MenuItem> m;
+    auto add = [&](int cmd, std::wstring text, std::wstring keys = L"", bool disabled = false, bool checked = false) {
+        MenuItem it; it.cmd = cmd; it.text = std::move(text); it.keys = std::move(keys); it.disabled = disabled; it.checked = checked;
+        m.push_back(std::move(it));
+    };
+    auto sep = [&] { m.push_back(MenuItem()); };
+    Tab* a = Active();
+    bool starred = a && store::FindBookmark(DisplayUrl(a)) != 0;
+    bool canStar = a && store::Recordable(DisplayUrl(a));
+    add(CMD_NEWTAB, L"New tab", L"Ctrl+T");
+    add(CMD_CLOSETAB, L"Close tab", L"Ctrl+W");
+    add(CMD_REOPEN, L"Reopen closed tab", L"Ctrl+Shift+T", g.closed.empty());
+    sep();
+    add(CMD_BOOKMARK, starred ? L"Remove bookmark" : L"Bookmark this page", L"Ctrl+D", !canStar);
+    add(CMD_BOOKMARKS, L"Bookmarks", L"Ctrl+Shift+O");
+    add(CMD_HISTORY, L"History", L"Ctrl+H");
+    add(CMD_FIND, L"Find in page", L"Ctrl+F");
+    sep();
+    add(CMD_ZOOMIN, L"Zoom in", L"Ctrl++");
+    add(CMD_ZOOMOUT, L"Zoom out", L"Ctrl+-");
+    add(CMD_ZOOMRESET, L"Reset zoom", L"Ctrl+0");
+    sep();
+    add(CMD_PRINT, L"Print", L"Ctrl+P");
+    add(CMD_SCAN, L"Scanlines", L"", false, g.scan);
+    add(CMD_FULLSCREEN, L"Fullscreen", L"F11", false, g.fullscreen);
+    add(CMD_DEVTOOLS, L"Developer tools", L"F12");
+    sep();
+    if (g.upd == U_READY) add(CMD_UPDATE_RESTART, L"Restart to update to v" + g.updVersion);
+    if (g.upd == U_AVAILABLE) add(CMD_UPDATE_PAGE, L"Download v" + g.updVersion);
+    add(CMD_UPDATE_CHECK, L"Check for updates", L"", g.upd == U_CHECKING || g.upd == U_DOWNLOADING);
+    if (IsInstalledCopy()) add(CMD_UPDATE_AUTO, L"Automatic updates", L"", false, AutoUpdateEnabled());
+    add(CMD_ABOUT, L"About NeonNet");
+
     RECT c = ChromeRect();
-    POINT p{ c.left + S(cssX), c.top + S(cssY) };
+    POINT p{ c.left + S(cssX) + S(32), c.top + S(cssY) + S(2) };   // right edge of the ≡ button
     ClientToScreen(g.hwnd, &p);
-    int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTALIGN | TPM_TOPALIGN, p.x + S(32), p.y, 0, g.hwnd, nullptr);
-    DestroyMenu(m);
+    int cmd = RunMenu(std::move(m), p);
     if (cmd) ExecCmd(cmd);
 }
 
@@ -1092,6 +1543,12 @@ static void OnChromeCommand(const std::wstring& msg) {
     else if (cmd == L"close") CloseTab(_wtoi(arg.c_str()));
     else if (cmd == L"select") SelectTab(_wtoi(arg.c_str()), true);
     else if (cmd == L"scan") ExecCmd(CMD_SCAN);
+    else if (cmd == L"bookmark") ExecCmd(CMD_BOOKMARK);
+    else if (cmd == L"find") { g.findText = arg.substr(0, 1000); DoFind(true); }
+    else if (cmd == L"findnext") DoFind(true);
+    else if (cmd == L"findprev") DoFind(false);
+    else if (cmd == L"findcase") { g.findCase = !g.findCase; SendState(); DoFind(true); }
+    else if (cmd == L"findclose") CloseFind();
     else if (cmd == L"focusPage") FocusPage();
     else if (cmd == L"min") ShowWindow(g.hwnd, SW_MINIMIZE);
     else if (cmd == L"max") ShowWindow(g.hwnd, IsZoomed(g.hwnd) ? SW_RESTORE : SW_MAXIMIZE);
@@ -1235,6 +1692,7 @@ static void SavePlacement() {
 static void BeginClose() {
     if (g.closing) return;
     SavePlacement();
+    store::SaveIfDirty();
     g.closing = true;
     ShowWindow(g.hwnd, SW_HIDE);
     for (auto& t : g.tabs) if (t->browser) t->browser->GetHost()->CloseDevTools();
@@ -1294,9 +1752,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (wp == TIMER_ZOOM) KillTimer(hwnd, TIMER_ZOOM);
         else if (wp == TIMER_NOTICE) { KillTimer(hwnd, TIMER_NOTICE); g.notice.clear(); }
         else if (wp == TIMER_UPDATE) MaybeAutoCheck();
+        else if (wp == TIMER_SAVE) { KillTimer(hwnd, TIMER_SAVE); store::SaveIfDirty(); return 0; }
         InvalidateStatus();
         return 0;
     case WM_APP_UPDATE: { std::unique_ptr<UpdateMsg> m((UpdateMsg*)lp); if (!g.closing) OnUpdateMsg(*m); return 0; }
+    case WM_APP_STORE: ScheduleSave(); SendState(); return 0;
     case WM_SETFOCUS: FocusPage(); return 0;
     case WM_APP_CMD: { std::unique_ptr<std::wstring> m((std::wstring*)lp); if (!g.closing) OnChromeCommand(*m); return 0; }
     case WM_APP_OPEN: {
@@ -1374,6 +1834,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     if (argv) LocalFree(argv);
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    store::Load(KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME);
     EnableDarkMenus();
     g.scan = RegGetDword(L"Scanlines", 1) != 0;
 
@@ -1434,6 +1895,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     CefRunMessageLoop();
     g_client = nullptr;
     CefShutdown();
+    store::SaveIfDirty();
     UpdateShutdown();
     if (g.font) DeleteObject(g.font);
     CoUninitialize();

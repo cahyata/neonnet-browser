@@ -68,7 +68,7 @@ Inactive tabs are hidden (`ShowWindow(SW_HIDE)` and `WasHidden(true)`) so Chromi
 
 The tab strip and address bar are an ordinary HTML page (`ui/chrome.html`) in a CEF browser of its own. Both directions:
 
-**UI → app:** the UI calls `fetch('https://neonnet.ui/cmd?m=<command>')`. The `m` value is the command name and its arguments separated by newlines, URL-encoded.
+**UI → app:** the UI calls `fetch('https://neonnet.ui/cmd?m=<command>')`. The `m` value is the command name and its arguments separated by newlines, URL-encoded. The UI sends them one at a time (each request waits for the previous one), so the app receives them in order.
 
 | Command | Arguments | Action |
 |---|---|---|
@@ -78,12 +78,15 @@ The tab strip and address bar are an ordinary HTML page (`ui/chrome.html`) in a 
 | `newtab` | | New tab |
 | `select`, `close` | tab id | Select or close a tab |
 | `scan` | | Toggle scanlines |
+| `bookmark` | | Bookmark the active page, or remove its bookmark |
+| `find` | text | Search the active tab |
+| `findnext`, `findprev`, `findcase`, `findclose` | | Find bar buttons and keys |
 | `menu` | x, y | Open the `≡` menu at the button |
 | `min`, `max`, `quit` | | Window controls |
 | `drag` | | Start moving the window (`WM_NCLBUTTONDOWN` + `HTCAPTION`) |
 | `focusPage` | | Give focus back to the page |
 
-**App → UI:** `SendState()` runs `window.__nn({...})` in the chrome browser with the full state: tabs (id, title, loading), active tab, URL, canBack, canFwd, loading, scan, max. The UI re-renders from that state.
+**App → UI:** `SendState()` runs `window.__nn({...})` in the chrome browser with the full state: tabs (id, title, loading), active tab, URL, canBack, canFwd, loading, scan, max, canStar, starred, find, findCase, findText. The UI re-renders from that state. Two smaller messages exist: `findResult` (match count and selected match) and `focusFind`.
 
 **Channel security:** `https://neonnet.ui/` is served by the app's own scheme handler, so these requests never reach the network. `/cmd` is only accepted from the chrome browser (checked by browser id). Web pages in tabs cannot send commands, even though they may load `https://neonnet.ui/newtab.html`.
 
@@ -93,7 +96,38 @@ The tab strip and address bar are an ordinary HTML page (`ui/chrome.html`) in a 
 |---|---|---|
 | `https://neonnet.ui/chrome.html` | `IDR_CHROME` | Chrome browser |
 | `https://neonnet.ui/newtab.html` | `IDR_NEWTAB` | New tabs and the home button |
+| `https://neonnet.ui/history.html` | `IDR_HISTORY` | History page (Ctrl+H) |
+| `https://neonnet.ui/bookmarks.html` | `IDR_BOOKMARKS` | Bookmarks page (Ctrl+Shift+O) |
 | `https://neonnet.ui/cmd?...` | | Command channel (answers 204) |
+| `https://neonnet.ui/api/...` | | History and bookmarks data (JSON) |
+
+Every response carries `X-Frame-Options: DENY`, so websites cannot load NeonNet's pages in a frame.
+
+## History and bookmarks
+
+`src/store.cpp` keeps both lists in memory and writes them to `%LOCALAPPDATA%\NeonNet\history.txt` and `bookmarks.txt`, one record per line: `unix-time-ms TAB url TAB title`, with tabs, newlines and backslashes escaped. Files are written to a `.tmp` file first and then renamed over the old one, two seconds after a change (`TIMER_SAVE`) and when NeonNet closes. An SRW lock protects the lists, because the UI thread records visits while the IO thread serves the API.
+
+- **Recording:** `OnAddressChange` calls `store::Visit()` for http, https and file URLs (also for same-page navigations such as `pushState`). Reloading the newest entry updates its time instead of adding a row. `OnTitleChange` fills in the title. `OnLoadError` removes the visit again with `store::Forget()`.
+- **Limits:** visits older than 90 days, and anything beyond 20,000 visits, are dropped when NeonNet starts.
+- **API** (`https://neonnet.ui/api/`, served by `ServeApi()`):
+
+  | Path | Answer |
+  |---|---|
+  | `history?q=` | Up to 1,500 visits, newest first, filtered by title or URL |
+  | `history/delete?id=`, `history/clear` | Remove one visit, or all |
+  | `bookmarks` | All bookmarks, oldest first |
+  | `bookmarks/delete?id=`, `bookmarks/edit?id=&title=&url=` | Change bookmarks; `edit` rejects anything that is not http, https or file |
+
+  The API answers only a **main frame that shows a `https://neonnet.ui/` page** in a tab (403 otherwise). A website's `fetch`, even with `no-cors`, cannot read or change the lists. Changes made through the API post `WM_APP_STORE` to the UI thread, which saves and refreshes the star.
+- **Pages:** `history.html`, `bookmarks.html` and the new tab page fetch this API and build their lists with `textContent`. Links are only made for http, https and file URLs.
+
+## Find in page
+
+Ctrl+F sets `g.findOpen`, which makes `ChromeRect()` `FIND_DIP` (34 DIP) taller, so the chrome browser shows the find row of `chrome.html` and the tabs move down. Each search calls `CefBrowserHost::Find(text, forward, matchCase, findNext=true)`. With `findNext=false` Chromium only highlights the matches without selecting one, and the first "next" would then select match 1 again. `OnFindResult` sends the count to the UI. Switching tabs, opening a tab or a popup closes the bar and calls `StopFinding(true)` on the old tab (`HideFind()`).
+
+## Reopening closed tabs
+
+`CloseTab()` pushes the tab's URL and strip position onto `g.closed` (at most 25; not while the window is closing, and never for the new tab page). Ctrl+Shift+T pops the newest one and creates the tab at the same position. Only the URL comes back, not the tab's back/forward history: CEF cannot move a navigation history between browsers.
 
 The HTML files are embedded as `RCDATA` in `NeonNet.dll`, so there are no loose UI files that could be changed from outside.
 
@@ -113,6 +147,7 @@ The HTML files are embedded as `RCDATA` in `NeonNet.dll`, so there are no loose 
 ## Other features
 
 - **Scanlines:** `ScanScript()` inserts one `position:fixed` `div` with `pointer-events:none` and a line gradient. It runs on `OnLoadStart` and when loading finishes. The script is idempotent: it never stacks overlays, and removes the overlay when scanlines are off.
+- **`≡` menu:** a native menu cannot be recolored, so `RunMenu()` shows a `WS_POPUP` window (class `NeonNetMenu`) painted with GDI: clipped-corner region, pink outline, cyan highlight and scanlines drawn with `GdiAlphaBlend`. It runs its own message loop until an item is chosen, Esc is pressed or the popup loses activation, and returns the command like `TrackPopupMenu` does. A `menu` request that arrives within 250 ms of the menu closing is ignored, so a second click on `≡` closes the menu instead of reopening it.
 - **Shortcuts:** `OnPreKeyEvent` catches keys before the page does, for every browser (chrome and tabs).
 - **Fullscreen:** combines two sources: `fsUser` from F11, and `fsElement` from the page (for example a video) through `OnFullscreenModeChange`. In fullscreen the window covers the whole monitor and the chrome and status bar are hidden.
 - **Downloads:** `OnBeforeDownload` opens a save dialog. `OnDownloadUpdated` shows progress in the status bar.

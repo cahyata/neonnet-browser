@@ -69,6 +69,26 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;app-re
   animation:sweep 1s linear infinite}
 @keyframes sweep{from{left:-30%}to{left:100%}}
 #line{position:absolute;left:0;right:0;bottom:0;height:1px;background:var(--pink);opacity:.6}
+#star{color:var(--muted);font-size:15px;width:30px;height:100%}
+#star:hover:not(:disabled){color:var(--yellow)}
+#star.on{color:var(--yellow)}
+#star:disabled{color:#3a2a5e;cursor:default}
+
+/* row 3: find bar (only while open; the host makes the chrome area taller) */
+#find{height:34px;display:none;align-items:center;gap:6px;padding:0 12px 2px;border-bottom:1px solid var(--cyan)}
+body.find #find{display:flex}
+#find .fl{color:var(--yellow);letter-spacing:1px}
+#fbox{width:min(420px,50%);height:24px;display:flex;align-items:center;border:1px solid var(--pink);background:var(--bg2);
+  clip-path:polygon(0 0,calc(100% - 6px) 0,100% 6px,100% 100%,0 100%)}
+#fq{flex:1;min-width:0;height:100%;background:none;border:0;outline:0;color:var(--cyan);padding:0 8px;font:12px "Cascadia Mono","Consolas",monospace;user-select:text}
+#fq::placeholder{color:#5a4a8a}
+#fq::selection{background:var(--pink);color:var(--bg)}
+#fcount{color:var(--muted);padding:0 8px;white-space:nowrap}
+#fcount.none{color:var(--pink)}
+.fb{color:var(--yellow);height:24px;padding:0 4px}
+.fb:hover{color:var(--bg);background:var(--yellow)}
+#fcase{height:22px;padding:0 6px;border:1px solid var(--muted);color:var(--muted)}
+#fcase.on{border-color:var(--cyan);color:var(--cyan)}
 </style>
 </head>
 <body>
@@ -88,17 +108,31 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;app-re
   <button class="nb" id="fwd" title="Forward (Alt+Right)">[&#9654;]</button>
   <button class="nb" id="reload" title="Reload (F5)">[&#10227;]</button>
   <button class="nb" id="home" title="Home">[&#8962;]</button>
-  <div id="addr"><span>&gt;&gt;</span><input id="url" spellcheck="false" autocomplete="off" placeholder="search the grid or enter address"></div>
+  <div id="addr"><span>&gt;&gt;</span><input id="url" spellcheck="false" autocomplete="off" placeholder="search the grid or enter address"><button id="star" title="Bookmark this page (Ctrl+D)">&#9734;</button></div>
   <button id="go">GO</button>
   <button id="scanb" title="Toggle scanlines">SCAN</button>
   <button id="menu" title="Menu">&#8801;</button>
   <div id="line"></div>
   <div id="bar"><i></i></div>
 </div>
+<div id="find">
+  <span class="fl">FIND&gt;</span>
+  <div id="fbox"><input id="fq" spellcheck="false" autocomplete="off" placeholder="find in page"><span id="fcount"></span></div>
+  <button class="fb" id="fprev" title="Previous match (Shift+Enter)">[&#9650;]</button>
+  <button class="fb" id="fnext" title="Next match (Enter)">[&#9660;]</button>
+  <button id="fcase" title="Match case">Aa</button>
+  <button class="fb" id="fclose" title="Close (Esc)">[&#10005;]</button>
+</div>
 <script>
 const $ = s => document.querySelector(s);
 // Commands go to the host as requests to https://neonnet.ui/cmd (served by the app itself).
-const send = (...a) => fetch('https://neonnet.ui/cmd?m=' + encodeURIComponent(a.join('\n')), {cache: 'no-store'}).catch(() => {});
+// They are sent one at a time so the host sees them in order (typing in the find bar
+// followed by Enter must not arrive as Enter first).
+let queue = Promise.resolve();
+const send = (...a) => {
+  const u = 'https://neonnet.ui/cmd?m=' + encodeURIComponent(a.join('\n'));
+  queue = queue.then(() => fetch(u, {cache: 'no-store'})).catch(() => {});
+};
 const NEWTAB = 'https://neonnet.ui/newtab.html';
 let state = {tabs:[], active:0};
 let editing = false;
@@ -138,13 +172,43 @@ function render(){
   $('#max').innerHTML = state.max ? '&#10064;' : '&#9633;';
   $('#max').title = state.max ? 'Restore' : 'Maximize';
   if(!editing) $('#url').value = shownUrl(state.url);
+  const star = $('#star');
+  star.disabled = !state.canStar;
+  star.classList.toggle('on', !!state.starred);
+  star.innerHTML = state.starred ? '&#9733;' : '&#9734;';
+  star.title = state.starred ? 'Remove bookmark (Ctrl+D)' : 'Bookmark this page (Ctrl+D)';
+  document.body.classList.toggle('find', !!state.find);
+  if(state.find && !findWas){ fq.value = state.findText || ''; showCount(0, 0); }
+  findWas = !!state.find;
+  $('#fcase').classList.toggle('on', !!state.findCase);
+}
+
+const fq = $('#fq');
+let findWas = false;
+function showCount(count, active){
+  const c = $('#fcount');
+  c.textContent = count ? active + '/' + count : (fq.value ? '0/0' : '');
+  c.classList.toggle('none', !count && !!fq.value);
 }
 
 // The host pushes state with window.__nn({...}).
 window.__nn = m => {
   if(m.type === 'state'){ state = m; render(); }
   else if(m.type === 'focusUrl'){ const u = $('#url'); u.focus(); u.select(); }
+  else if(m.type === 'focusFind'){ fq.focus(); fq.select(); }
+  else if(m.type === 'findResult'){ showCount(m.count, m.active); }
 };
+
+fq.addEventListener('input', () => { send('find', fq.value); if(!fq.value) showCount(0, 0); });
+fq.addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); send(e.shiftKey ? 'findprev' : 'findnext'); }
+  else if(e.key === 'Escape'){ e.preventDefault(); send('findclose'); }
+});
+$('#fnext').onclick = () => send('findnext');
+$('#fprev').onclick = () => send('findprev');
+$('#fcase').onclick = () => send('findcase');
+$('#fclose').onclick = () => send('findclose');
+$('#star').onclick = () => send('bookmark');
 
 // Window dragging: empty parts of the tab row move the window, double click maximizes.
 const isDragArea = el => el && (el.id === 'top' || el.id === 'spacer' || el.id === 'brand' || el.id === 'tabs' || (el.closest && el.closest('#brand')));
@@ -171,7 +235,7 @@ $('#max').onclick = () => send('max');
 $('#close').onclick = () => send('quit');
 $('#scanb').onclick = () => send('scan');
 $('#menu').onclick = () => { const r = $('#menu').getBoundingClientRect(); send('menu', Math.round(r.left), Math.round(r.bottom)); };
-document.addEventListener('contextmenu', e => { if(e.target !== url) e.preventDefault(); });
+document.addEventListener('contextmenu', e => { if(e.target !== url && e.target !== fq) e.preventDefault(); });
 document.addEventListener('dragstart', e => e.preventDefault());
 
 send('ready');

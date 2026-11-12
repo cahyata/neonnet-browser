@@ -3,6 +3,8 @@
 #define IDI_APP        101
 #define IDR_CHROME     201
 #define IDR_NEWTAB     202
+#define IDR_HISTORY    203
+#define IDR_BOOKMARKS  204
 
 #define APP_VERSION    L"1.0.0"
 #define APP_PUBLISHER  L"NeonNet"

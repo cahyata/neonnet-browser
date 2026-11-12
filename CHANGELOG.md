@@ -2,6 +2,19 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Features
+- Find in page: Ctrl+F opens a find bar with a match counter, next/previous (Enter, Shift+Enter, F3, Ctrl+G) and a match-case switch.
+- Reopen closed tabs with Ctrl+Shift+T, at their old position, up to 25 tabs back.
+- Bookmarks: the `☆` star in the address bar and Ctrl+D, a bookmarks page (Ctrl+Shift+O) with search, edit and delete, and the newest bookmarks on the new tab page.
+- History: visits are kept for 90 days, with a history page (Ctrl+H) that can search, remove single visits or clear everything.
+- New menu items for all of the above.
+- The `≡` menu is drawn in the NeonNet theme (clipped corners, neon colors, scanlines) instead of the Windows menu style, and works with the arrow keys.
+
+### Security
+- NeonNet's own pages can no longer be loaded inside a frame by other sites.
+
 ## [1.0.0] - 2026-11-11
 
 First release.

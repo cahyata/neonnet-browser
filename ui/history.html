@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>HISTORY</title>
+<style>
+:root{--bg:#12062c;--bg2:#0a0420;--row:#1b0b3d;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
+main{max-width:920px;margin:0 auto;padding:28px 20px 60px}
+h1{margin:0;font:italic 900 40px Impact,"Arial Black",sans-serif;letter-spacing:3px;color:var(--cyan);text-shadow:3px 3px 0 var(--pink)}
+.sub{color:var(--yellow);letter-spacing:2px;margin:4px 0 20px}
+.tools{display:flex;gap:10px;align-items:center;margin-bottom:18px}
+.search{flex:1;display:flex;align-items:center;height:36px;border:1px solid var(--cyan);background:var(--bg2);
+  clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))}
+.search span{color:var(--pink);padding:0 6px 0 12px}
+.search input{flex:1;height:100%;background:none;border:0;outline:0;color:var(--cyan);font:14px "Cascadia Mono","Consolas",monospace}
+.search input::placeholder{color:#5a4a8a}
+button{font:inherit;cursor:pointer;border:0}
+.danger{height:36px;padding:0 16px;background:none;border:1px solid var(--pink);color:var(--pink);font-weight:bold}
+.danger:hover,.danger.arm{background:var(--pink);color:var(--bg)}
+h2{font:bold 12px "Cascadia Mono","Consolas",monospace;color:var(--yellow);letter-spacing:2px;margin:22px 0 6px;
+  padding-bottom:4px;border-bottom:1px solid rgba(255,46,151,.5)}
+.row{display:flex;align-items:center;gap:12px;padding:6px 8px;min-height:32px}
+.row:hover{background:var(--row)}
+.time{color:var(--muted);width:44px;flex:none}
+.row a{flex:1;min-width:0;display:flex;gap:10px;color:var(--cyan);text-decoration:none;overflow:hidden;white-space:nowrap}
+.row a:hover .t{text-decoration:underline}
+.t{overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+.h{color:var(--muted);overflow:hidden;text-overflow:ellipsis;flex:1 1 0;min-width:60px}
+.x{width:24px;height:24px;background:none;color:var(--muted);visibility:hidden;flex:none}
+.row:hover .x{visibility:visible}
+.x:hover{background:var(--pink);color:var(--bg)}
+.empty{color:var(--muted);margin-top:40px;text-align:center;letter-spacing:1px}
+</style>
+</head>
+<body>
+<main>
+  <h1>HISTORY</h1>
+  <div class="sub">&gt; ACCESS LOG // LAST 90 DAYS</div>
+  <div class="tools">
+    <div class="search"><span>&gt;&gt;</span><input id="q" spellcheck="false" autocomplete="off" placeholder="search history" autofocus></div>
+    <button class="danger" id="clear">CLEAR ALL</button>
+  </div>
+  <div id="list"></div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const safe = u => /^(https?:|file:)/i.test(u);
+const pad = n => String(n).padStart(2, '0');
+
+function dayLabel(d){
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const day = new Date(d); day.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - day) / 86400000);
+  const date = d.toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long', year:'numeric'}).toUpperCase();
+  return diff === 0 ? 'TODAY - ' + date : diff === 1 ? 'YESTERDAY - ' + date : date;
+}
+
+function host(u){ try { return new URL(u).host || u; } catch(e){ return u; } }
+
+async function load(){
+  const q = $('#q').value.trim();
+  let items = [];
+  try { items = await (await fetch('/api/history?q=' + encodeURIComponent(q), {cache:'no-store'})).json(); } catch(e){}
+  const list = $('#list'); list.innerHTML = '';
+  if(!items.length){
+    const e = document.createElement('div'); e.className = 'empty';
+    e.textContent = q ? 'NO MATCHES FOR "' + q.toUpperCase() + '"' : 'NO HISTORY YET. GO EXPLORE THE GRID.';
+    list.appendChild(e); return;
+  }
+  let lastDay = '';
+  for(const it of items){
+    const d = new Date(it.time);
+    const label = dayLabel(d);
+    if(label !== lastDay){
+      const h = document.createElement('h2'); h.textContent = label; list.appendChild(h); lastDay = label;
+    }
+    const row = document.createElement('div'); row.className = 'row';
+    const tm = document.createElement('span'); tm.className = 'time'; tm.textContent = pad(d.getHours()) + ':' + pad(d.getMinutes());
+    const a = document.createElement('a');
+    if(safe(it.url)) a.href = it.url;
+    a.title = it.url;
+    const t = document.createElement('span'); t.className = 't'; t.textContent = it.title || it.url;
+    const hs = document.createElement('span'); hs.className = 'h'; hs.textContent = host(it.url);
+    a.append(t, hs);
+    const x = document.createElement('button'); x.className = 'x'; x.title = 'Remove from history'; x.innerHTML = '&#10005;';
+    x.onclick = async () => {
+      await fetch('/api/history/delete?id=' + it.id, {cache:'no-store'}).catch(() => {});
+      row.remove();
+    };
+    row.append(tm, a, x);
+    list.appendChild(row);
+  }
+}
+
+let timer = 0;
+$('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 150); });
+
+// Two clicks to clear: the first one arms the button for three seconds.
+let armed = 0;
+$('#clear').onclick = async () => {
+  const b = $('#clear');
+  if(!armed){
+    b.classList.add('arm'); b.textContent = 'CONFIRM?';
+    armed = setTimeout(() => { armed = 0; b.classList.remove('arm'); b.textContent = 'CLEAR ALL'; }, 3000);
+    return;
+  }
+  clearTimeout(armed); armed = 0; b.classList.remove('arm'); b.textContent = 'CLEAR ALL';
+  await fetch('/api/history/clear', {cache:'no-store'}).catch(() => {});
+  load();
+};
+
+load();
+</script>
+</body>
+</html>

@@ -4,6 +4,8 @@
 IDI_APP     ICON    "neonnet.ico"
 IDR_CHROME  RCDATA  "..\\ui\\chrome.html"
 IDR_NEWTAB  RCDATA  "..\\ui\\newtab.html"
+IDR_HISTORY RCDATA  "..\\ui\\history.html"
+IDR_BOOKMARKS RCDATA "..\\ui\\bookmarks.html"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION 1,0,0,0

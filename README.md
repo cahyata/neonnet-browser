@@ -19,6 +19,7 @@ NeonNet ships its own Chromium engine. It does not need Edge, WebView2 or any ot
 - **Single window:** running `NeonNet.exe <url>` while NeonNet is open adds a tab to the existing window.
 - **Chromium sandbox enabled:** renderer and GPU processes run isolated.
 - **Per-user installer:** no admin rights needed, uninstall from Settings > Apps.
+- **Find in page, bookmarks and history:** Ctrl+F, Ctrl+D, Ctrl+H, and Ctrl+Shift+T to reopen a closed tab.
 - **Automatic updates:** new releases are downloaded in the background, checked against a SHA-256 checksum, and installed when NeonNet closes. Can be turned off.
 
 ## Download and install
@@ -55,13 +56,16 @@ neonnet-browser/
 ├─ src/
 │  ├─ main.cpp          all browser logic
 │  ├─ updater.cpp/.h    update check, download and checksum
+│  ├─ store.cpp/.h      history and bookmarks
 │  ├─ resource.h        resource IDs and version
 │  ├─ app.rc            icon, embedded UI pages, version info
 │  ├─ app.manifest      Windows manifest (DPI awareness, common controls)
 │  └─ neonnet.ico       application icon
 ├─ ui/
 │  ├─ chrome.html       tab strip and address bar
-│  └─ newtab.html       new tab page
+│  ├─ newtab.html       new tab page
+│  ├─ history.html      history page
+│  └─ bookmarks.html    bookmarks page
 ├─ installer/
 │  ├─ setup.cpp         installer
 │  └─ setup.rc
@@ -78,7 +82,7 @@ neonnet-browser/
 
 - DRM content (Netflix, Disney+, Spotify web player) does not play.
 - No account sync, password manager or Chrome Web Store extensions.
-- No find-in-page (Ctrl+F) yet.
+- Bookmarks are a flat list (no folders), and the address bar does not suggest from history yet.
 
 ## License
 

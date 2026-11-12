@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>BOOKMARKS</title>
+<style>
+:root{--bg:#12062c;--bg2:#0a0420;--row:#1b0b3d;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
+main{max-width:920px;margin:0 auto;padding:28px 20px 60px}
+h1{margin:0;font:italic 900 40px Impact,"Arial Black",sans-serif;letter-spacing:3px;color:var(--cyan);text-shadow:3px 3px 0 var(--pink)}
+.sub{color:var(--yellow);letter-spacing:2px;margin:4px 0 20px}
+.search{display:flex;align-items:center;height:36px;margin-bottom:16px;border:1px solid var(--cyan);background:var(--bg2);
+  clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))}
+.search span{color:var(--pink);padding:0 6px 0 12px}
+.search input{flex:1;height:100%;background:none;border:0;outline:0;color:var(--cyan);font:14px "Cascadia Mono","Consolas",monospace}
+.search input::placeholder{color:#5a4a8a}
+button{font:inherit;cursor:pointer;border:0;background:none}
+.row{display:flex;align-items:center;gap:12px;padding:7px 8px;min-height:36px;border-bottom:1px solid rgba(138,111,192,.18)}
+.row:hover{background:var(--row)}
+.n{color:var(--yellow);width:28px;flex:none}
+.row a{flex:1;min-width:0;display:flex;gap:10px;color:var(--cyan);text-decoration:none;overflow:hidden;white-space:nowrap}
+.row a:hover .t{text-decoration:underline}
+.t{overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+.u{color:var(--muted);overflow:hidden;text-overflow:ellipsis;flex:1 1 0;min-width:60px}
+.act{display:flex;gap:4px;visibility:hidden;flex:none}
+.row:hover .act{visibility:visible}
+.act button{height:24px;padding:0 8px;color:var(--muted)}
+.act .e:hover{background:var(--cyan);color:var(--bg)}
+.act .d:hover{background:var(--pink);color:var(--bg)}
+.edit{display:flex;gap:8px;flex:1;min-width:0}
+.edit input{height:28px;background:var(--bg2);border:1px solid var(--pink);outline:0;color:var(--cyan);padding:0 8px;font:13px "Cascadia Mono","Consolas",monospace;min-width:0}
+.edit input:focus{border-color:var(--cyan)}
+.edit .ti{flex:1}.edit .ui{flex:1.4}
+.edit button{height:28px;padding:0 12px;font-weight:bold}
+.save{background:var(--pink);color:var(--bg)}.save:hover{background:var(--cyan)}
+.cancel{color:var(--muted);border:1px solid var(--muted)}.cancel:hover{color:var(--cyan);border-color:var(--cyan)}
+.err{color:var(--pink);margin-left:40px}
+.empty{color:var(--muted);margin-top:40px;text-align:center;letter-spacing:1px;line-height:1.8}
+.empty b{color:var(--yellow);font-weight:normal}
+</style>
+</head>
+<body>
+<main>
+  <h1>BOOKMARKS</h1>
+  <div class="sub">&gt; SAVED COORDINATES</div>
+  <div class="search"><span>&gt;&gt;</span><input id="q" spellcheck="false" autocomplete="off" placeholder="search bookmarks" autofocus></div>
+  <div id="list"></div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const safe = u => /^(https?:|file:)/i.test(u);
+let all = [];
+
+async function load(){
+  try { all = await (await fetch('/api/bookmarks', {cache:'no-store'})).json(); } catch(e){ all = []; }
+  render();
+}
+
+function render(){
+  const q = $('#q').value.trim().toLowerCase();
+  const list = $('#list'); list.innerHTML = '';
+  const items = all.slice().reverse().filter(b => !q || b.title.toLowerCase().includes(q) || b.url.toLowerCase().includes(q));
+  if(!items.length){
+    const e = document.createElement('div'); e.className = 'empty';
+    if(q) e.textContent = 'NO MATCHES FOR "' + q.toUpperCase() + '"';
+    else e.innerHTML = 'NO BOOKMARKS YET.<br>PRESS <b>CTRL+D</b> OR THE <b>&#9734;</b> IN THE ADDRESS BAR TO SAVE A PAGE.';
+    list.appendChild(e); return;
+  }
+  items.forEach((b, i) => list.appendChild(row(b, i)));
+}
+
+function row(b, i){
+  const r = document.createElement('div'); r.className = 'row';
+  const n = document.createElement('span'); n.className = 'n'; n.textContent = String(i + 1).padStart(2, '0');
+  const a = document.createElement('a');
+  if(safe(b.url)) a.href = b.url;
+  a.title = b.url;
+  const t = document.createElement('span'); t.className = 't'; t.textContent = b.title || b.url;
+  const u = document.createElement('span'); u.className = 'u'; u.textContent = b.url;
+  a.append(t, u);
+  const act = document.createElement('div'); act.className = 'act';
+  const e = document.createElement('button'); e.className = 'e'; e.textContent = 'EDIT';
+  const d = document.createElement('button'); d.className = 'd'; d.textContent = 'DELETE';
+  e.onclick = () => r.replaceWith(editor(b, i));
+  d.onclick = async () => {
+    await fetch('/api/bookmarks/delete?id=' + b.id, {cache:'no-store'}).catch(() => {});
+    all = all.filter(x => x.id !== b.id); render();
+  };
+  act.append(e, d);
+  r.append(n, a, act);
+  return r;
+}
+
+function editor(b, i){
+  const wrap = document.createElement('div');
+  const r = document.createElement('div'); r.className = 'row';
+  const n = document.createElement('span'); n.className = 'n'; n.textContent = String(i + 1).padStart(2, '0');
+  const f = document.createElement('div'); f.className = 'edit';
+  const ti = document.createElement('input'); ti.className = 'ti'; ti.value = b.title; ti.placeholder = 'title';
+  const ui = document.createElement('input'); ui.className = 'ui'; ui.value = b.url; ui.placeholder = 'https://...'; ui.spellcheck = false;
+  const s = document.createElement('button'); s.className = 'save'; s.textContent = 'SAVE';
+  const c = document.createElement('button'); c.className = 'cancel'; c.textContent = 'CANCEL';
+  const err = document.createElement('div'); err.className = 'err';
+  const save = async () => {
+    const url = ui.value.trim(), title = ti.value.trim();
+    if(!safe(url)){ err.textContent = 'ADDRESS MUST START WITH http://, https:// OR file:///'; return; }
+    const res = await fetch('/api/bookmarks/edit?id=' + b.id + '&title=' + encodeURIComponent(title) + '&url=' + encodeURIComponent(url),
+                            {cache:'no-store'}).catch(() => null);
+    if(!res || !res.ok){ err.textContent = 'COULD NOT SAVE THIS BOOKMARK'; return; }
+    load();
+  };
+  s.onclick = save;
+  c.onclick = render;
+  [ti, ui].forEach(x => x.addEventListener('keydown', e => { if(e.key === 'Enter') save(); else if(e.key === 'Escape') render(); }));
+  f.append(ti, ui, s, c);
+  r.append(n, f);
+  wrap.append(r, err);
+  setTimeout(() => ti.focus(), 0);
+  return wrap;
+}
+
+$('#q').addEventListener('input', render);
+load();
+</script>
+</body>
+</html>
