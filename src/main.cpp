@@ -1544,13 +1544,41 @@ static const char DEVTOOLS_DOCK_JS[] =
     "}).catch(function(){console.log('__NN_READY__');});"
     "})();";
 
-class DevToolsClient : public CefClient, public CefLifeSpanHandler, public CefKeyboardHandler, public CefLoadHandler, public CefDisplayHandler {
+static void LaunchIncognito(const std::wstring& url);
+
+// Intercept Chromium tab/window dispositions (middle-click, Ctrl+click, noopener links, PDF viewer links,
+// DevTools links) so they always open inside NeonNet instead of spawning a stray Chromium window.
+static bool HandleOpenDisposition(const CefString& target_url, cef_window_open_disposition_t disp, bool isUi) {
+    if (g.closing || disp == CEF_WOD_IGNORE_ACTION) return true;
+    if (disp == CEF_WOD_CURRENT_TAB) return isUi;
+    if (disp == CEF_WOD_SAVE_TO_DISK || disp == CEF_WOD_NEW_PICTURE_IN_PICTURE) return false;
+    std::wstring u = target_url.ToWString();
+    if (disp == CEF_WOD_OFF_THE_RECORD) {
+        if (!u.empty()) { if (g.incognito) CreateTab(u, true, -1); else LaunchIncognito(u); }
+        return true;
+    }
+    if (!u.empty()) CreateTab(u, disp != CEF_WOD_NEW_BACKGROUND_TAB, -1);
+    return true;
+}
+
+class DevToolsClient : public CefClient, public CefLifeSpanHandler, public CefKeyboardHandler, public CefLoadHandler, public CefDisplayHandler, public CefRequestHandler {
 public:
     explicit DevToolsClient(int tabId) : tabId_(tabId) {}
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
+    CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+    bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int, const CefString& target_url,
+                       const CefString&, CefLifeSpanHandler::WindowOpenDisposition disp, bool, const CefPopupFeatures&,
+                       CefWindowInfo&, CefRefPtr<CefClient>&, CefBrowserSettings&,
+                       CefRefPtr<CefDictionaryValue>&, bool*) override {
+        return HandleOpenDisposition(target_url, disp == CEF_WOD_CURRENT_TAB ? CEF_WOD_NEW_FOREGROUND_TAB : disp, true);
+    }
+    bool OnOpenURLFromTab(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, const CefString& target_url,
+                          CefRequestHandler::WindowOpenDisposition target_disposition, bool) override {
+        return HandleOpenDisposition(target_url, target_disposition, true);
+    }
     void OnLoadEnd(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int) override {
         if (!frame->IsMain()) return;
         // Some of the tools' features (the device toolbar) exist only when their address says "can_dock=true",
@@ -1935,10 +1963,15 @@ public:
 
     // --- life span ---
     bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, int, const CefString& target_url,
-                       const CefString&, CefLifeSpanHandler::WindowOpenDisposition, bool, const CefPopupFeatures&,
+                       const CefString&, CefLifeSpanHandler::WindowOpenDisposition disp, bool, const CefPopupFeatures&,
                        CefWindowInfo& windowInfo, CefRefPtr<CefClient>& client, CefBrowserSettings& settings,
                        CefRefPtr<CefDictionaryValue>&, bool*) override {
         if (IsUiBrowser(browser) || g.closing) return true;   // the chrome UI never opens popups
+        if (disp == CEF_WOD_OFF_THE_RECORD) {
+            std::wstring u = target_url.ToWString();
+            if (!u.empty()) { if (g.incognito) CreateTab(u, true, -1); else LaunchIncognito(u); }
+            return true;
+        }
         // Keep the popup (so window.opener works for logins) but host it as a new tab.
         auto tab = std::make_unique<Tab>();
         int id = tab->id = g.nextId++;
@@ -2166,6 +2199,11 @@ public:
         t->upgradedTo = L"https://" + url.substr(7);
         CefPostTask(TID_UI, new NavTask(t->id, t->upgradedTo));
         return true;
+    }
+
+    bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, const CefString& target_url,
+                          CefRequestHandler::WindowOpenDisposition target_disposition, bool) override {
+        return HandleOpenDisposition(target_url, target_disposition, IsUiBrowser(browser));
     }
 
     // --- request ---
@@ -4972,7 +5010,7 @@ public:
         // address?") and would keep a second, unprotected copy of what NeonNet's password manager holds.
         auto noAutofill = [](CefRefPtr<CefRequestContext> ctx) {
             static const char* prefs[] = { "credentials_enable_service", "profile.password_manager_enabled", "credentials_enable_autosignin",
-                                           "autofill.credit_card_enabled", "autofill.profile_enabled" };
+                                           "autofill.credit_card_enabled", "autofill.profile_enabled", "plugins.always_open_pdf_externally" };
             for (const char* p : prefs) {
                 CefRefPtr<CefValue> off = CefValue::Create();
                 off->SetBool(false);
@@ -5406,7 +5444,10 @@ static void DoDownloadAction(int act, long long id) {
     }
     if (state != store::DL_COMPLETE || path.empty() || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return;
     if (act == DLA_OPEN) {
-        if (store::DownloadOpenable(path)) ShellExecuteW(g.hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        size_t dot = path.rfind(L'.');
+        bool isPdf = dot != std::wstring::npos && _wcsicmp(path.c_str() + dot, L".pdf") == 0;
+        if (isPdf) CreateTab(NormalizeArgUrl(path), true, -1);
+        else if (store::DownloadOpenable(path)) ShellExecuteW(g.hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     } else if (act == DLA_SHOW) {
         std::wstring args = L"/select,\"" + path + L"\"";
         ShellExecuteW(g.hwnd, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
