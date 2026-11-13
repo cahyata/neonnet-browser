@@ -43,6 +43,7 @@
 #include "store.h"
 #include "perf.h"
 #include "crash.h"
+#include "userscripts.h"
 #include "browserreg.h"
 #include <windowsx.h>   // after CEF headers: its macros (GetFirstChild...) clash with cef_dom.h
 
@@ -78,6 +79,7 @@ static const wchar_t* HISTORY_PAGE = L"https://neonnet.ui/history.html";
 static const wchar_t* BOOKMARKS_PAGE = L"https://neonnet.ui/bookmarks.html";
 static const wchar_t* DOWNLOADS_PAGE = L"https://neonnet.ui/downloads.html";
 static const wchar_t* SETTINGS_PAGE = L"https://neonnet.ui/settings.html";
+static const wchar_t* EXTENSIONS_PAGE = L"https://neonnet.ui/extensions.html";
 static const wchar_t* APP_DIR_NAME = L"NeonNet";
 static const wchar_t* REG_KEY = L"Software\\NeonNet";
 static const wchar_t* UNINSTALL_KEY = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\NeonNet";
@@ -108,7 +110,7 @@ enum Cmd {
     CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
     CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE,
     CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_BOOKMARKS_BAR, CMD_HISTORY,
-    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS
+    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS, CMD_EXTENSIONS
 };
 enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW };
 
@@ -649,6 +651,15 @@ static std::wstring ScanScript(bool on) {
 
 static void ApplyScan(CefRefPtr<CefBrowser> b) {
     if (b) b->GetMainFrame()->ExecuteJavaScript(ScanScript(g.scan), b->GetMainFrame()->GetURL(), 0);
+}
+
+static void RunUserscripts(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame> frame, userscripts::RunAt phase) {
+    if (!b || !frame || !frame->IsMain()) return;
+    std::wstring url = frame->GetURL().ToWString();
+    if (url.empty()) return;
+    for (const auto& s : userscripts::ScriptsForUrl(url, phase, APP_VERSION)) {
+        frame->ExecuteJavaScript(s.js, s.label, 0);
+    }
 }
 
 static std::wstring ErrorText(int code) {
@@ -1333,6 +1344,7 @@ public:
             else if (vk == 'T') cmd = shift ? CMD_REOPEN : CMD_NEWTAB;
             else if (vk == 'H' && !shift) cmd = CMD_HISTORY;
             else if (vk == 'J' && !shift) cmd = CMD_DOWNLOADS;
+            else if (vk == 'E' && shift) cmd = CMD_EXTENSIONS;
             else if (vk == VK_OEM_COMMA) cmd = CMD_SETTINGS;
             else if (vk == VK_TAB) cmd = shift ? CMD_PREVTAB : CMD_NEXTTAB;
         } else if (!ctrl && !alt && !shift) {
@@ -1779,7 +1791,20 @@ public:
         }
     }
     void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType) override {
-        if (frame->IsMain()) { if (Tab* t = TabOf(browser)) { t->dirty = false; ApplyScan(browser); } }   // a new page: nothing typed yet
+        if (frame->IsMain()) {
+            if (Tab* t = TabOf(browser)) {
+                t->dirty = false;
+                ApplyScan(browser);
+                RunUserscripts(browser, frame, userscripts::RUN_START);
+            }
+        }   // a new page: nothing typed yet
+    }
+    void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override {
+        if (!frame->IsMain() || httpStatusCode == 0) return;
+        if (TabOf(browser)) {
+            RunUserscripts(browser, frame, userscripts::RUN_END);
+            RunUserscripts(browser, frame, userscripts::RUN_IDLE);
+        }
     }
     void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, ErrorCode errorCode,
                      const CefString&, const CefString& failedUrl) override {
@@ -1879,6 +1904,7 @@ public:
             case 'J': if (!repeat) cmd = CMD_DOWNLOADS; break;
             case VK_OEM_COMMA: if (!repeat) cmd = CMD_SETTINGS; break;
             case 'O': if (shift && !repeat) cmd = CMD_BOOKMARKS; break;
+            case 'E': if (shift && !repeat) cmd = CMD_EXTENSIONS; break;
             case 'W': case VK_F4: if (!repeat) cmd = CMD_CLOSETAB; break;
             case 'L': cmd = CMD_FOCUSURL; break;
             case 'R': cmd = CMD_RELOAD; break;
@@ -2300,9 +2326,12 @@ static std::string SettingsJson() {
     }
     std::wstring chromium = std::to_wstring(cef_version_info(4)) + L"." + std::to_wstring(cef_version_info(5)) + L"." +
                             std::to_wstring(cef_version_info(6)) + L"." + std::to_wstring(cef_version_info(7));
+    size_t scriptTotal = 0, scriptEnabled = 0;
+    userscripts::Counts(scriptTotal, scriptEnabled);
     o += std::string("],\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
          ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
          ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) + ",\"smoothScroll\":" + b(RegGetDword(L"SmoothScroll", 1) != 0) + ",\"smoothStep\":" + std::to_string(RegGetDword(L"SmoothStep", 120)) + ",\"smoothTime\":" + std::to_string(RegGetDword(L"SmoothTime", 400)) + ",\"netSpeed\":" + b(RegGetDword(L"NetSpeed", 1) != 0) + ",\"devDock\":" + std::to_string(RegGetDword(L"DevToolsDock", 0)) + ",\"defaultBrowser\":" + b(browserreg::IsDefault()) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
+         ",\"scriptTotal\":" + std::to_string(scriptTotal) + ",\"scriptEnabled\":" + std::to_string(scriptEnabled) +
          ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"bookmarksBar\":" + b(RegGetDword(L"BookmarksBar", 1) != 0) + ",\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
     return o;
@@ -2399,6 +2428,25 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         else return new StringResource("{\"error\":\"invalid value\"}", "application/json", 400);
         PostMessageW(g.hwnd, WM_APP_STORE, 0, 0);   // the lock icon panel shows the new values
     }
+    else if (path == L"api/userscripts") out = userscripts::ListJson();
+    else if (path == L"api/userscripts/save") {
+        std::string err;
+        long long savedId = userscripts::SaveFromJson(body, err);
+        if (!savedId) {
+            int code = userscripts::IsReadOnly() ? 403 : 400;
+            std::wstring werr(err.begin(), err.end());
+            return new StringResource("{\"error\":" + JsonUtf8(werr) + "}", "application/json", code);
+        }
+        out = "{\"ok\":true,\"id\":" + std::to_string(savedId) + "}";
+    }
+    else if (path == L"api/userscripts/toggle") {
+        if (!userscripts::SetEnabled(id, QueryParam(query, L"enabled") == L"1"))
+            return new StringResource("{\"error\":\"cannot update script\"}", "application/json", userscripts::IsReadOnly() ? 403 : 400);
+    }
+    else if (path == L"api/userscripts/delete") {
+        if (!userscripts::Delete(id))
+            return new StringResource("{\"error\":\"cannot delete script\"}", "application/json", userscripts::IsReadOnly() ? 403 : 400);
+    }
     else if (path == L"api/settings") out = SettingsJson();
     else if (path == L"api/settings/set") {
         std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
@@ -2487,6 +2535,7 @@ public:
         else if (path == L"warning.html") id = IDR_WARNING;
         else if (path == L"passwords.html") id = IDR_PASSWORDS;
         else if (path == L"permissions.html") id = IDR_PERMISSIONS;
+        else if (path == L"extensions.html" || path == L"userscripts.html") id = IDR_EXTENSIONS;
         std::string body;
         if (id && LoadUi(id, body)) return new StringResource(std::move(body), "text/html", 200);
         // Unknown neonnet:// page: a themed page with a proper title (the tab would otherwise
@@ -2861,7 +2910,7 @@ static void ShowAbout() {
         L"  Ctrl+Shift+T  reopen closed tab\n"
         L"  Ctrl+F  find in page     F3  find next\n"
         L"  Ctrl+D  bookmark page    Ctrl+Shift+O  bookmarks\n"
-        L"  Ctrl+H  history\n"
+        L"  Ctrl+H  history          Ctrl+Shift+E  extensions\n"
         L"  Ctrl+L  address bar      Ctrl+Tab  next tab\n"
         L"  F5      reload           Alt+Left/Right  back/forward\n"
         L"  Ctrl +/-/0  zoom         F11  fullscreen\n"
@@ -3284,6 +3333,7 @@ static void ExecCmd(int cmd) {
     }
     case CMD_HISTORY: OpenPage(HISTORY_PAGE); break;
     case CMD_DOWNLOADS: OpenPage(DOWNLOADS_PAGE); break;
+    case CMD_EXTENSIONS: OpenPage(EXTENSIONS_PAGE); break;
     case CMD_SETTINGS: OpenPage(SETTINGS_PAGE); break;
     }
     // zoom changes are async; refresh the status bar shortly after
@@ -3907,6 +3957,7 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
     add(CMD_BOOKMARKS_BAR, L"Bookmarks bar", L"Ctrl+Shift+B", false, g.bookmarksBar);
     add(CMD_HISTORY, L"History", L"Ctrl+H", g.incognito);   // nothing is recorded in an incognito window
     add(CMD_DOWNLOADS, L"Downloads", L"Ctrl+J");
+    add(CMD_EXTENSIONS, L"Extensions (Userscripts)", L"Ctrl+Shift+E");
     add(CMD_PERFORMANCE, L"Performance panel", L"Ctrl+Shift+M", false, g.panelOpen);
     add(CMD_FIND, L"Find in page", L"Ctrl+F");
     sep();
@@ -5191,11 +5242,15 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (g.incognito) {
-        store::LoadBookmarksReadOnly(KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME);
+        std::wstring dataRoot = KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME;
+        store::LoadBookmarksReadOnly(dataRoot);
+        userscripts::LoadReadOnly(dataRoot);
         // its own taskbar button, not grouped with the normal window
         SetCurrentProcessExplicitAppUserModelID(L"NeonNet.Incognito");
     } else {
-        store::Load(KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME);
+        std::wstring dataRoot = KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME;
+        store::Load(dataRoot);
+        userscripts::Load(dataRoot);
     }
     EnableDarkMenus();
     g.scan = RegGetDword(L"Scanlines", 1) != 0;

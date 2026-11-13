@@ -13,6 +13,7 @@ IDR_WARNING RCDATA "..\\ui\\warning.html"
 IDR_BLOCKLIST RCDATA "..\\ui\\blocklist.txt"
 IDR_PASSWORDS RCDATA "..\\ui\\passwords.html"
 IDR_PERMISSIONS RCDATA "..\\ui\\permissions.html"
+IDR_EXTENSIONS RCDATA "..\\ui\\extensions.html"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION 1,6,1,0
