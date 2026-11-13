@@ -2,6 +2,11 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.6.1] - 2026-11-13
+
+### Fixes
+- Closing the developer tools with their own X button no longer closes the whole browser. The button now closes only the developer tools (F12 did already).
+
 ## [1.6.0] - 2026-11-13
 
 ### Features

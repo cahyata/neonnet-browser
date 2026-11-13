@@ -15,8 +15,8 @@ IDR_PASSWORDS RCDATA "..\\ui\\passwords.html"
 IDR_PERMISSIONS RCDATA "..\\ui\\permissions.html"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,6,0,0
- PRODUCTVERSION 1,6,0,0
+ FILEVERSION 1,6,1,0
+ PRODUCTVERSION 1,6,1,0
  FILEOS 0x40004L
  FILETYPE 0x1L
 BEGIN
@@ -26,11 +26,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "NeonNet"
             VALUE "FileDescription", "NeonNet Browser"
-            VALUE "FileVersion", "1.6.0"
+            VALUE "FileVersion", "1.6.1"
             VALUE "InternalName", "NeonNet"
             VALUE "OriginalFilename", "NeonNet.exe"
             VALUE "ProductName", "NeonNet"
-            VALUE "ProductVersion", "1.6.0"
+            VALUE "ProductVersion", "1.6.1"
         END
     END
     BLOCK "VarFileInfo"
