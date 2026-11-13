@@ -21,6 +21,7 @@ Done without being planned here first (the planned ones are ticked in the lists 
 - [x] New right-click items: open link in incognito window, open image in new tab, view page source, search for the selected text (1.4.0)
 - [x] History can be cleared by period from the settings page, with a link from the history page (1.4.0)
 - [x] Tabs with sound, typed text or a kept-awake site are never put to sleep by the performance panel (1.5.0)
+- [x] Site information panel (lock icon) with per-site permissions: location, camera, microphone, notifications, clipboard, sensors (unreleased)
 - [x] Smooth scrolling for the mouse wheel and the keyboard, with a setting (unreleased)
 - [x] Network speed (download and upload) at the bottom left of the status bar, with a setting (unreleased)
 - [x] Tab right-click menu: pin, duplicate, mute, close other tabs (unreleased)

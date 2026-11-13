@@ -118,6 +118,32 @@ body.find #find{display:flex}
 #sug{position:absolute;z-index:20;display:none;background:var(--bg2);border:1px solid var(--cyan);border-top:1px solid var(--pink);
   box-shadow:0 10px 24px rgba(0,0,0,.55)}
 #sug.on{display:block}
+/* site information and permissions (lock icon): shown like the suggestions, the host makes this window taller */
+#lock{display:none;width:32px;height:100%;color:var(--cyan);padding:0}
+#lock.on{display:flex;align-items:center;justify-content:center}
+#lock.bad{color:var(--pink)}
+#lock:hover{background:rgba(0,229,255,.12)}
+#site{position:absolute;z-index:20;display:none;box-sizing:border-box;background:var(--bg2);border:1px solid var(--cyan);border-top:1px solid var(--pink);
+  box-shadow:0 10px 24px rgba(0,0,0,.55);padding:12px 14px 14px;font-size:13px;color:var(--text)}
+#site.on{display:block}
+#site .hd{display:flex;align-items:center;gap:8px}
+#site .host{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cyan);font-weight:bold;font-size:15px}
+#site .sx{color:var(--muted);width:26px;height:24px;padding:0}
+#site .sx:hover{color:var(--pink)}
+#site .st{margin:8px 0 2px;line-height:1.5}
+#site .st.bad{color:var(--pink)}
+#site h3{font-size:11px;letter-spacing:2px;color:var(--yellow);margin:14px 0 6px;font-weight:normal}
+#site .pm{display:flex;align-items:center;gap:10px;padding:3px 0}
+#site .pm .l{flex:1}
+#site .seg{display:inline-flex}
+#site .seg button{font:bold 11px "Cascadia Mono",Consolas,monospace;border:1px solid var(--muted);color:var(--muted);padding:3px 8px;margin-left:-1px;height:24px}
+#site .seg button:hover{color:var(--pink);border-color:var(--pink);position:relative}
+#site .seg button.on{background:var(--cyan);border-color:var(--cyan);color:var(--bg)}
+#site .seg button.on.blk{background:var(--pink);border-color:var(--pink)}
+#site .note{color:var(--muted);font-size:12px;margin-top:10px;line-height:1.5}
+#site .ft{display:flex;gap:8px;margin-top:12px}
+#site .ft button{font:bold 11px "Cascadia Mono",Consolas,monospace;border:1px solid var(--muted);color:var(--muted);padding:5px 10px}
+#site .ft button:hover{color:var(--pink);border-color:var(--pink)}
 .sg{display:flex;gap:10px;align-items:center;height:30px;padding:0 10px;cursor:pointer;white-space:nowrap}
 .sg .i{width:18px;text-align:center;flex:none;color:var(--muted)}
 .sg .tt{color:#e8d8ff;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;max-width:55%}
@@ -145,7 +171,7 @@ body.find #find{display:flex}
   <button class="nb" id="fwd" title="Forward (Alt+Right)">[&#9654;]</button>
   <button class="nb" id="reload" title="Reload (F5)">[&#10227;]</button>
   <button class="nb" id="home" title="Home">[&#8962;]</button>
-  <div id="addr"><span>&gt;&gt;</span><input id="url" spellcheck="false" autocomplete="off" placeholder="search the grid or enter address"><button id="star" title="Bookmark this page (Ctrl+D)">&#9734;</button></div>
+  <div id="addr"><button id="lock" title="Site information and permissions"></button><span id="pr">&gt;&gt;</span><input id="url" spellcheck="false" autocomplete="off" placeholder="search the grid or enter address"><button id="star" title="Bookmark this page (Ctrl+D)">&#9734;</button></div>
   <button id="go">GO</button>
   <button id="perfb" title="Performance panel (Ctrl+Shift+M)">PERF</button>
   <button id="scanb" title="Toggle scanlines">SCAN</button>
@@ -162,6 +188,7 @@ body.find #find{display:flex}
   <button class="fb" id="fclose" title="Close (Esc)">[&#10005;]</button>
 </div>
 <div id="sug"></div>
+<div id="site"></div>
 <script>
 const $ = s => document.querySelector(s);
 // Commands go to the host as requests to /cmd on this host (served by the app itself).
@@ -256,11 +283,86 @@ function render(){
   star.classList.toggle('on', !!state.starred);
   star.innerHTML = state.starred ? '&#9733;' : '&#9734;';
   star.title = state.starred ? 'Remove bookmark (Ctrl+D)' : 'Bookmark this page (Ctrl+D)';
+  updateLock();
   document.body.classList.toggle('find', !!state.find);
   if(state.find && !findWas){ fq.value = state.findText || ''; showCount(0, 0); }
   findWas = !!state.find;
   $('#fcase').classList.toggle('on', !!state.findCase);
 }
+
+// --- site information and permissions: the lock icon at the left of the address bar ---
+const LOCK_SHUT = '<svg viewBox="0 0 16 16" width="15" height="15"><rect x="3" y="7" width="10" height="7" fill="currentColor"/><path d="M5 7V5a3 3 0 016 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+const LOCK_OPEN = '<svg viewBox="0 0 16 16" width="15" height="15"><rect x="3" y="7" width="10" height="7" fill="currentColor"/><path d="M5 7V5a3 3 0 015.8-1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+const lock = $('#lock'), sitePanel = $('#site');
+let siteOpen = false, siteNeed = 0, siteOrigin = '', siteChanged = false;
+const siteShown = () => state.site && state.url && !state.url.startsWith(NEWTAB) ? state.site : null;
+
+function updateLock(){
+  const s = siteShown();
+  lock.classList.toggle('on', !!s);
+  $('#pr').style.display = s ? 'none' : '';
+  if(s){
+    const bad = s.kind === 'insecure' || s.warn;
+    lock.classList.toggle('bad', bad);
+    lock.innerHTML = s.kind === 'insecure' || s.warn ? LOCK_OPEN : LOCK_SHUT;
+    lock.title = s.kind === 'internal' ? 'NeonNet page' : bad ? 'Not secure. Site information and permissions' : 'Site information and permissions';
+  }
+  if(siteOpen){ if(!s || s.origin !== siteOrigin) closeSite(); else renderSite(); }
+}
+function closeSite(){
+  if(!siteOpen) return;
+  siteOpen = false; sitePanel.classList.remove('on'); sitePanel.textContent = '';
+  if(siteNeed){ siteNeed = 0; send('dropdown', 0); }
+}
+function openSite(){
+  const s = siteShown(); if(!s) return;
+  closeSug(); siteOpen = true; siteOrigin = s.origin; siteChanged = false; renderSite();
+}
+function renderSite(){
+  const s = siteShown(); if(!s){ closeSite(); return; }
+  const mk = (tag, cls, text) => { const e = document.createElement(tag); if(cls) e.className = cls; if(text !== undefined) e.textContent = text; return e; };
+  sitePanel.textContent = '';
+  const hd = mk('div', 'hd');
+  const x = mk('button', 'sx', '✕'); x.title = 'Close'; x.onclick = closeSite;
+  hd.append(mk('span', 'host', s.host), x);
+  sitePanel.appendChild(hd);
+  const bad = s.kind === 'insecure' || s.warn;
+  sitePanel.appendChild(mk('div', 'st' + (bad ? ' bad' : ''),
+    s.kind === 'internal' ? 'This is a NeonNet page. It is part of the browser and sends nothing to a website.' :
+    s.warn ? 'You opened this site although its certificate could not be verified.' :
+    s.kind === 'insecure' ? 'Connection is not secure (http). Other people on the network can read and change what you exchange with this site.' :
+    'Connection is secure (https).'));
+  if(s.perms){
+    sitePanel.appendChild(mk('h3', '', 'PERMISSIONS FOR THIS SITE'));
+    let any = false;
+    s.perms.forEach(p => {
+      if(p.v) any = true;
+      const row = mk('div', 'pm'); row.appendChild(mk('span', 'l', p.l));
+      const seg = mk('span', 'seg');
+      [['ASK', 0, ''], ['ALLOW', 1, ''], ['BLOCK', 2, 'blk']].forEach(([name, v, cls]) => {
+        const b = mk('button', (p.v === v ? 'on ' : '') + cls, name);
+        b.onclick = () => { siteChanged = true; send('siteperm', p.k, v); };
+        seg.appendChild(b);
+      });
+      row.appendChild(seg); sitePanel.appendChild(row);
+    });
+    if(siteChanged) sitePanel.appendChild(mk('div', 'note', 'Reload the page for a change to reach what is already open.'));
+    const ft = mk('div', 'ft');
+    if(any){ const r = mk('button', '', 'RESET THIS SITE'); r.onclick = () => { siteChanged = true; send('siteperm', '*', 0); }; ft.appendChild(r); }
+    const all = mk('button', '', 'ALL SITES'); all.onclick = () => { closeSite(); send('opentab', NN_BASE + 'permissions.html'); };
+    ft.appendChild(all);
+    sitePanel.appendChild(ft);
+  }
+  const r = $('#addr').getBoundingClientRect();
+  sitePanel.style.left = r.left + 'px'; sitePanel.style.top = r.bottom + 'px'; sitePanel.style.width = Math.min(420, window.innerWidth - r.left - 8) + 'px';
+  sitePanel.classList.add('on');
+  const need = Math.ceil(sitePanel.getBoundingClientRect().bottom) + 8;
+  if(need !== siteNeed){ siteNeed = need; send('dropdown', need); }
+}
+lock.onclick = () => { if(siteOpen) closeSite(); else openSite(); };
+document.addEventListener('mousedown', e => { if(siteOpen && !sitePanel.contains(e.target) && !lock.contains(e.target)) closeSite(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && siteOpen){ e.preventDefault(); closeSite(); } });
+window.addEventListener('blur', closeSite);
 
 const fq = $('#fq');
 let findWas = false;
@@ -370,6 +472,7 @@ function pick(i){
   if(u){ closeSug(); editing = false; url.blur(); send('navigate', u); }
 }
 function renderSug(){
+  closeSite();
   sug.textContent = '';
   const row = (cls, icon, title, sub, i) => {
     const d = document.createElement('div'); d.className = 'sg ' + cls + (i === sugSel ? ' sel' : '');
@@ -424,9 +527,9 @@ url.addEventListener('input', e => {
 });
 // The host resizes this window itself to show the list, so only a change of width closes it.
 let lastW = window.innerWidth;
-window.addEventListener('resize', () => { if(window.innerWidth !== lastW){ lastW = window.innerWidth; closeSug(); } });
+window.addEventListener('resize', () => { if(window.innerWidth !== lastW){ lastW = window.innerWidth; closeSug(); closeSite(); } });
 
-url.addEventListener('focus', () => { editing = true; setTimeout(() => url.select(), 0); });
+url.addEventListener('focus', () => { closeSite(); editing = true; setTimeout(() => url.select(), 0); });
 url.addEventListener('blur', () => { editing = false; closeSug(); url.value = shownUrl(state.url); });
 url.addEventListener('keydown', e => {
   if(e.key === 'Enter'){ e.preventDefault(); go(); }

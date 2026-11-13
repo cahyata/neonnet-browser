@@ -157,6 +157,12 @@ The mouse wheel and the keyboard scroll with an animation instead of jumping: ea
 
 It stays out of the way where it would do harm: a touchpad (already smooth), a page that handles the wheel itself (maps, editors), text fields, video and audio controls, and scrolling with Ctrl, Shift or Alt held (zoom and sideways scrolling). Only normal web pages are smoothed; NeonNet's own pages scroll as usual.
 
+## Site information and permissions
+
+The lock icon at the left of the address bar opens a panel for the page you are on. It says whether the connection is secure (https), not secure (http) or opened despite a certificate warning, and lists what the site may use: **location, camera, microphone, notifications, clipboard and motion sensors**. For each one choose **ASK** (NeonNet asks when the site wants it), **ALLOW** or **BLOCK**. **RESET THIS SITE** forgets all choices for the site; **ALL SITES** opens the full list at `neonnet://permissions`, also reachable from **Settings > SITE PERMISSIONS**.
+
+When a site asks for something, the answer you give is remembered for that site. A change reaches a page that is already open when you reload it. Incognito windows keep answers in memory until the window closes.
+
 ## Network speed
 
 The bottom left of the status bar shows the download speed (cyan, `▼`) and upload speed (pink, `▲`), in B/s, KB/s or MB/s, updated every second. It is the traffic of the whole computer on its Ethernet, Wi-Fi and mobile data adapters together, so a download in another program shows up too. Virtual adapters (VMware, VirtualBox, Hyper-V, VPN tunnels) are left out so nothing is counted twice. Switch it off in **Settings > LOOK > Network speed in the status bar**.

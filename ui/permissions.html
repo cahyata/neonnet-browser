@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SITE PERMISSIONS</title>
+<style>
+:root{--bg:#12062c;--bg2:#0a0420;--pink:#ff2e97;--cyan:#00e5ff;--yellow:#ffd600;--text:#e8d8ff;--muted:#8a6fc0;--line:#3a1a5e}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px "Cascadia Mono",Consolas,monospace}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.18) 2px 3px)}
+main{max-width:860px;margin:0 auto;padding:36px 22px 60px}
+h1{margin:0 0 6px;font:italic 900 44px Impact,"Arial Black",sans-serif;letter-spacing:3px;color:var(--cyan);text-shadow:3px 3px 0 var(--pink)}
+.sub{color:var(--muted);letter-spacing:1px;margin:0 0 26px}
+.note{color:var(--muted);line-height:1.6;margin:0 0 18px;border-left:2px solid var(--pink);padding-left:12px}
+.site{border-bottom:1px solid var(--line);padding:12px 12px 8px}
+.site:hover{background:rgba(0,229,255,.04)}
+.head{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+.origin{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cyan)}
+.perm{display:flex;align-items:center;gap:14px;padding:4px 0 4px 14px}
+.perm .l{flex:1;color:var(--text)}
+.seg{display:inline-flex}
+button{font:bold 12px "Cascadia Mono",Consolas,monospace;background:none;border:1px solid var(--muted);color:var(--muted);padding:6px 12px;cursor:pointer}
+button:hover{border-color:var(--pink);color:var(--pink)}
+.seg button{padding:4px 10px;margin-left:-1px}
+.seg button.on{background:var(--cyan);border-color:var(--cyan);color:var(--bg)}
+.seg button.on.block{background:var(--pink);border-color:var(--pink)}
+.empty{color:var(--muted);padding:14px 12px}
+#clear{margin-top:18px;border-color:var(--pink);color:var(--pink)}
+#clear:hover{background:var(--pink);color:var(--bg)}
+a{color:var(--yellow);text-decoration:none}a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<main>
+  <h1>SITE PERMISSIONS</h1>
+  <p class="sub">&gt; WHAT EACH SITE MAY USE: CAMERA, MICROPHONE, LOCATION AND MORE</p>
+  <p class="note">When a site asks to use your camera, location or another feature, NeonNet asks you once and remembers the answer for that site. Sites listed here have an answer. <b>ALLOW</b> lets the site use it, <b>BLOCK</b> refuses it, <b>ASK</b> removes the answer so you are asked again. You can also change them for the page you are on with the lock icon in the address bar. A change reaches a page that is already open when you reload it. Incognito windows keep answers in memory only.</p>
+  <div id="sites"></div>
+  <button id="clear">FORGET ALL SITE PERMISSIONS</button>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+async function api(p){ const r = await fetch('/api/' + p, {cache: 'no-store'}); return r.json(); }
+const q = encodeURIComponent;
+function el(tag, cls, text){ const e = document.createElement(tag); if(cls) e.className = cls; if(text !== undefined) e.textContent = text; return e; }
+async function load(){
+  const d = await api('siteperms');
+  const box = $('#sites'); box.textContent = '';
+  if(!d.sites.length) box.appendChild(el('div', 'empty', 'No site has an answer yet.'));
+  d.sites.forEach(s => {
+    const site = el('div', 'site');
+    const head = el('div', 'head');
+    head.append(el('span', 'origin', s.origin));
+    const forget = el('button', '', 'FORGET SITE');
+    forget.onclick = async () => { await api('siteperms/reset?origin=' + q(s.origin)); load(); };
+    head.appendChild(forget);
+    site.appendChild(head);
+    s.perms.forEach(p => {
+      const row = el('div', 'perm');
+      row.appendChild(el('span', 'l', p.l));
+      const seg = el('span', 'seg');
+      [['ASK', 0, ''], ['ALLOW', 1, ''], ['BLOCK', 2, 'block']].forEach(([name, v, cls]) => {
+        const b = el('button', (p.v === v ? 'on ' : '') + cls, name);
+        b.onclick = async () => { await api('siteperms/set?origin=' + q(s.origin) + '&key=' + q(p.k) + '&value=' + v); load(); };
+        seg.appendChild(b);
+      });
+      row.appendChild(seg);
+      site.appendChild(row);
+    });
+    box.appendChild(site);
+  });
+  $('#clear').style.display = d.sites.length ? '' : 'none';
+}
+$('#clear').onclick = async () => { if(confirm('Forget the permissions of every site?')){ await api('siteperms/clear'); load(); } };
+load();
+</script>
+</body>
+</html>

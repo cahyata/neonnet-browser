@@ -215,7 +215,6 @@ struct App {
     std::set<std::wstring> warned;     // what NeonNet itself showed a warning for ("cert|host:port", "http|host"): only these can be proceeded
     std::deque<std::unique_ptr<DlgReq>> dlgQueue;   // dialogs waiting for the one on screen
     bool dlgBusy = false;
-    std::map<std::wstring, int> permMemo;           // answers given to permission prompts since NeonNet started: 1 allow, 2 block
     bool sessionPending = false;      // a write of the open tabs to session.txt is scheduled
     std::string lastSession;          // what session.txt holds now, so an unchanged strip is not written again
     bool closing = false;
@@ -497,6 +496,8 @@ static void RunInChrome(const std::wstring& js) {
     if (g.chrome) g.chrome->GetMainFrame()->ExecuteJavaScript(js, CHROME_UI, 0);
 }
 
+static std::wstring SiteJson(const std::wstring& url);   // the site panel's data, below with the site permissions
+
 static void SendState() {
     Tab* a = Active();
     if (a) SetWindowTextW(g.hwnd, ((a->title.empty() ? std::wstring(L"New tab") : a->title) +
@@ -530,6 +531,7 @@ static void SendState() {
     j += std::wstring(L",\"findCase\":") + (g.findCase ? L"true" : L"false");
     j += L",\"findText\":" + JsonStr(g.findText);
     j += L",\"search\":" + JsonStr(CurrentEngine().url);
+    j += L",\"site\":" + SiteJson(cur);
     j += L"}";
     RunInChrome(L"window.__nn&&window.__nn(" + j + L")");
 }
@@ -822,6 +824,158 @@ static void PwNeverRemove(const std::wstring& origin) { std::lock_guard<std::mut
 static void PwClear() { std::lock_guard<std::mutex> lk(g_pwMu); g_pw.clear(); PwSaveLocked(); }
 static size_t PwCount() { std::lock_guard<std::mutex> lk(g_pwMu); return g_pw.size(); }
 static std::string PwJsonList();   // below, next to JsonUtf8
+
+// ---------------------------------------------------------------------------
+// Site permissions
+// What a site may do (camera, location, ...) is remembered per origin in sitepermissions.txt and can be
+// changed from the lock icon in the address bar or from neonnet://permissions. 1 = allow, 2 = block,
+// no entry = ask. An incognito window keeps its answers in memory only.
+
+struct PermDef {
+    const wchar_t* key; const wchar_t* label; const wchar_t* ask;
+    uint32_t bit;     // CEF_PERMISSION_TYPE_* flags that mean this permission (permission prompt)
+    uint32_t media;   // CEF_MEDIA_PERMISSION_* flags that mean it (camera and microphone requests)
+    bool common;      // always listed in the site panel, even when nothing is stored
+};
+static const PermDef PERM_DEFS[] = {
+    { L"location", L"Location", L"know your location", CEF_PERMISSION_TYPE_GEOLOCATION, 0, true },
+    { L"camera", L"Camera", L"use your camera", CEF_PERMISSION_TYPE_CAMERA_STREAM, CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE, true },
+    { L"microphone", L"Microphone", L"use your microphone", CEF_PERMISSION_TYPE_MIC_STREAM, CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE, true },
+    { L"notifications", L"Notifications", L"show notifications", CEF_PERMISSION_TYPE_NOTIFICATIONS, 0, true },
+    { L"clipboard", L"Clipboard", L"see what you copy to the clipboard", CEF_PERMISSION_TYPE_CLIPBOARD, 0, true },
+    { L"sensors", L"Motion sensors", L"use your motion sensors", CEF_PERMISSION_TYPE_SENSORS, 0, true },
+    { L"screen", L"Screen sharing", L"see and record your screen", 0, CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE, false },
+    { L"camera-control", L"Camera movement and zoom", L"move and zoom your camera", CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM, 0, false },
+    { L"midi", L"MIDI devices", L"use your MIDI devices", CEF_PERMISSION_TYPE_MIDI_SYSEX, 0, false },
+    { L"keyboard-lock", L"Keyboard lock", L"take over your keyboard", CEF_PERMISSION_TYPE_KEYBOARD_LOCK, 0, false },
+    { L"pointer-lock", L"Mouse pointer lock", L"hide and capture your mouse pointer", CEF_PERMISSION_TYPE_POINTER_LOCK, 0, false },
+    { L"multiple-downloads", L"Several downloads", L"download several files", CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS, 0, false },
+    { L"local-fonts", L"Installed fonts", L"see the fonts installed on this computer", CEF_PERMISSION_TYPE_LOCAL_FONTS, 0, false },
+    { L"idle-detection", L"Idle detection", L"know when you are idle", CEF_PERMISSION_TYPE_IDLE_DETECTION, 0, false },
+    { L"window-management", L"Window management", L"manage windows on all your screens", CEF_PERMISSION_TYPE_WINDOW_MANAGEMENT, 0, false },
+    { L"file-system", L"File editing", L"edit files on this computer", CEF_PERMISSION_TYPE_FILE_SYSTEM_ACCESS, 0, false },
+    { L"embedded-storage", L"Cookies when embedded", L"use its cookies and site data while embedded in another site", CEF_PERMISSION_TYPE_STORAGE_ACCESS | CEF_PERMISSION_TYPE_TOP_LEVEL_STORAGE_ACCESS, 0, false },
+    { L"protected-media", L"Protected content", L"identify this device for protected content", CEF_PERMISSION_TYPE_PROTECTED_MEDIA_IDENTIFIER, 0, false },
+    { L"protocol-handler", L"Link handling", L"open links of its own kind", CEF_PERMISSION_TYPE_REGISTER_PROTOCOL_HANDLER, 0, false },
+    { L"local-network", L"Local network", L"reach devices on your network", CEF_PERMISSION_TYPE_LOCAL_NETWORK | CEF_PERMISSION_TYPE_LOOPBACK_NETWORK, 0, false },
+    { L"other", L"Other device features", L"use another feature of this device", 0, 0, false },
+};
+
+// The permissions a request is for, by key (a request can ask for several at once).
+static std::vector<std::wstring> PermKeys(bool media, uint32_t p) {
+    std::vector<std::wstring> v;
+    uint32_t known = 0;
+    for (const auto& d : PERM_DEFS) { uint32_t m = media ? d.media : d.bit; known |= m; if (m && (p & m)) v.push_back(d.key); }
+    if ((p & ~known) || v.empty()) v.push_back(L"other");
+    return v;
+}
+static bool PermKeyValid(const std::wstring& k) { for (const auto& d : PERM_DEFS) if (k == d.key) return true; return false; }
+
+static std::mutex g_spMu;                                            // the IO thread lists them for neonnet://permissions
+static std::map<std::wstring, std::map<std::wstring, int>> g_sp;     // origin -> key -> 1 allow, 2 block
+
+static std::wstring SpPath() { return KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME + L"\\sitepermissions.txt"; }
+static bool SpOriginValid(const std::wstring& o) {
+    if (o.size() < 9 || o.size() > 300) return false;
+    if (o.rfind(L"https://", 0) != 0 && o.rfind(L"http://", 0) != 0) return false;
+    for (wchar_t c : o) if (c < 0x21) return false;
+    return OriginOf(o) == o;
+}
+
+static void SpSaveLocked() {
+    if (g.incognito) return;
+    std::string text = "NEONNET-SITEPERMS 1\n";
+    for (const auto& s : g_sp) for (const auto& e : s.second) text += Utf8(s.first) + "\t" + Utf8(e.first) + "\t" + std::to_string(e.second) + "\n";
+    std::wstring path = SpPath(), tmp = path + L".tmp";
+    if (g_sp.empty()) { DeleteFileW(path.c_str()); return; }
+    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD w = 0;
+    bool ok = WriteFile(h, text.data(), (DWORD)text.size(), &w, nullptr) && w == text.size();
+    CloseHandle(h);
+    if (!ok || !MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str());
+}
+
+static void SpLoad() {
+    std::lock_guard<std::mutex> lk(g_spMu);
+    g_sp.clear();
+    if (g.incognito) return;
+    HANDLE h = CreateFileW(SpPath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD size = GetFileSize(h, nullptr), got = 0;
+    std::string data;
+    if (size > 0 && size < 4 * 1024 * 1024) {
+        data.resize(size);
+        if (!ReadFile(h, &data[0], size, &got, nullptr) || got != size) data.clear();
+    }
+    CloseHandle(h);
+    size_t pos = data.find('\n');
+    if (pos == std::string::npos || data.compare(0, pos, "NEONNET-SITEPERMS 1") != 0) return;
+    size_t count = 0;
+    for (++pos; pos < data.size() && count < 20000;) {
+        size_t e = data.find('\n', pos);
+        if (e == std::string::npos) e = data.size();
+        std::string line = data.substr(pos, e - pos);
+        pos = e + 1;
+        size_t t1 = line.find('\t'), t2 = t1 == std::string::npos ? t1 : line.find('\t', t1 + 1);
+        if (t2 == std::string::npos) continue;
+        std::wstring origin = Wide(line.substr(0, t1)), key = Wide(line.substr(t1 + 1, t2 - t1 - 1));
+        int v = atoi(line.c_str() + t2 + 1);
+        if ((v == 1 || v == 2) && SpOriginValid(origin) && PermKeyValid(key)) { g_sp[origin][key] = v; count++; }
+    }
+}
+
+static int SpGet(const std::wstring& origin, const std::wstring& key) {
+    std::lock_guard<std::mutex> lk(g_spMu);
+    auto s = g_sp.find(origin);
+    if (s == g_sp.end()) return 0;
+    auto e = s->second.find(key);
+    return e == s->second.end() ? 0 : e->second;
+}
+// v: 1 allow, 2 block, 0 ask again (the entry is removed)
+static void SpSet(const std::wstring& origin, const std::wstring& key, int v) {
+    std::lock_guard<std::mutex> lk(g_spMu);
+    if (v == 0) {
+        auto s = g_sp.find(origin);
+        if (s != g_sp.end()) { s->second.erase(key); if (s->second.empty()) g_sp.erase(s); }
+    } else if (g_sp.size() < 5000 || g_sp.count(origin)) g_sp[origin][key] = v;
+    SpSaveLocked();
+}
+static void SpReset(const std::wstring& origin) { std::lock_guard<std::mutex> lk(g_spMu); g_sp.erase(origin); SpSaveLocked(); }
+static void SpClear() { std::lock_guard<std::mutex> lk(g_spMu); g_sp.clear(); SpSaveLocked(); }
+
+// [{"k":"camera","l":"Camera","v":1},...] for one origin: the common permissions, then any other one that is set
+static std::wstring SpPermsJson(const std::wstring& origin) {
+    std::lock_guard<std::mutex> lk(g_spMu);
+    const std::map<std::wstring, int>* m = nullptr;
+    auto s = g_sp.find(origin);
+    if (s != g_sp.end()) m = &s->second;
+    std::wstring j = L"[";
+    bool first = true;
+    for (const auto& d : PERM_DEFS) {
+        int v = 0;
+        if (m) { auto e = m->find(d.key); if (e != m->end()) v = e->second; }
+        if (!d.common && !v) continue;
+        if (!first) j += L",";
+        first = false;
+        j += L"{\"k\":" + JsonStr(d.key) + L",\"l\":" + JsonStr(d.label) + L",\"v\":" + std::to_wstring(v) + L"}";
+    }
+    return j + L"]";
+}
+
+// What the lock icon panel shows for the page at this address (null: no panel for it)
+static std::wstring SiteJson(const std::wstring& url) {
+    std::wstring sc, h; int p;
+    SplitUrl(url, sc, h, p);
+    if (h.empty() || (sc != L"https" && sc != L"http")) return L"null";
+    bool internal = h == L"neonnet.ui";
+    std::wstring origin = OriginOf(url);
+    std::wstring j = L"{\"origin\":" + JsonStr(origin) + L",\"host\":" + JsonStr(h) + L",\"kind\":" +
+                     JsonStr(internal ? L"internal" : sc == L"https" ? L"secure" : L"insecure") +
+                     L",\"warn\":" + (!internal && sc == L"https" && g.certAllow.count(HostPortKey(url)) ? L"true" : L"false");
+    if (!internal) j += L",\"perms\":" + SpPermsJson(origin);
+    return j + L"}";
+}
 
 // Smooth scrolling is done by SMOOTH_JS in the page; the browser process tells it whether it is on and how
 // far and how long to scroll (message nn.cfg), when the page starts and when the setting changes.
@@ -1903,6 +2057,28 @@ static std::string JsonUtf8(const std::wstring& w) {
     return o + "\"";
 }
 
+// {"sites":[{"origin":"https://x.com","perms":[{"k":"camera","l":"Camera","v":1}]}]} for neonnet://permissions
+static std::string SpJsonList() {
+    std::lock_guard<std::mutex> lk(g_spMu);
+    std::string o = "{\"sites\":[";
+    bool firstSite = true;
+    for (const auto& s : g_sp) {
+        if (!firstSite) o += ",";
+        firstSite = false;
+        o += "{\"origin\":" + JsonUtf8(s.first) + ",\"perms\":[";
+        bool first = true;
+        for (const auto& d : PERM_DEFS) {
+            auto e = s.second.find(d.key);
+            if (e == s.second.end()) continue;
+            if (!first) o += ",";
+            first = false;
+            o += "{\"k\":" + JsonUtf8(d.key) + ",\"l\":" + JsonUtf8(d.label) + ",\"v\":" + std::to_string(e->second) + "}";
+        }
+        o += "]}";
+    }
+    return o + "]}";
+}
+
 static std::string PwJsonList() {
     std::lock_guard<std::mutex> lk(g_pwMu);
     std::string o = "{\"saved\":[";
@@ -1989,6 +2165,16 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
     else if (path == L"api/passwords/delete") PwDelete((int)id);
     else if (path == L"api/passwords/never/remove") PwNeverRemove(QueryParam(query, L"origin"));
     else if (path == L"api/passwords/clear") PwClear();
+    else if (path == L"api/siteperms") out = SpJsonList();
+    else if (path == L"api/siteperms/set" || path == L"api/siteperms/reset" || path == L"api/siteperms/clear") {
+        std::wstring origin = QueryParam(query, L"origin"), key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
+        if (path == L"api/siteperms/clear") SpClear();
+        else if (!SpOriginValid(origin)) return new StringResource("{\"error\":\"invalid site\"}", "application/json", 400);
+        else if (path == L"api/siteperms/reset") SpReset(origin);
+        else if (PermKeyValid(key) && (val == L"0" || val == L"1" || val == L"2")) SpSet(origin, key, _wtoi(val.c_str()));
+        else return new StringResource("{\"error\":\"invalid value\"}", "application/json", 400);
+        PostMessageW(g.hwnd, WM_APP_STORE, 0, 0);   // the lock icon panel shows the new values
+    }
     else if (path == L"api/settings") out = SettingsJson();
     else if (path == L"api/settings/set") {
         std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
@@ -2057,6 +2243,7 @@ public:
         else if (path == L"performance.html") id = IDR_PERFORMANCE;
         else if (path == L"warning.html") id = IDR_WARNING;
         else if (path == L"passwords.html") id = IDR_PASSWORDS;
+        else if (path == L"permissions.html") id = IDR_PERMISSIONS;
         std::string body;
         if (id && LoadUi(id, body)) return new StringResource(std::move(body), "text/html", 200);
         // Unknown neonnet:// page: a themed page with a proper title (the tab would otherwise
@@ -3273,33 +3460,11 @@ static std::wstring OriginHost(const std::wstring& o) {
 
 // What a permission request is for, one line each.
 static std::wstring PermissionLines(bool media, uint32_t p) {
-    struct P { uint32_t bit; const wchar_t* text; };
-    static const P perms[] = {
-        { CEF_PERMISSION_TYPE_CAMERA_STREAM, L"use your camera" }, { CEF_PERMISSION_TYPE_MIC_STREAM, L"use your microphone" },
-        { CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM, L"move and zoom your camera" }, { CEF_PERMISSION_TYPE_GEOLOCATION, L"know your location" },
-        { CEF_PERMISSION_TYPE_NOTIFICATIONS, L"show notifications" }, { CEF_PERMISSION_TYPE_CLIPBOARD, L"see what you copy to the clipboard" },
-        { CEF_PERMISSION_TYPE_MIDI_SYSEX, L"use your MIDI devices" }, { CEF_PERMISSION_TYPE_KEYBOARD_LOCK, L"take over your keyboard" },
-        { CEF_PERMISSION_TYPE_POINTER_LOCK, L"hide and capture your mouse pointer" }, { CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS, L"download several files" },
-        { CEF_PERMISSION_TYPE_LOCAL_FONTS, L"see the fonts installed on this computer" }, { CEF_PERMISSION_TYPE_IDLE_DETECTION, L"know when you are idle" },
-        { CEF_PERMISSION_TYPE_WINDOW_MANAGEMENT, L"manage windows on all your screens" }, { CEF_PERMISSION_TYPE_FILE_SYSTEM_ACCESS, L"edit files on this computer" },
-        { CEF_PERMISSION_TYPE_STORAGE_ACCESS | CEF_PERMISSION_TYPE_TOP_LEVEL_STORAGE_ACCESS, L"use its cookies and site data while embedded in another site" },
-        { CEF_PERMISSION_TYPE_SENSORS, L"use your motion sensors" }, { CEF_PERMISSION_TYPE_PROTECTED_MEDIA_IDENTIFIER, L"identify this device for protected content" },
-        { CEF_PERMISSION_TYPE_REGISTER_PROTOCOL_HANDLER, L"open links of its own kind" },
-        { CEF_PERMISSION_TYPE_LOCAL_NETWORK | CEF_PERMISSION_TYPE_LOOPBACK_NETWORK, L"reach devices on your network" },
-    };
     std::wstring o;
-    auto add = [&](const wchar_t* t) { o += L"  - "; o += t; o += L"\n"; };
-    if (media) {
-        if (p & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE) add(L"use your camera");
-        if (p & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE) add(L"use your microphone");
-        if (p & (CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE)) add(L"see and record your screen");
-    } else {
-        uint32_t known = 0;
-        for (const auto& e : perms) { known |= e.bit; if (p & e.bit) add(e.text); }
-        if (p & ~known) add(L"use another feature of this device");
-    }
-    if (o.empty()) o = L"  - use a feature of this device\n";
-    if (!o.empty() && o.back() == L'\n') o.pop_back();
+    for (const auto& k : PermKeys(media, p))
+        for (const auto& d : PERM_DEFS)
+            if (k == d.key) { o += L"  - "; o += d.ask; o += L"\n"; }
+    if (!o.empty()) o.pop_back();
     return o;
 }
 
@@ -3311,15 +3476,21 @@ static void ShowDlgReq(DlgReq& r) {
         if (r.media) r.media->Cancel();
     };
     if (g.closing) { cancelAll(); return; }
-    std::wstring memo;
+    std::wstring origin;
+    std::vector<std::wstring> keys;
     if (r.kind == DlgReq::PERM || r.kind == DlgReq::MEDIA) {
-        memo = r.origin + L"|" + std::to_wstring((int)r.kind) + L"|" + std::to_wstring(r.perms);
-        auto it = g.permMemo.find(memo);
-        if (it != g.permMemo.end()) {   // asked and answered before in this run: no second question
-            bool allow = it->second == 1;
-            if (r.perm) r.perm->Continue(allow ? CEF_PERMISSION_RESULT_ACCEPT : CEF_PERMISSION_RESULT_DENY);
-            if (r.media) { if (allow) r.media->Continue(r.perms); else r.media->Cancel(); }
-            return;
+        origin = OriginOf(r.origin);
+        keys = PermKeys(r.kind == DlgReq::MEDIA, r.perms);
+        if (!origin.empty()) {
+            // a choice made for this site before (in the site panel or by an earlier answer): no second question
+            bool anyBlock = false, allAllow = true;
+            for (const auto& k : keys) { int v = SpGet(origin, k); if (v == 2) anyBlock = true; if (v != 1) allAllow = false; }
+            if (anyBlock || allAllow) {
+                bool allow = !anyBlock;
+                if (r.perm) r.perm->Continue(allow ? CEF_PERMISSION_RESULT_ACCEPT : CEF_PERMISSION_RESULT_DENY);
+                if (r.media) { if (allow) r.media->Continue(r.perms); else r.media->Cancel(); }
+                return;
+            }
         }
     }
     if (r.tabId) if (Tab* t = FindTab(r.tabId)) if (t->id != g.active) SelectTab(t->id, false);   // the page that asks is shown
@@ -3356,7 +3527,9 @@ static void ShowDlgReq(DlgReq& r) {
     }
     case DlgReq::PERM: case DlgReq::MEDIA:
         st.title = host + L" WANTS TO";
-        st.message = PermissionLines(r.kind == DlgReq::MEDIA, r.perms);
+        st.message = PermissionLines(r.kind == DlgReq::MEDIA, r.perms) +
+                     (g.incognito ? L"\nYour answer is kept until this window closes." : L"\nYour answer is remembered for this site.") +
+                     L"\nChange it any time from the lock icon in the address bar.";
         st.buttons = { { L"ALLOW", 1 }, { L"BLOCK", 2 } }; st.defId = 2; st.cancelId = 0;   // Enter blocks: the safe answer
         break;
     }
@@ -3371,12 +3544,14 @@ static void ShowDlgReq(DlgReq& r) {
         if (!r.secret.empty()) SecureZeroMemory(&r.secret[0], r.secret.size() * sizeof(wchar_t));
         break;
     case DlgReq::PERM:
-        if (res) g.permMemo[memo] = res;
+        if ((res == 1 || res == 2) && !origin.empty()) for (const auto& k : keys) SpSet(origin, k, res);
         r.perm->Continue(res == 1 ? CEF_PERMISSION_RESULT_ACCEPT : res == 2 ? CEF_PERMISSION_RESULT_DENY : CEF_PERMISSION_RESULT_DISMISS);
+        SendState();
         break;
     case DlgReq::MEDIA:
-        if (res) g.permMemo[memo] = res;
+        if ((res == 1 || res == 2) && !origin.empty()) for (const auto& k : keys) SpSet(origin, k, res);
         if (res == 1) r.media->Continue(r.perms); else r.media->Cancel();
+        SendState();
         break;
     }
 }
@@ -3617,6 +3792,22 @@ static void OnChromeCommand(const std::wstring& msg) {
         // address bar suggestions: the toolbar height they need (CSS px, 0 = closed)
         int n = std::max(0, std::min(_wtoi(arg.c_str()), 520));
         if (n != g.dropNeed) { g.dropNeed = n; Layout(); }
+    }
+    else if (cmd == L"siteperm") {
+        // "<key>\n<0|1|2>" for the page that is shown (never for an address the toolbar names): 0 ask, 1 allow, 2 block;
+        // key "*" forgets everything set for this site
+        size_t b = arg.find(L'\n');
+        std::wstring key = arg.substr(0, b), val = b == std::wstring::npos ? L"" : arg.substr(b + 1);
+        std::wstring origin = a ? OriginOf(DisplayUrl(a)) : L"";
+        if (SpOriginValid(origin) && origin != L"https://neonnet.ui") {
+            if (key == L"*") SpReset(origin);
+            else if (PermKeyValid(key) && (val == L"0" || val == L"1" || val == L"2")) SpSet(origin, key, _wtoi(val.c_str()));
+            SendState();
+        }
+    }
+    else if (cmd == L"opentab") {
+        // NeonNet's own pages only (the site panel links to the permission list)
+        if (arg.rfind(UI_HOST, 0) == 0 && arg.size() < 200) CreateTab(arg, true);
     }
     else if (cmd == L"close") CloseTab(_wtoi(arg.c_str()));
     else if (cmd == L"pin") { if (Tab* t = FindTab(_wtoi(arg.c_str()))) SetPinned(t->id, !t->pinned); }
@@ -4609,6 +4800,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     { DWORD s = RegGetDword(L"SmoothStep", 120), t = RegGetDword(L"SmoothTime", 400); g.smoothStep = (s >= 40 && s <= 400) ? (int)s : 120; g.smoothTime = (t >= 100 && t <= 1500) ? (int)t : 400; }
     g.netSpeed = RegGetDword(L"NetSpeed", 1) != 0;
     if (!g.incognito) PwLoad();
+    SpLoad();
     g.blockAds = RegGetDword(L"BlockAds", 0) != 0;
     if (g.blockAds) LoadBlocklist();
     { DWORD r = RegGetDword(L"RamLimitMB", 0); g.ramLimitMB = (r >= 512 && r <= 65536) ? r : 0; }
