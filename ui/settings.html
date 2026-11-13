@@ -121,6 +121,7 @@ a:hover{color:var(--yellow);text-decoration:underline}
   text-decoration:none;
 }
 .hud-link:hover{border-color:var(--cyan);color:var(--bg);background:var(--cyan);text-decoration:none}
+.hud-link.on{border-color:var(--cyan);color:var(--cyan);background:rgba(0,229,255,.1)}
 
 /* Layout */
 .wrap{
@@ -351,9 +352,11 @@ select option{background:var(--bg2);color:var(--cyan)}
       <button id="clearFilter" title="Clear filter">&#10005;</button>
     </div>
     <div class="hud-links">
+      <a class="hud-link on" href="https://neonnet.ui/settings.html">SETTINGS</a>
       <a class="hud-link" href="https://neonnet.ui/extensions.html">EXTENSIONS</a>
       <a class="hud-link" href="https://neonnet.ui/bookmarks.html">BOOKMARKS</a>
       <a class="hud-link" href="https://neonnet.ui/history.html">HISTORY</a>
+      <a class="hud-link" href="https://neonnet.ui/downloads.html">DOWNLOADS</a>
     </div>
   </div>
 </header>

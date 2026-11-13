@@ -37,67 +37,89 @@ body::after{
 a{color:var(--cyan);text-decoration:none}
 a:hover{color:var(--yellow);text-decoration:underline}
 
-/* Sticky top bar */
+/* Sticky top bar (matches Settings HUD) */
 .topbar{
   position:sticky;
   top:0;
-  z-index:20;
-  background:rgba(10,4,32,.92);
-  backdrop-filter:blur(8px);
-  border-bottom:1px solid var(--line);
+  z-index:30;
+  background:var(--bg);
+  border-bottom:1px solid var(--cyan);
+  box-shadow:0 4px 24px rgba(10,4,32,.85);
 }
-.topbar-in{
-  max-width:920px;
+.top-row{
+  max-width:1100px;
   margin:0 auto;
-  padding:14px 24px;
+  padding:10px 18px;
   display:flex;
   align-items:center;
-  gap:14px;
+  gap:12px;
   flex-wrap:wrap;
 }
-.brand{display:flex;align-items:baseline;gap:12px;margin-right:auto}
-h1{
-  margin:0;
-  font:italic 900 26px Impact,"Arial Black",sans-serif;
-  letter-spacing:2.5px;
-  color:var(--cyan);
-  text-shadow:2px 2px 0 var(--pink);
-}
-.count{font-size:12px;color:var(--muted)}
-.count b{color:var(--green);font-weight:normal}
-
-.search-wrap{
+.brand{
+  color:var(--yellow);
+  font-weight:bold;
+  letter-spacing:1.5px;
+  white-space:nowrap;
   display:flex;
   align-items:center;
-  flex:1;
-  min-width:210px;
-  max-width:340px;
-  height:36px;
-  background:var(--bg);
-  border:1px solid var(--line);
-  padding:0 10px;
   gap:8px;
-  transition:border-color .15s;
 }
-.search-wrap:focus-within{border-color:var(--cyan)}
-.search-wrap span{color:var(--pink);font-weight:bold}
-.search{
+.brand b{color:var(--pink)}
+.badge{
+  padding:1px 6px;
+  border:1px solid var(--green);
+  color:var(--green);
+  font-size:11px;
+  letter-spacing:1px;
+}
+.addr{
+  flex:1;
+  min-width:220px;
+  height:32px;
+  display:flex;
+  align-items:center;
+  border:1px solid var(--cyan);
+  background:var(--bg2);
+  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px));
+}
+.addr span{color:var(--pink);padding:0 6px 0 10px;user-select:none}
+.addr input{
   flex:1;
   min-width:0;
+  height:100%;
   background:none;
   border:0;
   outline:0;
-  color:var(--text);
-  font:inherit;
+  color:var(--cyan);
+  font:12px "Cascadia Mono","Consolas",monospace;
 }
-.search::placeholder{color:#65509a}
-.kbd{
-  font-size:10px;
+.addr input::placeholder{color:#5e4a8f}
+.addr button{
+  height:100%;
+  border:0;
+  background:none;
   color:var(--muted);
-  border:1px solid var(--line);
-  padding:1px 5px;
+  padding:0 10px;
+  cursor:pointer;
+  font:inherit;
+  display:none;
 }
-
+.addr button.show{display:block}
+.addr button:hover{color:var(--pink)}
+.hud-links{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hud-link{
+  height:30px;
+  padding:0 10px;
+  border:1px solid var(--muted);
+  color:var(--muted);
+  font:bold 11px "Cascadia Mono","Consolas",monospace;
+  letter-spacing:1px;
+  display:inline-flex;
+  align-items:center;
+  text-decoration:none;
+}
+.hud-link:hover{border-color:var(--cyan);color:var(--bg);background:var(--cyan);text-decoration:none}
+.hud-link.on{border-color:var(--cyan);color:var(--cyan);background:rgba(0,229,255,.1)}
 .top-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 
 button,.btn{
@@ -123,7 +145,7 @@ button.ghost:hover:not(:disabled){border-color:var(--line);color:var(--text)}
 button.danger:hover:not(:disabled){border-color:var(--pink);color:var(--pink2)}
 button:disabled{opacity:.4;cursor:default}
 
-main{max-width:920px;margin:0 auto;padding:24px 24px 72px}
+main{max-width:1100px;margin:0 auto;padding:22px 18px 72px}
 
 .banner{
   background:rgba(255,214,0,.08);
@@ -370,21 +392,19 @@ textarea#code:focus{border-color:var(--cyan)}
 </head>
 <body>
 <header class="topbar">
-  <div class="topbar-in">
-    <div class="brand">
-      <h1>EXTENSIONS</h1>
-      <span class="count" id="summary"></span>
-    </div>
-    <label class="search-wrap">
+  <div class="top-row">
+    <div class="brand">&#9632; <b>NEON</b>NET // EXTENSIONS <span class="badge" id="summary">0 ACTIVE</span></div>
+    <div class="addr">
       <span>&gt;&gt;</span>
-      <input class="search" id="q" placeholder="Search extensions...">
-      <span class="kbd">Ctrl+K</span>
-    </label>
-    <div class="top-actions">
-      <button class="ghost" id="aboutBtn">? GUIDE</button>
-      <button class="cyan" id="importBtn">IMPORT</button>
-      <button class="primary" id="newBtn">+ NEW</button>
-      <input type="file" id="fileIn" accept=".user.js,.js,text/javascript" hidden>
+      <input id="q" spellcheck="false" autocomplete="off" placeholder="filter userscripts or websites (Ctrl+K)">
+      <button id="qClear" title="Clear filter">&#10005;</button>
+    </div>
+    <div class="hud-links">
+      <a class="hud-link" href="https://neonnet.ui/settings.html">SETTINGS</a>
+      <a class="hud-link on" href="https://neonnet.ui/extensions.html">EXTENSIONS</a>
+      <a class="hud-link" href="https://neonnet.ui/bookmarks.html">BOOKMARKS</a>
+      <a class="hud-link" href="https://neonnet.ui/history.html">HISTORY</a>
+      <a class="hud-link" href="https://neonnet.ui/downloads.html">DOWNLOADS</a>
     </div>
   </div>
 </header>
@@ -414,7 +434,13 @@ textarea#code:focus{border-color:var(--cyan)}
       <button class="pill" data-f="on">Enabled</button>
       <button class="pill" data-f="off">Disabled</button>
     </div>
-    <span class="hint-inline">Drop <code>.user.js</code> anywhere to import</span>
+    <div class="top-actions">
+      <span class="hint-inline">Drop <code>.user.js</code> anywhere</span>
+      <button class="ghost" id="aboutBtn">? GUIDE</button>
+      <button class="cyan" id="importBtn">IMPORT</button>
+      <button class="primary" id="newBtn">+ NEW</button>
+      <input type="file" id="fileIn" accept=".user.js,.js,text/javascript" hidden>
+    </div>
   </div>
 
   <div id="list"></div>
@@ -523,7 +549,8 @@ function chip(text){
 function render(){
   const total = state.scripts.length;
   const active = state.scripts.filter(s => s.enabled).length;
-  $('#summary').innerHTML = '<b>' + active + '</b> active / ' + total + ' total';
+  $('#summary').textContent = active + ' / ' + total + ' ACTIVE';
+  $('#qClear').classList.toggle('show', $('#q').value.length > 0);
 
   const query = $('#q').value.trim().toLowerCase();
   const list = $('#list');
@@ -789,6 +816,7 @@ document.addEventListener('drop', async e => {
   openEditor(0, code, 'IMPORT: ' + f.name);
 });
 
+$('#qClear').onclick = () => { $('#q').value = ''; render(); $('#q').focus(); };
 $('#q').addEventListener('input', render);
 document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') load(); });
 load();

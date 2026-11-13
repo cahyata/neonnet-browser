@@ -7,8 +7,26 @@
 :root{--bg:#12062c;--bg2:#0a0420;--row:#1b0b3d;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0;--green:#35ffa0}
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
-main{max-width:920px;margin:0 auto;padding:28px 20px 60px}
-.top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.15) 2px 3px)}
+.topbar{position:sticky;top:0;z-index:30;background:var(--bg);border-bottom:1px solid var(--cyan);box-shadow:0 4px 24px rgba(10,4,32,.85)}
+.top-row{max-width:1100px;margin:0 auto;padding:10px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.brand{color:var(--yellow);font-weight:bold;letter-spacing:1.5px;white-space:nowrap;display:flex;align-items:center;gap:8px}
+.brand b{color:var(--pink)}
+.tbadge{padding:1px 6px;border:1px solid var(--green);color:var(--green);font-size:11px;letter-spacing:1px}
+.addr{flex:1;min-width:220px;height:32px;display:flex;align-items:center;border:1px solid var(--cyan);background:var(--bg2);
+  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px))}
+.addr span{color:var(--pink);padding:0 6px 0 10px;user-select:none}
+.addr input{flex:1;min-width:0;height:100%;background:none;border:0;outline:0;color:var(--cyan);font:12px "Cascadia Mono","Consolas",monospace}
+.addr input::placeholder{color:#5e4a8f}
+.addr button{height:100%;border:0;background:none;color:var(--muted);padding:0 10px;cursor:pointer;font:inherit;display:none}
+.addr button.show{display:block}
+.addr button:hover{color:var(--pink)}
+.hud-links{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hud-link{height:30px;padding:0 10px;border:1px solid var(--muted);color:var(--muted);font:bold 11px "Cascadia Mono","Consolas",monospace;letter-spacing:1px;display:inline-flex;align-items:center;text-decoration:none}
+.hud-link:hover{border-color:var(--cyan);color:var(--bg);background:var(--cyan);text-decoration:none}
+.hud-link.on{border-color:var(--cyan);color:var(--cyan);background:rgba(0,229,255,.1)}
+main{max-width:1100px;margin:0 auto;padding:22px 18px 60px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
 h1{margin:0;font:italic 900 40px Impact,"Arial Black",sans-serif;letter-spacing:3px;color:var(--cyan);text-shadow:3px 3px 0 var(--pink)}
 .sub{color:var(--yellow);letter-spacing:2px;margin:4px 0 0}
 .bar{display:flex;gap:8px;flex-wrap:wrap}
@@ -61,12 +79,26 @@ button{cursor:pointer;border:0;background:none}
 </style>
 </head>
 <body>
+<header class="topbar">
+  <div class="top-row">
+    <div class="brand">&#9632; <b>NEON</b>NET // BOOKMARKS <span class="tbadge">SAVED</span></div>
+    <div class="addr">
+      <span>&gt;&gt;</span>
+      <input id="q" spellcheck="false" autocomplete="off" placeholder="search bookmarks and folders (Ctrl+K)">
+      <button id="qClear" title="Clear filter">&#10005;</button>
+    </div>
+    <div class="hud-links">
+      <a class="hud-link" href="https://neonnet.ui/settings.html">SETTINGS</a>
+      <a class="hud-link" href="https://neonnet.ui/extensions.html">EXTENSIONS</a>
+      <a class="hud-link on" href="https://neonnet.ui/bookmarks.html">BOOKMARKS</a>
+      <a class="hud-link" href="https://neonnet.ui/history.html">HISTORY</a>
+      <a class="hud-link" href="https://neonnet.ui/downloads.html">DOWNLOADS</a>
+    </div>
+  </div>
+</header>
 <main>
   <div class="top">
-    <div>
-      <h1>BOOKMARKS</h1>
-      <div class="sub">&gt; SAVED COORDINATES</div>
-    </div>
+    <div class="crumbs" id="crumbs"></div>
     <div class="bar">
       <button class="btn" id="newDir">+ NEW FOLDER</button>
       <button class="btn" id="newBm">+ BOOKMARK</button>
@@ -75,8 +107,6 @@ button{cursor:pointer;border:0;background:none}
       <input type="file" id="impFile" accept=".html,.htm" hidden>
     </div>
   </div>
-  <div class="search"><span>&gt;&gt;</span><input id="q" spellcheck="false" autocomplete="off" placeholder="search bookmarks and folders" autofocus></div>
-  <div class="crumbs" id="crumbs"></div>
   <div id="newBox">
     <input id="newTitle" placeholder="folder name">
     <input id="newUrl" placeholder="https://..." spellcheck="false">
@@ -299,7 +329,12 @@ $('#expBtn').onclick = async () => {
   } catch(e){ say('COULD NOT EXPORT BOOKMARKS', true); }
 };
 
-$('#q').addEventListener('input', render);
+function syncClear(){ $('#qClear').classList.toggle('show', $('#q').value.length > 0); }
+$('#q').addEventListener('input', () => { syncClear(); render(); });
+$('#qClear').onclick = () => { $('#q').value = ''; syncClear(); render(); $('#q').focus(); };
+document.addEventListener('keydown', e => {
+  if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); $('#q').focus(); $('#q').select(); }
+});
 load();
 </script>
 </body>
