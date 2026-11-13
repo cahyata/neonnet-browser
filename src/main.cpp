@@ -87,7 +87,8 @@ static const UINT WM_APP_CLEARDATA = WM_APP + 10;   // lParam = new ClearReq (fr
 static const UINT WM_APP_CLEARSITES = WM_APP + 11;  // lParam = new ClearSites (cookies are done, site data is next)
 
 static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5,
-                      TIMER_ALERT = 6, TIMER_TEMP = 7, TIMER_PERF = 8, TIMER_TRIM = 9, TIMER_AUDIO = 10;
+                      TIMER_ALERT = 6, TIMER_TEMP = 7, TIMER_PERF = 8, TIMER_TRIM = 9, TIMER_AUDIO = 10,
+                      TIMER_SESSION = 11;
 static const ULONGLONG UPDATE_INTERVAL_MS = 24ull * 60 * 60 * 1000;   // check at most once a day
 
 enum Cmd {
@@ -132,9 +133,10 @@ struct Tab {
     ULONGLONG audioUntil = 0;      // the page said it is playing sound: audible until this tick (see MEDIA_HOOK_JS)
     bool audible = false;          // as last shown to the UI
     bool dirty = false;            // a text field on the page holds text the user typed: do not unload it
+    bool pinned = false;           // pinned tabs sit at the left, are narrow and come back at the next start
 };
 
-struct ClosedTab { std::wstring url; int index; };
+struct ClosedTab { std::wstring url; int index; bool pinned = false; };
 
 struct App {
     HMODULE hmod = nullptr;   // NeonNet.dll (resources live here)
@@ -169,6 +171,8 @@ struct App {
     std::wstring hoverText, download;
     std::wstring alert;   // urgent status bar message (unsupported video / DRM), shown above everything else
     std::wstring startUrl;
+    bool sessionPending = false;      // a write of the open tabs to session.txt is scheduled
+    std::string lastSession;          // what session.txt holds now, so an unchanged strip is not written again
     bool closing = false;
     // Incognito window (own process, started with --neonnet-incognito): in-memory browser
     // profile, no history, no saved window placement, no updates. Set once before CEF starts.
@@ -334,6 +338,14 @@ struct MediaAsk {
 // History and bookmarks are written to disk shortly after they change.
 static void ScheduleSave() { if (g.hwnd) SetTimer(g.hwnd, TIMER_SAVE, 2000, nullptr); }
 
+// The open tabs are written to session.txt a few seconds after they change (not on every change,
+// and not again while the timer is already running), so a crash loses at most a few seconds.
+static void ScheduleSession() {
+    if (!g.hwnd || g.closing || g.incognito || g.sessionPending) return;
+    g.sessionPending = true;
+    SetTimer(g.hwnd, TIMER_SESSION, 3000, nullptr);
+}
+
 static Tab* FindTab(int id) { for (auto& t : g.tabs) if (t->id == id) return t.get(); return nullptr; }
 static Tab* TabOf(CefRefPtr<CefBrowser> b) {
     if (!b) return nullptr;
@@ -346,6 +358,12 @@ static bool IsPanel(CefRefPtr<CefBrowser> b) { return b && g.panelId.load() && b
 static bool IsUiBrowser(CefRefPtr<CefBrowser> b) { return IsChrome(b) || IsPanel(b); }   // NeonNet's own UI, never a page
 static Tab* Active() { return FindTab(g.active); }
 static int IndexOf(int id) { for (size_t i = 0; i < g.tabs.size(); i++) if (g.tabs[i]->id == id) return (int)i; return -1; }
+
+// Pinned tabs always form the left end of the strip.
+static int PinnedCount() { int n = 0; for (auto& t : g.tabs) if (t->pinned) n++; return n; }
+static void KeepPinsFirst() {
+    std::stable_partition(g.tabs.begin(), g.tabs.end(), [](const std::unique_ptr<Tab>& t) { return t->pinned; });
+}
 
 static bool LoadUi(int id, std::string& out) {
     HRSRC r = FindResourceW(g.hmod, MAKEINTRESOURCEW(id), RT_RCDATA);
@@ -445,9 +463,11 @@ static void SendState() {
         if (i) j += L",";
         j += L"{\"id\":" + std::to_wstring(t->id) + L",\"title\":" + JsonStr(t->title) +
              L",\"loading\":" + (t->loading ? L"true" : L"false") + L",\"discarded\":" + (t->discarded ? L"true" : L"false") +
-             L",\"audible\":" + (t->audible ? L"true" : L"false") + L",\"muted\":" + (t->muted ? L"true" : L"false") + L"}";
+             L",\"audible\":" + (t->audible ? L"true" : L"false") + L",\"muted\":" + (t->muted ? L"true" : L"false") +
+             L",\"pinned\":" + (t->pinned ? L"true" : L"false") + L"}";
     }
     j += L"],\"active\":" + std::to_wstring(g.active);
+    ScheduleSession();   // every change of the tab strip (and of titles and addresses) ends up here
     j += L",\"url\":" + JsonStr(a ? DisplayUrl(a) : L"");
     j += std::wstring(L",\"canBack\":") + (a && a->canBack ? L"true" : L"false");
     j += std::wstring(L",\"canFwd\":") + (a && a->canFwd && a->errorUrl.empty() ? L"true" : L"false");
@@ -653,6 +673,7 @@ static void CreateTab(const std::wstring& url, bool activate, int at) {
     int cur = IndexOf(g.active);
     int pos = at >= 0 ? std::min(at, (int)g.tabs.size()) : (cur < 0 ? (int)g.tabs.size() : cur + 1);
     g.tabs.insert(g.tabs.begin() + pos, std::move(tab));
+    KeepPinsFirst();   // a new tab opened next to a pinned one must not end up among the pinned tabs
     if (activate) { HideFind(); g.active = id; }
 
     g.creatingTab = id;
@@ -687,7 +708,7 @@ static void CloseTab(int id) {
     if (!g.closing) {
         std::wstring u = DisplayUrl(t.get());
         if (!u.empty() && u.rfind(NEWTAB, 0) != 0 && u.rfind(L"data:", 0) != 0) {
-            g.closed.push_back({ u, i });
+            g.closed.push_back({ u, i, t->pinned });
             if (g.closed.size() > 25) g.closed.erase(g.closed.begin());
         }
     }
@@ -699,6 +720,34 @@ static void CloseTab(int id) {
     if (g.tabs.empty()) { g.active = 0; CreateTab(NEWTAB, true); return; }
     if (g.active == id) SelectTab(g.tabs[std::min(i, (int)g.tabs.size() - 1)]->id, true);
     else SendState();
+}
+
+// Pin or unpin a tab. A pinned tab goes to the end of the pinned tabs; an unpinned one to the
+// first place after them.
+static void SetPinned(int id, bool pin) {
+    int from = IndexOf(id);
+    if (from < 0 || g.tabs[from]->pinned == pin) return;
+    std::unique_ptr<Tab> t = std::move(g.tabs[from]);
+    g.tabs.erase(g.tabs.begin() + from);
+    t->pinned = pin;
+    g.tabs.insert(g.tabs.begin() + PinnedCount(), std::move(t));
+    SendState();
+}
+
+// Drag and drop in the tab strip. A tab stays inside its own group: pinned tabs among the
+// pinned ones, the others among the others.
+static void MoveTab(int id, int to) {
+    int from = IndexOf(id);
+    if (from < 0) return;
+    int pins = PinnedCount(), n = (int)g.tabs.size();
+    bool p = g.tabs[from]->pinned;
+    to = std::max(p ? 0 : pins, std::min(to, p ? pins - 1 : n - 1));
+    if (to != from) {
+        std::unique_ptr<Tab> t = std::move(g.tabs[from]);
+        g.tabs.erase(g.tabs.begin() + from);
+        g.tabs.insert(g.tabs.begin() + to, std::move(t));
+    }
+    SendState();   // also when nothing moved: the strip then snaps back to the real order
 }
 
 // ---------------------------------------------------------------------------
@@ -861,6 +910,7 @@ public:
         int at = IndexOf(g.active);
         if (at < 0) g.tabs.push_back(std::move(tab));
         else g.tabs.insert(g.tabs.begin() + at + 1, std::move(tab));
+        KeepPinsFirst();
         HideFind();
         g.active = id;
         g.pendingPopups.push_back(id);
@@ -1338,6 +1388,7 @@ static std::string SettingsJson() {
                             std::to_wstring(cef_version_info(6)) + L"." + std::to_wstring(cef_version_info(7));
     o += std::string("],\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
          ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
+         ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
          ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
     return o;
@@ -1399,7 +1450,7 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
         bool ok = false;
         if (key == L"search") { for (const auto& e : SEARCH_ENGINES) if (val == e.id) ok = true; }
-        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload") ok = (val == L"0" || val == L"1");
+        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession") ok = (val == L"0" || val == L"1");
         else if (key == L"home") {
             std::wstring low = val; for (auto& ch : low) ch = towlower(ch);
             ok = val.empty() || (val.size() < 500 && (low.rfind(L"http://", 0) == 0 || low.rfind(L"https://", 0) == 0 || low.rfind(L"file:///", 0) == 0));
@@ -1514,6 +1565,125 @@ static std::wstring RegGetString(const wchar_t* name) {
 static std::wstring HomeUrl() {
     std::wstring h = RegGetString(L"HomePage");
     return h.empty() ? std::wstring(NEWTAB) : h;
+}
+
+// ---------------------------------------------------------------------------
+// Tabs of the last session
+//
+// NeonNet writes the open tabs to %LOCALAPPDATA%\NeonNet\session.txt itself (Chromium's own
+// session restore needs persistent session cookies, which stay off, see ARCHITECTURE.md). One
+// line per tab: flags (P pinned, A active, - none), title, address, separated by tabs. Pinned
+// tabs always come back; the others only when "continue where you left off" is on. Restored
+// tabs start asleep (no page loaded), so thirty tabs do not mean thirty pages loading at once.
+// An incognito window neither writes nor reads the file.
+
+struct SavedTab { std::wstring url, title; bool pinned = false, active = false; };
+
+static bool SessionUrlOk(const std::wstring& u) {
+    if (u.empty() || u.size() > 8000) return false;
+    for (wchar_t c : u) if (c < 0x20) return false;
+    return u.rfind(L"http://", 0) == 0 || u.rfind(L"https://", 0) == 0 || u.rfind(L"file:///", 0) == 0;
+}
+
+static std::wstring SessionPath() { return KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME + L"\\session.txt"; }
+
+static std::string SessionText() {
+    std::string o = "NEONNET-SESSION 1\n";
+    int n = 0;
+    for (auto& t : g.tabs) {
+        std::wstring u = DisplayUrl(t.get());
+        if (!SessionUrlOk(u) || n >= 200) continue;
+        n++;
+        std::wstring ti = t->title;
+        for (auto& c : ti) if (c < 0x20) c = L' ';
+        if (ti.size() > 200) ti.resize(200);
+        std::string flags;
+        if (t->pinned) flags += 'P';
+        if (t->id == g.active) flags += 'A';
+        if (flags.empty()) flags = "-";
+        o += flags + "\t" + Utf8(ti) + "\t" + Utf8(u) + "\n";
+    }
+    return o;
+}
+
+// Writes session.txt now (a new file, then swapped in, so a crash cannot leave half a file).
+static void SaveSession() {
+    g.sessionPending = false;
+    if (g.hwnd) KillTimer(g.hwnd, TIMER_SESSION);
+    if (g.incognito || g.tabs.empty()) return;
+    std::string s = SessionText();
+    if (s == g.lastSession) return;
+    std::wstring path = SessionPath(), tmp = path + L".tmp";
+    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD w = 0;
+    bool ok = WriteFile(h, s.data(), (DWORD)s.size(), &w, nullptr) && w == s.size();
+    CloseHandle(h);
+    if (ok && MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) g.lastSession = s;
+    else DeleteFileW(tmp.c_str());
+}
+
+static std::vector<SavedTab> LoadSession() {
+    std::vector<SavedTab> v;
+    HANDLE h = CreateFileW(SessionPath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return v;
+    DWORD size = GetFileSize(h, nullptr), got = 0;
+    std::string data;
+    if (size > 0 && size < 4 * 1024 * 1024) {
+        data.resize(size);
+        if (!ReadFile(h, &data[0], size, &got, nullptr) || got != size) data.clear();
+    }
+    CloseHandle(h);
+    size_t pos = data.find('\n');
+    if (pos == std::string::npos || data.compare(0, pos, "NEONNET-SESSION 1") != 0) return v;
+    g.lastSession = data;
+    for (++pos; pos < data.size() && v.size() < 200;) {
+        size_t e = data.find('\n', pos);
+        if (e == std::string::npos) e = data.size();
+        std::string line = data.substr(pos, e - pos);
+        pos = e + 1;
+        size_t t1 = line.find('\t');
+        size_t t2 = t1 == std::string::npos ? t1 : line.find('\t', t1 + 1);
+        if (t2 == std::string::npos) continue;
+        SavedTab s;
+        s.pinned = line.substr(0, t1).find('P') != std::string::npos;
+        s.active = line.substr(0, t1).find('A') != std::string::npos;
+        s.title = Wide(line.substr(t1 + 1, t2 - t1 - 1));
+        s.url = Wide(line.substr(t2 + 1));
+        if (SessionUrlOk(s.url)) v.push_back(std::move(s));
+    }
+    return v;
+}
+
+// The first tabs of a new window: the saved ones that come back, then (or instead) the
+// address NeonNet was started with, or the home page.
+static void OpenStartTabs() {
+    std::vector<SavedTab> saved;
+    bool all = false;
+    if (!g.incognito) {
+        saved = LoadSession();
+        all = RegGetDword(L"RestoreSession", 0) != 0;
+        // A lone empty new tab is not worth bringing back: the home page is better.
+        if (all && saved.size() == 1 && !saved[0].pinned && saved[0].url.rfind(NEWTAB, 0) == 0) saved.clear();
+        if (!all) saved.erase(std::remove_if(saved.begin(), saved.end(), [](const SavedTab& s) { return !s.pinned; }), saved.end());
+    }
+    int activeId = 0;
+    for (auto& s : saved) {
+        auto tab = std::make_unique<Tab>();
+        tab->id = g.nextId++;
+        tab->url = s.url;
+        if (!s.title.empty()) tab->title = s.title;
+        tab->pinned = s.pinned;
+        tab->discarded = true;   // asleep until selected, see RestoreTab
+        tab->loading = false;
+        tab->lastActive = GetTickCount64();
+        if (s.active) activeId = tab->id;
+        g.tabs.push_back(std::move(tab));
+    }
+    KeepPinsFirst();
+    bool openNew = saved.empty() || !all || !g.startUrl.empty();
+    if (openNew) CreateTab(g.startUrl.empty() ? HomeUrl() : g.startUrl, true);
+    else SelectTab(activeId ? activeId : g.tabs.front()->id, true);
 }
 
 static void PostUpdate(const UpdateMsg& m) {
@@ -2047,6 +2217,7 @@ static void ExecCmd(int cmd) {
             ClosedTab c = g.closed.back();
             g.closed.pop_back();
             CreateTab(c.url, true, c.index);
+            if (c.pinned) SetPinned(g.active, true);
         }
         break;
     case CMD_BOOKMARK: ToggleBookmark(); break;
@@ -2360,6 +2531,46 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
     if (cmd) ExecCmd(cmd);
 }
 
+// Right-click on a tab in the strip. cssX/cssY: the click inside the toolbar page, in CSS pixels.
+static void ShowTabMenu(int id, int cssX, int cssY, double ratio) {
+    Tab* t = FindTab(id);
+    if (!t || GetTickCount64() - g_menuClosedAt < 250) return;
+    enum { T_PIN = 1, T_DUP, T_MUTE, T_CLOSE_OTHERS, T_CLOSE };
+    std::vector<MenuItem> m;
+    auto add = [&](int cmd, std::wstring text, bool disabled = false) {
+        MenuItem it; it.cmd = cmd; it.text = std::move(text); it.disabled = disabled;
+        m.push_back(std::move(it));
+    };
+    add(T_PIN, t->pinned ? L"Unpin tab" : L"Pin tab");
+    add(T_DUP, L"Duplicate tab", DisplayUrl(t).empty());
+    if (t->audible || t->muted) add(T_MUTE, t->muted ? L"Unmute tab" : L"Mute tab");
+    m.push_back(MenuItem());
+    int others = 0;
+    for (auto& o : g.tabs) if (o->id != id && !o->pinned) others++;
+    add(T_CLOSE_OTHERS, L"Close other tabs", others == 0);   // pinned tabs stay
+    add(T_CLOSE, L"Close tab");
+
+    RECT c = ChromeRect();
+    if (!(ratio >= 0.5 && ratio <= 8)) ratio = g.dpi / 96.0;
+    POINT p{ c.left + (int)lround(cssX * ratio), c.top + (int)lround(cssY * ratio) };
+    ClientToScreen(g.hwnd, &p);
+    int cmd = RunMenu(std::move(m), p, L"TAB", true);
+    if (g.closing || !FindTab(id)) return;
+    switch (cmd) {
+    case T_PIN: SetPinned(id, !FindTab(id)->pinned); break;
+    case T_DUP: { Tab* s = FindTab(id); CreateTab(DisplayUrl(s), true, IndexOf(id) + 1); break; }
+    case T_MUTE: ToggleMute(id); break;
+    case T_CLOSE_OTHERS: {
+        std::vector<int> ids;
+        for (auto& o : g.tabs) if (o->id != id && !o->pinned) ids.push_back(o->id);
+        for (int i : ids) CloseTab(i);
+        SelectTab(id, true);
+        break;
+    }
+    case T_CLOSE: CloseTab(id); break;
+    }
+}
+
 // The right-click menu. The chosen command goes back to Chromium, which runs it (or hands it to
 // OnContextMenuCommand for NeonNet's own items).
 // ---------------------------------------------------------------------------
@@ -2489,6 +2700,20 @@ static void OnChromeCommand(const std::wstring& msg) {
         if (n != g.dropNeed) { g.dropNeed = n; Layout(); }
     }
     else if (cmd == L"close") CloseTab(_wtoi(arg.c_str()));
+    else if (cmd == L"pin") { if (Tab* t = FindTab(_wtoi(arg.c_str()))) SetPinned(t->id, !t->pinned); }
+    else if (cmd == L"move" || cmd == L"tabmenu") {
+        // arguments: the tab, then the new place (move) or the click position in CSS pixels and
+        // the page's devicePixelRatio (tabmenu)
+        std::vector<std::wstring> v;
+        for (size_t s = 0;;) {
+            size_t e = arg.find(L'\n', s);
+            v.push_back(arg.substr(s, e == std::wstring::npos ? std::wstring::npos : e - s));
+            if (e == std::wstring::npos) break;
+            s = e + 1;
+        }
+        if (cmd == L"move" && v.size() > 1) MoveTab(_wtoi(v[0].c_str()), _wtoi(v[1].c_str()));
+        else if (cmd == L"tabmenu" && v.size() > 3) ShowTabMenu(_wtoi(v[0].c_str()), _wtoi(v[1].c_str()), _wtoi(v[2].c_str()), wcstod(v[3].c_str(), nullptr));
+    }
     else if (cmd == L"select") SelectTab(_wtoi(arg.c_str()), true);
     else if (cmd == L"scan") ExecCmd(CMD_SCAN);
     else if (cmd == L"bookmark") ExecCmd(CMD_BOOKMARK);
@@ -2670,7 +2895,7 @@ public:
         g.creatingChrome = true;
         CefBrowserHost::CreateBrowserSync(ChildInfo(ChromeRect()), g_client.get(), CHROME_UI, BrowserSettings(), nullptr, nullptr);
         g.creatingChrome = false;
-        CreateTab(g.startUrl.empty() ? HomeUrl() : g.startUrl, true);
+        OpenStartTabs();
         Layout();
     }
 
@@ -2769,6 +2994,9 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
     } else if (key == L"askDownload") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"AskDownload", REG_DWORD, &v, sizeof(v));
+    } else if (key == L"restoreSession") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"RestoreSession", REG_DWORD, &v, sizeof(v));
     } else if (key == L"home") {
         if (val.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, L"HomePage");
         else RegSetBin(L"HomePage", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
@@ -2955,6 +3183,7 @@ static void BeginClose() {
     if (g.closing) return;
     SavePlacement();
     store::SaveIfDirty();
+    SaveSession();   // before the browsers start closing and take the tabs with them
     SweepTemp();
     g.closing = true;
     ShowWindow(g.hwnd, SW_HIDE);
@@ -3021,6 +3250,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else if (wp == TIMER_TRIM) { KillTimer(hwnd, TIMER_TRIM); g.lastTrimCount = perf::TrimWorkingSets(); SamplePerf(); PushPerf(); }
         else if (wp == TIMER_UPDATE) MaybeAutoCheck();
         else if (wp == TIMER_SAVE) { KillTimer(hwnd, TIMER_SAVE); store::SaveIfDirty(); return 0; }
+        else if (wp == TIMER_SESSION) { if (!g.closing) SaveSession(); else KillTimer(hwnd, TIMER_SESSION); return 0; }
         InvalidateStatus();
         return 0;
     case WM_APP_UPDATE: { std::unique_ptr<UpdateMsg> m((UpdateMsg*)lp); if (!g.closing) OnUpdateMsg(*m); return 0; }

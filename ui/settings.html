@@ -61,6 +61,10 @@ select option{background:var(--bg2);color:var(--cyan)}
     <div class="pair"><input class="txt" id="home" spellcheck="false" autocomplete="off" placeholder="https://... (empty = new tab page)">
       <button class="btn" id="homeSave">SAVE</button></div>
   </div>
+  <div class="row">
+    <div class="lab"><b>Continue where you left off</b><span id="restoreHint"></span></div>
+    <button class="tog" id="restoreSession">OFF</button>
+  </div>
 
   <h2 id="privacy">PRIVACY</h2>
   <div class="row stack">
@@ -120,6 +124,10 @@ async function load(){
   setTog('#askDownload', cfg.askDownload);
   $('#dlHint').textContent = cfg.askDownload ? 'A save dialog opens for every download.'
     : 'Files are saved straight into ' + cfg.downloadDir + ' (a number is added if the name is taken).';
+  setTog('#restoreSession', cfg.restoreSession);
+  $('#restoreHint').textContent = cfg.restoreSession
+    ? 'All tabs of the last session come back at start-up. They load when you click them. Pinned tabs always come back.'
+    : 'Off: NeonNet starts with the home page. Pinned tabs come back either way.';
   setTog('#scan', cfg.scan);
   setTog('#autoUpdate', cfg.autoUpdate);
   $('#autoUpdate').disabled = !cfg.installed;
@@ -141,7 +149,7 @@ async function set(key, value){
 }
 
 $('#engine').onchange = async () => { await set('search', $('#engine').value); load(); };
-for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate']]){
+for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession']]){
   $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };
 }
 async function saveHome(){

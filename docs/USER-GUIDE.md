@@ -151,6 +151,16 @@ Ctrl+F opens the find bar under the address bar. Matches are highlighted as you 
 
 The find bar belongs to the tab it was opened in and closes when you switch to another tab. Ctrl+F or F3 brings it back with the last search.
 
+## Pinned tabs and moving tabs
+
+- **Reorder:** press a tab and drag it left or right. The other tabs make room as you pass them. Clicking a tab still selects it at once.
+- **Pin:** right-click a tab and choose **Pin tab** (**Unpin tab** to undo). A pinned tab moves to the left end of the strip and becomes narrow, showing a pin and its number; hover it for the title. It has no close button and a middle click does not close it, but Ctrl+W and **Close tab** in its menu do. Pinned tabs can only be dragged among themselves, and other tabs cannot be dropped among them.
+- **Tab menu:** besides pinning it has **Duplicate tab**, **Mute tab** / **Unmute tab** (when the tab has sound), **Close other tabs** (pinned tabs stay open) and **Close tab**.
+
+## Tabs of the last session
+
+Pinned tabs always come back when NeonNet starts. If **Continue where you left off** is on in the settings, all tabs of the last session come back, in their order, with the same tab selected. They come back asleep (dimmed): only the selected tab loads, the others load when you click them, so a session of thirty tabs starts as fast as one. The back/forward history, scroll position and what you typed into pages are not restored. If NeonNet is started with an address (a link from another program), that page opens as a new tab as well. An incognito window never saves or restores tabs. The tabs are saved a few seconds after each change and when NeonNet closes, so after a crash you lose at most a few seconds. The list is in `%LOCALAPPDATA%\NeonNet\session.txt`; delete the file to forget it.
+
 ## Reopening closed tabs
 
 Ctrl+Shift+T reopens the most recently closed tab at its old position. Press it again for the one before, up to 25 tabs back. This works while NeonNet is open; the list starts empty at each start. The page reloads, but its back/forward history is not restored.
@@ -175,6 +185,7 @@ Ctrl+, , the `≡` menu (**Settings**), or **SETTINGS** on the new tab page open
 |---|---|
 | **Search engine** | Google, DuckDuckGo, Bing, Brave or Ecosia. Used for text that is not an address, in the address bar and on the new tab page. |
 | **Home page** | Opened at start-up (when NeonNet is started without an address) and by the home button. Empty means the NeonNet new tab page. Only `http://`, `https://` and `file:///` addresses are accepted. New tabs always show the new tab page. |
+| **Continue where you left off** | Off (default): NeonNet starts with the home page. On: the tabs of the last session come back, asleep, and the home page is not opened. Pinned tabs come back either way. See [Tabs of the last session](#tabs-of-the-last-session). |
 | **Clear browsing data** | Deletes cookies and site data, the cache and the browsing history, in any combination, for the last hour, 24 hours, 7 days, 4 weeks or all time. History goes by the time of the visit. Cookies and site data also sign you out of sites. Cookies go by the time they were created. Site data (local storage, offline data) is cleared for the sites that lost a cookie, the sites in your history for that period and the pages open now, so it can miss a site you have not visited recently. The cache is always cleared completely. Single visits, or everything at once, can also be removed on the history page. In an incognito window the incognito session is cleared. |
 | **Ask where to save each file** | On (default): a save dialog opens for every download. Off: files go straight into your Downloads folder, and a number is added when the name is taken (`report (1).pdf`). |
 | **Scanlines** | The same switch as the `SCAN` button. |
@@ -231,6 +242,7 @@ Automatic updates only work for the installed copy (in `%LOCALAPPDATA%\Programs\
 |---|---|
 | Application | `%LOCALAPPDATA%\Programs\NeonNet` |
 | Profile (cookies, cache, sign-ins, site data) | `%LOCALAPPDATA%\NeonNet\Profile` |
+| Tabs of the last session | `%LOCALAPPDATA%\NeonNet\session.txt` |
 | History, bookmarks and downloads list | `%LOCALAPPDATA%\NeonNet\history.txt`, `bookmarks.txt` and `downloads.txt` (plain UTF-8 text) |
 | Downloaded updates (deleted after installing) | `%LOCALAPPDATA%\NeonNet\Updates` |
 | Settings (scanlines, search engine, home page, download behaviour, window position, automatic updates) | Registry `HKEY_CURRENT_USER\Software\NeonNet` |

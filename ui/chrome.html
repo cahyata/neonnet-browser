@@ -45,6 +45,12 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;app-re
 .tab .x{width:18px;height:18px;line-height:18px;text-align:center;visibility:hidden;color:var(--muted)}
 .tab:hover .x,.tab.active .x{visibility:visible}
 .tab .x:hover{color:var(--bg);background:var(--pink)}
+.tab .pin{display:none;flex:none;color:var(--yellow);align-items:center}
+.tab.pinned{width:66px;min-width:66px;flex:0 0 66px;padding:0 8px;gap:5px}
+.tab.pinned .pin{display:flex}
+.tab.pinned .t,.tab.pinned .x{display:none}
+.tab.dragging{z-index:10;background:var(--tab);color:var(--pink2);border-color:var(--cyan);opacity:.92;pointer-events:none}
+body.dragging,body.dragging *{cursor:grabbing!important}
 .tab.loading .n{animation:blink .6s steps(2) infinite}
 @keyframes blink{50%{opacity:.15}}
 #plus{app-region:no-drag;height:28px;width:28px;color:var(--cyan);font-size:16px;align-self:center;margin-top:6px}
@@ -169,6 +175,7 @@ const send = (...a) => {
 const NEWTAB = 'https://neonnet.ui/newtab.html';
 let state = {tabs:[], active:0};
 let editing = false;
+let drag = null, pendingRender = false;   // tab being pressed or dragged: {id, x0, on, el, grab, w}
 
 function toUrl(v){
   v = v.trim(); if(!v) return null;
@@ -191,14 +198,20 @@ function shownUrl(u){
   return u;
 }
 
+const PIN = '<svg viewBox="0 0 16 16" width="12" height="12"><path fill="currentColor" d="M10 1.5l4.5 4.5-1.6.8-2.3 2.3.3 3.2-1.2 1.2-2.9-2.9L3.4 14.4 2.6 13.6l4.3-3.4-2.9-2.9 1.2-1.2 3.2.3 2.3-2.3z"/></svg>';
+
 function render(){
+  if(drag && drag.on){ pendingRender = true; return; }   // never rebuild the strip under a tab being dragged
+  pendingRender = false;
   const box = $('#tabs'); box.innerHTML = '';
   state.tabs.forEach((t, i) => {
     const d = document.createElement('div');
     d.className = 'tab' + (t.id === state.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.discarded ? ' discarded' : '') +
-      (t.audible ? ' snd' : '') + (t.muted ? ' muted' : '');
+      (t.audible ? ' snd' : '') + (t.muted ? ' muted' : '') + (t.pinned ? ' pinned' : '');
+    d.dataset.id = t.id;
     d.title = t.title;
-    d.innerHTML = '<span class="n"></span><span class="spk"></span><span class="t"></span><button class="x" title="Close tab (Ctrl+W)">&#10005;</button>';
+    d.innerHTML = '<span class="pin"></span><span class="n"></span><span class="spk"></span><span class="t"></span><button class="x" title="Close tab (Ctrl+W)">&#10005;</button>';
+    d.querySelector('.pin').innerHTML = PIN;
     const spk = d.querySelector('.spk');
     spk.innerHTML = t.muted ? SPK_OFF : SPK_ON;
     spk.title = t.muted ? 'Sound is muted. Click to unmute this tab' : 'This tab is playing sound. Click to mute it';
@@ -206,8 +219,13 @@ function render(){
     spk.onclick = e => { e.stopPropagation(); send('mute', t.id); };
     d.querySelector('.n').textContent = String(i + 1).padStart(2, '0');
     d.querySelector('.t').textContent = (t.title || 'NEW TAB').toUpperCase();
-    d.onmousedown = e => { if(e.button === 0 && !e.target.classList.contains('x')) send('select', t.id); };
-    d.onauxclick = e => { if(e.button === 1) send('close', t.id); };
+    d.onmousedown = e => {
+      if(e.button !== 0 || e.target.classList.contains('x')) return;
+      send('select', t.id);
+      drag = {id: t.id, x0: e.clientX, on: false};   // becomes a real drag after a few pixels, see below
+    };
+    d.onauxclick = e => { if(e.button === 1 && !t.pinned) send('close', t.id); };
+    d.oncontextmenu = e => { e.preventDefault(); send('tabmenu', t.id, Math.round(e.clientX), Math.round(e.clientY), window.devicePixelRatio || 1); };
     d.querySelector('.x').onclick = e => { e.stopPropagation(); send('close', t.id); };
     box.appendChild(d);
   });
@@ -251,6 +269,56 @@ window.__nn = m => {
   else if(m.type === 'focusFind'){ fq.focus(); fq.select(); }
   else if(m.type === 'findResult'){ showCount(m.count, m.active); }
 };
+
+// ---- drag to reorder tabs ---------------------------------------------------------------
+// Pressing a tab selects it at once. Moving the mouse more than a few pixels turns the press
+// into a drag: the tab follows the pointer and the others make room by swapping places in the
+// strip. A pinned tab only moves among the pinned ones, the others among the others. On release
+// the host gets the final place (send('move', id, index)) and answers with the real order.
+function dragMove(px){
+  const el = drag.el, box = $('#tabs'), br = box.getBoundingClientRect();
+  const want = Math.max(br.left, Math.min(px - drag.grab, br.right - drag.w));
+  const place = () => {   // slide the tab so it sits at `want` wherever it is in the strip now
+    el.style.transform = '';
+    el.style.transform = 'translateX(' + (want - el.getBoundingClientRect().left) + 'px)';
+  };
+  place();
+  const pinned = el.classList.contains('pinned');
+  const mid = n => { const r = n.getBoundingClientRect(); return r.left + r.width / 2; };
+  for(let guard = 0; guard < 60; guard++){
+    const center = want + drag.w / 2, prev = el.previousElementSibling, next = el.nextElementSibling;
+    if(prev && prev.classList.contains('pinned') === pinned && center < mid(prev)){ box.insertBefore(el, prev); place(); }
+    else if(next && next.classList.contains('pinned') === pinned && center > mid(next)){ box.insertBefore(next, el); place(); }
+    else break;
+  }
+}
+document.addEventListener('mousemove', e => {
+  if(!drag) return;
+  if(e.buttons !== 1){ endDrag(); return; }   // the release happened somewhere we did not see
+  if(!drag.on){
+    if(Math.abs(e.clientX - drag.x0) < 5) return;
+    const el = $('#tabs').querySelector('.tab[data-id="' + drag.id + '"]');
+    if(!el){ drag = null; return; }
+    const r = el.getBoundingClientRect();
+    drag.on = true; drag.el = el; drag.w = r.width; drag.grab = drag.x0 - r.left;
+    el.classList.add('dragging'); document.body.classList.add('dragging');
+  }
+  dragMove(e.clientX);
+});
+function endDrag(){
+  const d = drag; drag = null;
+  if(!d || !d.on) return;
+  document.body.classList.remove('dragging');
+  d.el.classList.remove('dragging'); d.el.style.transform = '';
+  const idx = [...$('#tabs').children].indexOf(d.el), was = state.tabs.findIndex(t => t.id === d.id);
+  if(idx >= 0 && was >= 0 && idx !== was){
+    state.tabs.splice(idx, 0, state.tabs.splice(was, 1)[0]);   // show the new order at once; the host confirms it
+    send('move', d.id, idx);
+  }
+  render();
+}
+document.addEventListener('mouseup', e => { if(e.button === 0) endDrag(); });
+window.addEventListener('blur', () => endDrag());
 
 fq.addEventListener('input', () => { send('find', fq.value); if(!fq.value) showCount(0, 0); });
 fq.addEventListener('keydown', e => {

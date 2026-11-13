@@ -10,7 +10,7 @@ NeonNet ships its own Chromium engine. It does not need Edge, WebView2 or any ot
 
 ## Features
 
-- **Tabs:** open, close, switch, and open links in a new tab. Popups (for example sign-in windows) open as tabs.
+- **Tabs:** open, close, switch, drag to reorder, pin, and open links in a new tab. Popups (for example sign-in windows) open as tabs. Optionally the tabs of the last session come back at start-up.
 - **Address bar:** type an address or search words (Google search).
 - **Theme:** clipped-corner window frame and a HUD-style status bar.
 - **Scanlines:** a CRT line effect over every page, toggled with the `SCAN` button.

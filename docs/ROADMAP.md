@@ -21,6 +21,7 @@ Done without being planned here first (the planned ones are ticked in the lists 
 - [x] New right-click items: open link in incognito window, open image in new tab, view page source, search for the selected text (1.4.0)
 - [x] History can be cleared by period from the settings page, with a link from the history page (1.4.0)
 - [x] Tabs with sound, typed text or a kept-awake site are never put to sleep by the performance panel (1.5.0)
+- [x] Tab right-click menu: pin, duplicate, mute, close other tabs (unreleased)
 
 ## Next: everyday use
 
@@ -34,9 +35,9 @@ Done without being planned here first (the planned ones are ticked in the lists 
 
 ## Tabs and windows
 
-- [ ] **Drag to reorder tabs** (M).
-- [ ] **Pin tabs** (S).
-- [ ] **Restore tabs from the last session** (M). Needs care: `persist_session_cookies` must stay off (see the notes in [ARCHITECTURE.md](ARCHITECTURE.md)), so this has to be done by NeonNet itself, not by Chromium.
+- [x] **Drag to reorder tabs** (M, unreleased).
+- [x] **Pin tabs** (S, unreleased). Right-click a tab. Pinned tabs sit at the left, are narrow and come back at the next start.
+- [x] **Restore tabs from the last session** (M, unreleased). Done by NeonNet itself (`session.txt`), not by Chromium, because `persist_session_cookies` must stay off (see [ARCHITECTURE.md](ARCHITECTURE.md)). Off by default; pinned tabs always come back; restored tabs start asleep.
 - [x] **Private window** (M, 1.4.0). Ctrl+Shift+N opens an incognito window with an in-memory profile.
 - [x] **Mute tab / audio indicator** (S, 1.5.0). A speaker on the tab, click to mute. Sound made only through the Web Audio API is not detected.
 - [x] **Performance panel** (L, 1.5.0). Ctrl+Shift+M: memory and CPU per tab, memory cleaner, sleeping tabs, RAM and CPU limiters, tabs with sound, typed text or a kept-awake site are never slept on their own.
