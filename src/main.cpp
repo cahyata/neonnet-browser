@@ -1230,10 +1230,35 @@ static void MaybeFinishClose() {
 // ---------------------------------------------------------------------------
 // CEF client (shared by the chrome UI browser and all tab browsers)
 
-class DevToolsClient : public CefClient, public CefLifeSpanHandler {
+class DevToolsClient : public CefClient, public CefLifeSpanHandler, public CefKeyboardHandler {
 public:
     explicit DevToolsClient(int tabId) : tabId_(tabId) {}
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+    CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
+    // The developer tools are a Chromium page: without this, Chromium would answer window shortcuts itself
+    // (Ctrl+Shift+N would open a Chromium window). Only the shortcuts the tools do not use themselves are taken;
+    // the rest (Ctrl+F, Ctrl+P, Ctrl+Shift+P, Ctrl+Shift+M, zoom ...) stay with the tools.
+    bool OnPreKeyEvent(CefRefPtr<CefBrowser>, const CefKeyEvent& e, CefEventHandle, bool*) override {
+        if (e.type != KEYEVENT_RAWKEYDOWN) return false;
+        bool ctrl = (e.modifiers & EVENTFLAG_CONTROL_DOWN) != 0, shift = (e.modifiers & EVENTFLAG_SHIFT_DOWN) != 0;
+        bool alt = (e.modifiers & EVENTFLAG_ALT_DOWN) != 0, repeat = (e.modifiers & EVENTFLAG_IS_REPEAT) != 0;
+        int vk = e.windows_key_code, cmd = 0;
+        if (repeat) return false;
+        if (ctrl && !alt) {
+            if (vk == 'N' && shift) cmd = CMD_INCOGNITO;
+            else if (vk == 'T') cmd = shift ? CMD_REOPEN : CMD_NEWTAB;
+            else if (vk == 'H' && !shift) cmd = CMD_HISTORY;
+            else if (vk == 'J' && !shift) cmd = CMD_DOWNLOADS;
+            else if (vk == VK_OEM_COMMA) cmd = CMD_SETTINGS;
+            else if (vk == VK_TAB) cmd = shift ? CMD_PREVTAB : CMD_NEXTTAB;
+        } else if (!ctrl && !alt && !shift) {
+            if (vk == VK_F11) cmd = CMD_FULLSCREEN;
+            else if (vk == VK_F12) cmd = CMD_DEVTOOLS;   // closes the tools
+        }
+        if (!cmd) return false;
+        ExecCmd(cmd);
+        return true;
+    }
     void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
         g.devtools++;
         if (Tab* t = FindTab(tabId_)) { t->dev = b; Layout(); }
