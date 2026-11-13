@@ -336,7 +336,7 @@ Rules the updater follows:
 - **Exact assets only.** The installer and checksum URLs must be exactly `https://github.com/<UPDATE_REPO>/releases/download/<tag>/NeonNet-Setup.exe` and `.sha256`. Assets from any other location are ignored.
 - **Only newer versions.** The release tag (`v1.2.3`) is compared with `APP_VERSION`; equal or older versions are never installed.
 - **Verified before use.** The file must match the SHA-256 from the release and end with the installer's `NEONPAK1` footer. Otherwise it is deleted.
-- **Installed copy only.** Downloads and installs happen only when `NeonNet.exe` runs from `%LOCALAPPDATA%\Programs\NeonNet`. Other copies (for example `build/app`) only report a newer version.
+- **Installed copy only.** Downloads and installs happen only when `NeonNet.exe` runs from the folder that the installer registered for this user (`InstallLocation` of the Uninstall entry in `HKCU`, or the default `%LOCALAPPDATA%\Programs\NeonNet`): `IsInstalledCopy()`. Other copies (for example `build/app`) and an install for all users (`IsMachineInstall()`, registered in `HKLM`) only report a newer version.
 - **Off the UI thread.** The worker runs on its own thread and reports through `PostMessageW(WM_APP_UPDATE)`. It never touches the browser state. At exit it is cancelled and given up to 5 seconds to stop.
 
 The checksum protects against corrupted or swapped downloads, but it lives in the same GitHub release as the installer. Anyone who can publish releases in the repository can publish an update. Signing the installer (see [Installer](INSTALLER.md#code-signing)) and checking the signature before running it would close that gap.
@@ -364,7 +364,12 @@ Each `OnBeforeClose` removes its browser from `g_all`. Once all are closed, `May
 ## Uninstall
 
 `NeonNet.exe --uninstall` (called from Settings > Apps):
-1. asks for confirmation;
-2. removes the shortcuts and registry keys;
-3. starts a hidden `cmd /c timeout 3 & rmdir` that deletes the app folder after the process exits. The folder is only deleted when the exe really is in the standard install folder;
-4. also deletes the profile, if the user chose to.
+1. for an install for all users, when not elevated: starts itself again with the `runas` verb (UAC) and ends;
+2. asks for confirmation;
+3. removes the shortcuts (shared ones for an install for all users) and the registry keys: the Uninstall entry, the browser registration (`browserreg::Unregister`, also the one under `HKCU` that the settings button may have added) and `HKCU\Software\NeonNet`;
+4. shows "NeonNet has been removed" and, only after it was dismissed, starts a hidden `cmd /c timeout 3 & rmdir` that deletes the app folder after the process exits (earlier the cleanup started first and lost the race when the message was read slowly). The folder is the registered `InstallLocation`, and is only deleted when the exe really is in it;
+5. also deletes the profile, if the user chose to.
+
+## Default browser registration
+
+`src/browserreg.h` (header only, used by the app and the installer) writes the keys that make NeonNet appear in Settings > Default apps: the ProgIds `NeonNetURL` (with `URL Protocol`) and `NeonNetHTML` with `shell\open\command` = `"<exe>" "%1"`, `Software\Clients\StartMenuInternet\NeonNet` with `Capabilities`, and the value under `Software\RegisteredApplications`. They go under `HKCU` (an install for this user, and the settings button) or `HKLM` (an install for all users). A link or file then starts `NeonNet.exe "<url or path>"`: a new process hands the address to the running one (`OnAlreadyRunningAppRelaunch` -> `WM_APP_OPEN`) or starts with it (`NormalizeArgUrl()`, which turns an existing path into a `file:` address). Windows does not let a program become the default: that is stored in `UserChoice` under a hash only Windows' own pages can write, so NeonNet only opens `ms-settings:defaultapps?registeredAppUser=NeonNet` and reads `UserChoice` (`browserreg::IsDefault()`, both http and https must be `NeonNetURL`) to show the state.

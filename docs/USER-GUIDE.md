@@ -3,19 +3,28 @@
 ## Installing
 
 1. Run `NeonNet-Setup.exe`.
-2. Choose the two options before installing:
+2. Choose the options before installing:
+   - **Change folder:** where NeonNet goes. The default is `%LOCALAPPDATA%\Programs\NeonNet`. If you pick a folder that already holds other things, NeonNet goes into a `NeonNet` folder inside it.
    - **Create desktop shortcut:** adds a shortcut to the desktop.
+   - **Install for all users:** installs for everyone who uses this computer, in `Program Files`. Windows asks for administrator permission.
+   - **Choose NeonNet as my default browser when done:** opens Windows' Default apps page after installing (see [Default browser](#default-browser)).
    - **Launch NeonNet when done:** opens NeonNet right after installing.
 3. Click **INSTALL**. Unpacking the Chromium runtime takes about 10–30 seconds.
 4. When **INSTALL COMPLETE** appears, click **LAUNCH** or **FINISH**.
 
 Good to know:
-- NeonNet is installed for the current Windows account only, so no admin rights are needed.
+- By default NeonNet is installed for the current Windows account only, so no admin rights are needed. An install for all users needs them, and does not update itself: it only tells you that a new version exists (run the new installer to update it).
 - It needs about 450 MB of disk space.
 - If NeonNet is running, the installer asks you to close it first.
-- Later versions install themselves (see [Updates](#updates)). You can also run a newer installer by hand; files are replaced and your browsing data is kept.
+- Later versions install themselves (see [Updates](#updates)). You can also run a newer installer by hand: it shows the folder and kind of install you chose before, files are replaced and your browsing data is kept.
 
 Windows SmartScreen may warn that the app is unrecognized, because the installer is not signed with a code signing certificate. Click **More info**, then **Run anyway**, if you trust where the file came from.
+
+## Default browser
+
+**Settings > DEFAULT BROWSER > SET AS DEFAULT** makes links from other programs (a link in a chat or a document, an `.html` file) open in NeonNet. NeonNet adds itself to Windows' list of browsers and opens Windows' **Default apps** page; there, search for **NeonNet** and choose it for `http`, `https` and the `.html` file types (or pick it in the list under "Set defaults for applications"). Windows does not let a program make itself the default, so this last step is yours. When NeonNet is already running, a link opens in it as a new tab.
+
+The installer adds NeonNet to the list too, so the button is only needed for a copy that was not installed (for example one started from another folder: it is registered at the place it runs from). Uninstalling NeonNet removes its entries.
 
 ## The window
 
@@ -281,26 +290,26 @@ If an update fails, the status bar says so on the next start, and NeonNet tries 
 
 Privacy: each check sends one request to `api.github.com`, and downloads come from GitHub. GitHub sees your IP address, like for any website. No other data is sent. Turn off **Automatic updates** to stop the checks.
 
-Automatic updates only work for the installed copy (in `%LOCALAPPDATA%\Programs\NeonNet`). A copy started from anywhere else only tells you that a new version exists.
+Automatic updates only work for the copy installed for this user (in the folder the installer used). A copy started from anywhere else, and an install for all users, only tell you that a new version exists.
 
 ## Where things are stored
 
 | What | Location |
 |---|---|
-| Application | `%LOCALAPPDATA%\Programs\NeonNet` |
+| Application | `%LOCALAPPDATA%\Programs\NeonNet`, or the folder you chose (an install for all users: `Program Files\NeonNet`) |
 | Profile (cookies, cache, sign-ins, site data) | `%LOCALAPPDATA%\NeonNet\Profile` |
 | Saved passwords (encrypted) | `%LOCALAPPDATA%\NeonNet\passwords.dat` |
 | Tabs of the last session | `%LOCALAPPDATA%\NeonNet\session.txt` |
 | History, bookmarks and downloads list | `%LOCALAPPDATA%\NeonNet\history.txt`, `bookmarks.txt` and `downloads.txt` (plain UTF-8 text) |
 | Downloaded updates (deleted after installing) | `%LOCALAPPDATA%\NeonNet\Updates` |
 | Settings (scanlines, search engine, home page, download behaviour, window position, automatic updates) | Registry `HKEY_CURRENT_USER\Software\NeonNet` |
-| Shortcuts | Start menu `NeonNet`, and the desktop if chosen |
+| Shortcuts | Start menu `NeonNet`, and the desktop if chosen (an install for all users: the shared Start menu and desktop) |
 
 Session cookies (cookies without an expiry date) are cleared when NeonNet closes, as in Chrome's default setup. Normal sign-in cookies are kept.
 
 ## Uninstalling
 
-Open **Settings > Apps > Installed apps > NeonNet Browser > Uninstall**. You are asked two things:
+Open **Settings > Apps > Installed apps > NeonNet Browser > Uninstall**. For an install for all users Windows asks for administrator permission first. You are asked two things:
 1. To confirm the uninstall.
 2. Whether to also delete your browsing data (history, bookmarks, cookies, sign-ins). The default is **No**, so the data is still there if you install again later.
 

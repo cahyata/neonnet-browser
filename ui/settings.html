@@ -54,6 +54,12 @@ select option{background:var(--bg2);color:var(--cyan)}
     <select id="engine"></select>
   </div>
 
+  <h2 id="default">DEFAULT BROWSER</h2>
+  <div class="row">
+    <div class="lab"><b>Open links from other programs in NeonNet</b><span id="defHint"></span></div>
+    <button class="btn" id="defaultBrowser">SET AS DEFAULT</button>
+  </div>
+
   <h2>START</h2>
   <div class="row">
     <div class="lab"><b>Home page</b><span>Opened at start-up and by the home button. Empty means the NeonNet new tab page. New tabs always show the new tab page.</span>
@@ -184,6 +190,9 @@ async function load(){
   setTog('#smoothScroll', cfg.smoothScroll);
   $('#smoothStep').value = String(cfg.smoothStep);
   $('#devDock').value = String(cfg.devDock);
+  $('#defHint').textContent = cfg.defaultBrowser ? 'NeonNet is your default browser: web links and .html files from other programs open here.'
+    : 'Windows decides this, not NeonNet: the button adds NeonNet to the list and opens Windows\' Default apps page, where you pick it for http and https (and .html files).';
+  $('#defaultBrowser').textContent = cfg.defaultBrowser ? 'OPEN WINDOWS SETTINGS' : 'SET AS DEFAULT';
   $('#smoothTime').value = String(cfg.smoothTime);
   $('#smoothStep').disabled = $('#smoothTime').disabled = !cfg.smoothScroll;
   setTog('#netSpeed', cfg.netSpeed);
@@ -216,6 +225,7 @@ async function set(key, value){
 }
 
 $('#engine').onchange = async () => { await set('search', $('#engine').value); load(); };
+$('#defaultBrowser').onclick = async () => { await set('defaultBrowser', '1'); };
 for(const k of ['smoothStep', 'smoothTime', 'devDock']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
 for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds']]){
   $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };

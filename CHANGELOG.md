@@ -2,6 +2,17 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Features
+- Set as default browser. **Settings > DEFAULT BROWSER** has a **SET AS DEFAULT** button: it adds NeonNet to Windows' list of browsers (the URL handlers for http and https and the file handlers for .htm, .html, .shtml, .xht and .xhtml) and opens Windows' Default apps page, where you choose it. Windows 10 and 11 do not let a program choose itself, so the last step is yours. The settings page says whether NeonNet is already the default. The installer registers NeonNet in the same way. Links and .html files from other programs open in NeonNet (in the running window as a new tab).
+- Installer: **CHANGE FOLDER** picks the folder to install into. A folder that already holds other things gets a `NeonNet` folder inside it, so that uninstalling never removes someone else's files. Running a newer installer by hand keeps the folder of the earlier install.
+- Installer: **Install for all users** (asks for administrator rights through Windows' UAC prompt). It installs into `Program Files`, puts the shortcuts in the shared Start menu and desktop, and registers NeonNet for the whole computer. Uninstalling such a copy also asks for administrator rights. A copy for all users does not update itself (it lives where the user cannot write): it only reports new versions.
+- Installer: **Choose NeonNet as my default browser when done** opens Windows' Default apps page after installing.
+
+### Fixes
+- Uninstalling no longer leaves the program folder behind when the final "NeonNet has been removed" message is read for more than a few seconds.
+
 ## [1.6.1] - 2026-11-13
 
 ### Fixes

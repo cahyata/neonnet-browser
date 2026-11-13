@@ -21,7 +21,7 @@ NeonNet ships its own Chromium engine. It does not need Edge, WebView2 or any ot
 - **Smooth scrolling and network speed:** an animated mouse wheel and keyboard scroll, and live download and upload speed in the status bar, both with a switch in the settings.
 - **Single window:** running `NeonNet.exe <url>` while NeonNet is open adds a tab to the existing window.
 - **Chromium sandbox enabled:** renderer and GPU processes run isolated.
-- **Per-user installer:** no admin rights needed, uninstall from Settings > Apps.
+- **Installer:** per user by default (no admin rights needed), with a choice of folder and an option to install for all users. Uninstall from Settings > Apps. NeonNet can be set as the default browser.
 - **Find in page, bookmarks and history:** Ctrl+F, Ctrl+D, Ctrl+H, and Ctrl+Shift+T to reopen a closed tab.
 - **Incognito window:** Ctrl+Shift+N opens a window whose cookies, cache and sign-ins live in memory only and disappear when it closes. No history is recorded.
 - **Performance panel:** Ctrl+Shift+M opens a side panel with memory and CPU per tab, a memory cleaner, sleeping tabs, and optional RAM and CPU limiters.

@@ -42,6 +42,7 @@
 #include "updater.h"
 #include "store.h"
 #include "perf.h"
+#include "browserreg.h"
 #include <windowsx.h>   // after CEF headers: its macros (GetFirstChild...) clash with cef_dom.h
 
 // ---------------------------------------------------------------------------
@@ -2277,7 +2278,7 @@ static std::string SettingsJson() {
                             std::to_wstring(cef_version_info(6)) + L"." + std::to_wstring(cef_version_info(7));
     o += std::string("],\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
          ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
-         ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) + ",\"smoothScroll\":" + b(RegGetDword(L"SmoothScroll", 1) != 0) + ",\"smoothStep\":" + std::to_string(RegGetDword(L"SmoothStep", 120)) + ",\"smoothTime\":" + std::to_string(RegGetDword(L"SmoothTime", 400)) + ",\"netSpeed\":" + b(RegGetDword(L"NetSpeed", 1) != 0) + ",\"devDock\":" + std::to_string(RegGetDword(L"DevToolsDock", 0)) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
+         ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) + ",\"smoothScroll\":" + b(RegGetDword(L"SmoothScroll", 1) != 0) + ",\"smoothStep\":" + std::to_string(RegGetDword(L"SmoothStep", 120)) + ",\"smoothTime\":" + std::to_string(RegGetDword(L"SmoothTime", 400)) + ",\"netSpeed\":" + b(RegGetDword(L"NetSpeed", 1) != 0) + ",\"devDock\":" + std::to_string(RegGetDword(L"DevToolsDock", 0)) + ",\"defaultBrowser\":" + b(browserreg::IsDefault()) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
          ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
     return o;
@@ -2356,6 +2357,7 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons" || key == L"httpsOnly" || key == L"blockAds" || key == L"savePasswords" || key == L"smoothScroll" || key == L"netSpeed") ok = (val == L"0" || val == L"1");
         else if (key == L"smoothStep") ok = (val == L"70" || val == L"120" || val == L"200");
         else if (key == L"devDock") ok = (val == L"0" || val == L"1" || val == L"2" || val == L"3");
+        else if (key == L"defaultBrowser") ok = (val == L"1");
         else if (key == L"smoothTime") ok = (val == L"250" || val == L"400" || val == L"700");
         else if (key == L"proceed") ok = val.size() < 2100 && (val.rfind(L"cert|https://", 0) == 0 || val.rfind(L"http|http://", 0) == 0);
         else if (key == L"home") {
@@ -2445,12 +2447,33 @@ public:
 
 static std::wstring UpdatesDir() { return KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME + L"\\Updates"; }
 
-static bool IsInstalledCopy() {
+// The folder the installer registered for this user ("InstallLocation" of the Uninstall entry in HKCU,
+// or HKLM for an install for all users), empty when there is none.
+static std::wstring RegisteredInstallDir(HKEY root) {
+    wchar_t buf[MAX_PATH] = {}; DWORD sz = sizeof(buf);
+    if (RegGetValueW(root, UNINSTALL_KEY, L"InstallLocation", RRF_RT_REG_SZ, nullptr, buf, &sz) != ERROR_SUCCESS) return L"";
+    return buf;
+}
+static std::wstring SelfDir() {
     wchar_t self[MAX_PATH]; GetModuleFileNameW(nullptr, self, MAX_PATH);
     PathRemoveFileSpecW(self);
-    std::wstring dir = KnownFolder(FOLDERID_LocalAppData) + L"\\Programs\\" + APP_DIR_NAME;
-    return _wcsicmp(self, dir.c_str()) == 0;
+    return self;
 }
+static bool SameDir(const std::wstring& a, const std::wstring& b) {
+    if (a.empty() || b.empty()) return false;
+    std::wstring x = a, y = b;
+    while (x.size() > 3 && x.back() == L'\\') x.pop_back();
+    while (y.size() > 3 && y.back() == L'\\') y.pop_back();
+    return _wcsicmp(x.c_str(), y.c_str()) == 0;
+}
+// This copy was installed for this user only (in the folder the installer was told to use). Only such a copy
+// updates itself: an install for all users lives where the user cannot write, so it only reports new versions.
+static bool IsInstalledCopy() {
+    std::wstring self = SelfDir();
+    return SameDir(self, RegisteredInstallDir(HKEY_CURRENT_USER)) ||
+           SameDir(self, KnownFolder(FOLDERID_LocalAppData) + L"\\Programs\\" + APP_DIR_NAME);
+}
+static bool IsMachineInstall() { return SameDir(SelfDir(), RegisteredInstallDir(HKEY_LOCAL_MACHINE)); }
 
 static bool AutoUpdateEnabled() { return RegGetDword(L"AutoUpdate", 1) != 0; }
 
@@ -4547,6 +4570,13 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         else if (key == L"smoothStep") { RegSetBin(L"SmoothStep", REG_DWORD, &v, sizeof(v)); g.smoothStep = (int)v; }
         else { RegSetBin(L"SmoothTime", REG_DWORD, &v, sizeof(v)); g.smoothTime = (int)v; }
         BroadcastSmooth();
+    } else if (key == L"defaultBrowser") {
+        // Windows does not let a program make itself the default browser: make sure NeonNet is in the list
+        // (the installer does this too, this also covers a copy that was not installed) and open the page
+        // where the user chooses it.
+        wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        if (!g.incognito) browserreg::Register(HKEY_CURRENT_USER, exe);
+        browserreg::OpenDefaultAppsSettings();
     } else if (key == L"devDock") {
         DWORD v = (DWORD)_wtoi(val.c_str());
         RegSetBin(L"DevToolsDock", REG_DWORD, &v, sizeof(v));
@@ -4871,29 +4901,52 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 // ---------------------------------------------------------------------------
 // Uninstall (NeonNet.exe --uninstall)
 
+static bool IsElevated() {
+    HANDLE t = nullptr; TOKEN_ELEVATION e{}; DWORD n = 0; bool r = false;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &t)) {
+        r = GetTokenInformation(t, TokenElevation, &e, sizeof(e), &n) && e.TokenIsElevated;
+        CloseHandle(t);
+    }
+    return r;
+}
+
 static int Uninstall() {
+    // An install for all users has to be removed with administrator rights: ask Windows for them and run again.
+    bool machine = IsMachineInstall();
+    if (machine && !IsElevated()) {
+        wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        SHELLEXECUTEINFOW sei{ sizeof(sei) };
+        sei.lpVerb = L"runas"; sei.lpFile = exe; sei.lpParameters = L"--uninstall"; sei.nShow = SW_SHOWNORMAL;
+        if (!ShellExecuteExW(&sei)) MessageBoxW(nullptr, L"NeonNet is installed for all users. Removing it needs administrator rights.", L"NeonNet uninstall", MB_OK | MB_ICONWARNING);
+        return 0;
+    }
     if (MessageBoxW(nullptr, L"Uninstall NeonNet from this computer?", L"NeonNet uninstall",
                     MB_YESNO | MB_ICONQUESTION) != IDYES) return 0;
-    bool wipe = MessageBoxW(nullptr, L"Also delete browsing data (history, cookies, saved logins)?",
+    bool wipe = MessageBoxW(nullptr, machine ? L"Also delete your own browsing data (history, cookies, saved logins)?\nOther users of this computer keep theirs."
+                                             : L"Also delete browsing data (history, cookies, saved logins)?",
                             L"NeonNet uninstall", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
-    DeleteFileW((KnownFolder(FOLDERID_Programs) + L"\\" + SHORTCUT_NAME).c_str());
-    DeleteFileW((KnownFolder(FOLDERID_Desktop) + L"\\" + SHORTCUT_NAME).c_str());
+    std::wstring installDir = RegisteredInstallDir(machine ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER);
+    if (installDir.empty()) installDir = KnownFolder(FOLDERID_LocalAppData) + L"\\Programs\\" + APP_DIR_NAME;
+    DeleteFileW((KnownFolder(machine ? FOLDERID_CommonPrograms : FOLDERID_Programs) + L"\\" + SHORTCUT_NAME).c_str());
+    DeleteFileW((KnownFolder(machine ? FOLDERID_PublicDesktop : FOLDERID_Desktop) + L"\\" + SHORTCUT_NAME).c_str());
+    if (machine) { RegDeleteTreeW(HKEY_LOCAL_MACHINE, UNINSTALL_KEY); browserreg::Unregister(HKEY_LOCAL_MACHINE); }
     RegDeleteTreeW(HKEY_CURRENT_USER, UNINSTALL_KEY);
+    browserreg::Unregister(HKEY_CURRENT_USER);   // the browser entry this user may have added from the settings page
     RegDeleteTreeW(HKEY_CURRENT_USER, REG_KEY);
 
     std::wstring local = KnownFolder(FOLDERID_LocalAppData);
-    std::wstring installDir = local + L"\\Programs\\" + APP_DIR_NAME;
-    wchar_t self[MAX_PATH]; GetModuleFileNameW(nullptr, self, MAX_PATH);
-    PathRemoveFileSpecW(self);
+    std::wstring self = SelfDir();
     std::wstring script = L"/c timeout /t 3 /nobreak >nul";
-    if (_wcsicmp(self, installDir.c_str()) == 0) script += L" & rmdir /s /q \"" + installDir + L"\"";
+    if (SameDir(self, installDir) && installDir.size() > 12) script += L" & rmdir /s /q \"" + installDir + L"\"";
     script += L" & rmdir /s /q \"" + local + L"\\" + APP_DIR_NAME + L"\\Updates\"";
     if (wipe) script += L" & rmdir /s /q \"" + local + L"\\" + APP_DIR_NAME + L"\"";
+    // Tell the user first: the folder cannot be deleted while this program is still running, and the cleanup
+    // below only waits a few seconds, so it must start after the message was dismissed.
+    MessageBoxW(nullptr, L"NeonNet has been removed.", L"NeonNet uninstall", MB_OK | MB_ICONINFORMATION);
     if (script.find(L"rmdir") != std::wstring::npos) {
         wchar_t sys[MAX_PATH]; GetSystemDirectoryW(sys, MAX_PATH);
         ShellExecuteW(nullptr, L"open", (std::wstring(sys) + L"\\cmd.exe").c_str(), script.c_str(), sys, SW_HIDE);
     }
-    MessageBoxW(nullptr, L"NeonNet has been removed.", L"NeonNet uninstall", MB_OK | MB_ICONINFORMATION);
     return 0;
 }
 
