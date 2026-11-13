@@ -4,6 +4,8 @@ A synthwave / cyber-HUD themed web browser for Windows. Dark purple, neon pink a
 
 NeonNet ships its own Chromium engine. It does not need Edge, WebView2 or any other runtime.
 
+> Built and vibecoded with **Claude** and **Antigravity (Gemini)**.
+
 ![New tab page](docs/images/new-tab.png)
 
 ![Browsing](docs/images/browsing.png)
