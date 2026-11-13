@@ -156,6 +156,10 @@ The panel is a second UI browser, `g.panel`, showing `performance.html` on `chro
 
 The script learns its settings from the browser process: the renderer's `nn.pid` message (sent for every new page) is answered with `nn.cfg` (on, step, time), and `ApplySetting()` sends `nn.cfg` to the main frame of every tab when a smooth scrolling setting changes. The renderer keeps the script's receiving function in C++ (`g_cfgRecv`, by frame; registered through `__nnpc`, which the script removes from the global object), as for the password manager. Registry values: `SmoothScroll`, `SmoothStep` (70, 120 or 200: 120 means a 100 px wheel step moves 120 px) and `SmoothTime` (250, 400 or 700 ms).
 
+## Docked developer tools
+
+`OpenDevTools()` calls `ShowDevTools()` with `SetAsChild(g.hwnd, DevRect())`, so the tools are a child window of the NeonNet window instead of a popup. `DevRect()` is the lower 40% of the page area. `Tab::dev` holds the tools' browser (set in `DevToolsClient::OnAfterCreated`, cleared in `OnBeforeClose`); `Layout()` shrinks the page of a tab that has it and shows the tools only for the active tab. F12 closes them when open (`CloseDevTools()`).
+
 ## Site permissions and the lock panel
 
 `PERM_DEFS` lists the permissions NeonNet knows (key, label, the CEF permission and media flags that mean it). `PermKeys()` turns a request (`OnShowPermissionPrompt` or `OnRequestMediaAccessPermission`) into keys. `ShowDlgReq()` first looks each key up in the store (`g_sp`, origin -> key -> 1 allow / 2 block, guarded by `g_spMu`): any block denies, all allowed accepts, otherwise the themed dialog asks and the answer is stored for every key of the request. The store is `sitepermissions.txt` next to the password file (a plain list: origin, key, value; loaded by `SpLoad()`, not read or written in an incognito window).

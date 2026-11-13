@@ -125,6 +125,7 @@ struct PwPending { std::wstring origin, user, pass; ULONGLONG at = 0; };
 struct Tab {
     int id = 0;
     CefRefPtr<CefBrowser> browser;
+    CefRefPtr<CefBrowser> dev;   // its developer tools, docked below the page (null = closed)
     std::wstring title = L"NEW TAB";
     std::wstring url;
     std::wstring errorUrl;
@@ -447,6 +448,12 @@ static RECT ContentRect() {
     if (g.panelOpen) right = std::max((int)c.left + S(200), (int)c.right - S(PANEL_DIP));   // the panel takes the right edge
     return { c.left, c.bottom, right, s.top };
 }
+// Developer tools are docked in the window: the lower 40% of the page area while a tab has them open.
+static RECT DevRect() {
+    RECT c = ContentRect();
+    int h = std::max((int)((c.bottom - c.top) * 2 / 5), std::min((int)(c.bottom - c.top) / 2, S(160)));
+    return { c.left, c.bottom - h, c.right, c.bottom };
+}
 // The performance panel: right of the page, same height.
 static RECT PanelRect() {
     RECT c = ChromeRect(), s = StatusRect(), p = ContentRect();
@@ -495,7 +502,11 @@ static void Layout() {
     }
     if (g.panel) Place(g.panel, PanelRect(), g.panelOpen && !g.fullscreen);
     RECT content = ContentRect();
-    for (auto& t : g.tabs) Place(t->browser, content, t->id == g.active);
+    for (auto& t : g.tabs) {
+        RECT pr = content;
+        if (t->dev) { RECT dr = DevRect(); pr.bottom = dr.top; Place(t->dev, dr, t->id == g.active && !g.fullscreen); }
+        Place(t->browser, pr, t->id == g.active);
+    }
     UpdateRegion();
     InvalidateRect(g.hwnd, nullptr, FALSE);
 }
@@ -1211,11 +1222,31 @@ static void MaybeFinishClose() {
 
 class DevToolsClient : public CefClient, public CefLifeSpanHandler {
 public:
+    explicit DevToolsClient(int tabId) : tabId_(tabId) {}
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
-    void OnAfterCreated(CefRefPtr<CefBrowser>) override { g.devtools++; }
-    void OnBeforeClose(CefRefPtr<CefBrowser>) override { g.devtools--; MaybeFinishClose(); }
+    void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
+        g.devtools++;
+        if (Tab* t = FindTab(tabId_)) { t->dev = b; Layout(); }
+    }
+    void OnBeforeClose(CefRefPtr<CefBrowser>) override {
+        g.devtools--;
+        if (Tab* t = FindTab(tabId_)) { t->dev = nullptr; if (!g.closing) Layout(); }
+        MaybeFinishClose();
+    }
+private:
+    int tabId_;
     IMPLEMENT_REFCOUNTING(DevToolsClient);
 };
+
+// Opens (or, when already open, shows and points at an element of) the developer tools of a tab,
+// docked in the NeonNet window below the page.
+static void OpenDevTools(Tab* t, CefPoint at) {
+    if (!t || !t->browser) return;
+    RECT r = DevRect();
+    CefWindowInfo wi;
+    wi.SetAsChild(g.hwnd, CefRect(r.left, r.top, r.right - r.left, r.bottom - r.top));
+    t->browser->GetHost()->ShowDevTools(wi, new DevToolsClient(t->id), CefBrowserSettings(), at);
+}
 
 // One row of a NeonNet-themed menu (the ≡ menu and the right-click menu; see RunMenu below).
 struct MenuItem {
@@ -1994,9 +2025,7 @@ public:
             return true;
         }
         if (command_id == MENU_INSPECT) {
-            CefWindowInfo wi; wi.SetAsPopup(nullptr, "NeonNet DevTools");
-            browser->GetHost()->ShowDevTools(wi, new DevToolsClient(), CefBrowserSettings(),
-                                             CefPoint(params->GetXCoord(), params->GetYCoord()));
+            if (Tab* t = TabOf(browser)) OpenDevTools(t, CefPoint(params->GetXCoord(), params->GetYCoord()));
             return true;
         }
         return false;
@@ -2955,7 +2984,10 @@ static void ExecCmd(int cmd) {
     }
     case CMD_FULLSCREEN: g.fsUser = !g.fullscreen; if (!g.fsUser) g.fsElement = false; UpdateFullscreen(); break;
     case CMD_DEVTOOLS:
-        if (b) { CefWindowInfo wi; wi.SetAsPopup(nullptr, "NeonNet DevTools"); b->GetHost()->ShowDevTools(wi, new DevToolsClient(), CefBrowserSettings(), CefPoint()); }
+        if (Tab* t = Active()) {
+            if (t->dev) { t->browser->GetHost()->CloseDevTools(); FocusPage(); }   // F12 again closes them
+            else OpenDevTools(t, CefPoint());
+        }
         break;
     case CMD_ABOUT: ShowAbout(); break;
     case CMD_UPDATE_CHECK: StartUpdateCheck(true); break;
