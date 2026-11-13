@@ -20,6 +20,10 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <unordered_set>
+#include <mutex>
+#include <wincrypt.h>
+#pragma comment(lib, "crypt32.lib")
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -98,7 +102,7 @@ enum Cmd {
     CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
     CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE,
     CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_HISTORY,
-    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE
+    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS
 };
 enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW };
 
@@ -112,6 +116,9 @@ struct UpdateMsg {
 };
 enum { MENU_OPEN_LINK_TAB = MENU_ID_USER_FIRST, MENU_INSPECT, MENU_OPEN_PLAYER,
        MENU_VIEW_SOURCE, MENU_OPEN_IMAGE_TAB, MENU_OPEN_LINK_INCOGNITO, MENU_SEARCH_SELECTION };
+
+// A login the user just sent, waiting to see whether it worked before NeonNet offers to save it.
+struct PwPending { std::wstring origin, user, pass; ULONGLONG at = 0; };
 
 struct Tab {
     int id = 0;
@@ -134,6 +141,8 @@ struct Tab {
     ULONGLONG audioUntil = 0;      // the page said it is playing sound: audible until this tick (see MEDIA_HOOK_JS)
     bool audible = false;          // as last shown to the UI
     bool dirty = false;            // a text field on the page holds text the user typed: do not unload it
+    PwPending pw;
+    std::wstring upgradedFrom, upgradedTo;   // HTTPS-only mode: the http address asked for, and the https address tried instead
     std::wstring icon;             // address of the page's favicon (http/https), shown in the tab strip
     bool pinned = false;           // pinned tabs sit at the left, are narrow and come back at the next start
 };
@@ -145,9 +154,9 @@ struct ClosedTab { std::wstring url; int index; bool pinned = false; };
 // browser callback hands over one of these; it is shown in the NeonNet theme later, from the
 // window procedure (never inside the callback), and the callback is answered afterwards.
 struct DlgReq {
-    enum Kind { ALERT, CONFIRM, PROMPT, UNLOAD, PERM, MEDIA } kind = ALERT;
+    enum Kind { ALERT, CONFIRM, PROMPT, UNLOAD, PERM, MEDIA, PWSAVE } kind = ALERT;
     int tabId = 0;
-    std::wstring origin, message, defText;
+    std::wstring origin, message, defText, secret;   // secret: the password to save (PWSAVE), wiped after use
     bool isReload = false;
     uint32_t perms = 0;
     CefRefPtr<CefJSDialogCallback> js;
@@ -189,6 +198,13 @@ struct App {
     std::wstring alert;   // urgent status bar message (unsupported video / DRM), shown above everything else
     std::wstring startUrl;
     bool favicons = true;             // show site icons on tabs (registry ShowFavicons)
+    bool httpsOnly = false;           // HTTPS-only mode (registry HttpsOnly)
+    bool savePasswords = true;        // offer to save passwords (registry SavePasswords)
+    std::atomic<bool> blockAds{ false };   // block trackers and ads (registry BlockAds); atomic: read on the IO thread
+    std::atomic<int> blockedCount{ 0 };    // requests blocked since NeonNet started
+    std::set<std::wstring> certAllow;  // host:port the user chose to open despite a certificate error, until NeonNet closes
+    std::set<std::wstring> httpAllow;  // hosts the user chose to open over plain http (HTTPS-only mode), until NeonNet closes
+    std::set<std::wstring> warned;     // what NeonNet itself showed a warning for ("cert|host:port", "http|host"): only these can be proceeded
     std::deque<std::unique_ptr<DlgReq>> dlgQueue;   // dialogs waiting for the one on screen
     bool dlgBusy = false;
     std::map<std::wstring, int> permMemo;           // answers given to permission prompts since NeonNet started: 1 allow, 2 block
@@ -592,6 +608,221 @@ static std::wstring ErrorText(int code) {
     }
 }
 
+// scheme, lower-case host (without brackets or user name) and port of an address; port 0 = none given
+static void SplitUrl(const std::wstring& u, std::wstring& scheme, std::wstring& host, int& port) {
+    scheme.clear(); host.clear(); port = 0;
+    size_t s = u.find(L"://");
+    if (s == std::wstring::npos) return;
+    scheme = u.substr(0, s);
+    for (auto& c : scheme) c = (wchar_t)towlower(c);
+    std::wstring a = u.substr(s + 3);
+    a = a.substr(0, a.find_first_of(L"/?#"));
+    size_t at = a.rfind(L'@');
+    if (at != std::wstring::npos) a = a.substr(at + 1);
+    if (!a.empty() && a[0] == L'[') {
+        size_t e = a.find(L']');
+        if (e == std::wstring::npos) return;
+        host = a.substr(1, e - 1);
+        if (e + 1 < a.size() && a[e + 1] == L':') port = _wtoi(a.c_str() + e + 2);
+    } else {
+        size_t c = a.rfind(L':');
+        if (c != std::wstring::npos) { port = _wtoi(a.c_str() + c + 1); a.resize(c); }
+        host = a;
+    }
+    for (auto& c : host) c = (wchar_t)towlower(c);
+}
+
+// "host:port" with the default port filled in: what a certificate exception is kept under
+static std::wstring HostPortKey(const std::wstring& u) {
+    std::wstring sc, h; int p;
+    SplitUrl(u, sc, h, p);
+    if (!p) p = sc == L"http" ? 80 : 443;
+    return h + L":" + std::to_wstring(p);
+}
+static std::wstring HostOnly(const std::wstring& u) { std::wstring sc, h; int p; SplitUrl(u, sc, h, p); return h; }
+
+// Addresses HTTPS-only mode leaves alone: this computer, the local network and anything that is
+// not a registered name (address literals and single-word names cannot have a certificate).
+static bool HttpsExempt(const std::wstring& h) {
+    if (h.empty() || h.find(L'.') == std::wstring::npos || h.find(L':') != std::wstring::npos) return true;
+    auto ends = [&](const wchar_t* e) { size_t n = wcslen(e); return h.size() >= n && h.compare(h.size() - n, n, e) == 0; };
+    if (ends(L".localhost") || ends(L".local") || ends(L".lan") || ends(L".internal") || ends(L".home.arpa")) return true;
+    bool digits = true;
+    for (wchar_t c : h) if (!((c >= L'0' && c <= L'9') || c == L'.')) digits = false;
+    return digits;   // an IPv4 address
+}
+
+static bool IsCertError(int code) { return code <= -200 && code >= -219; }
+
+// ---------------------------------------------------------------------------
+// Saved passwords
+//
+// %LOCALAPPDATA%\NeonNet\passwords.dat. Every secret in it is encrypted with Windows DPAPI (the key
+// belongs to the signed-in Windows account; no other user or computer can open the file): a line per
+// saved login holds the site and user name as one encrypted blob and the password as another, and a
+// line per "never save for this site" holds the site as a blob. In memory only the password stays
+// encrypted: it is decrypted for the moment it is filled into a page, and a page never receives it
+// before the user has clicked a saved user name. Incognito windows neither save nor fill.
+
+static const BYTE PW_ENTROPY[] = "NeonNet passwords v1";
+
+static bool DpProtect(const std::string& plain, std::string& blob) {
+    DATA_BLOB in{ (DWORD)plain.size(), (BYTE*)plain.data() }, ent{ (DWORD)(sizeof(PW_ENTROPY) - 1), (BYTE*)PW_ENTROPY }, out{};
+    if (!CryptProtectData(&in, L"NeonNet", &ent, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out)) return false;
+    blob.assign((const char*)out.pbData, out.cbData);
+    LocalFree(out.pbData);
+    return true;
+}
+static bool DpUnprotect(const std::string& blob, std::string& plain) {
+    DATA_BLOB in{ (DWORD)blob.size(), (BYTE*)blob.data() }, ent{ (DWORD)(sizeof(PW_ENTROPY) - 1), (BYTE*)PW_ENTROPY }, out{};
+    if (!CryptUnprotectData(&in, nullptr, &ent, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out)) return false;
+    plain.assign((const char*)out.pbData, out.cbData);
+    SecureZeroMemory(out.pbData, out.cbData);
+    LocalFree(out.pbData);
+    return true;
+}
+static std::string B64(const std::string& s) { return CefBase64Encode(s.data(), s.size()).ToString(); }
+static bool UnB64(const std::string& s, std::string& out) {
+    CefRefPtr<CefBinaryValue> b = CefBase64Decode(s);
+    if (!b) return false;
+    out.assign(b->GetSize(), '\0');
+    if (!out.empty()) b->GetData(&out[0], out.size(), 0);
+    return true;
+}
+
+struct PwEntry { int id = 0; std::wstring origin, user; std::string passBlob; };
+static std::mutex g_pwMu;                 // the settings page reads the list on the IO thread
+static std::vector<PwEntry> g_pw;
+static std::set<std::wstring> g_pwNever;
+static int g_pwNextId = 1;
+
+// scheme://host[:port], the unit a saved login belongs to
+static std::wstring OriginOf(const std::wstring& u) {
+    std::wstring sc, h; int p;
+    SplitUrl(u, sc, h, p);
+    if (sc.empty() || h.empty()) return L"";
+    std::wstring o = sc + L"://" + (h.find(L':') != std::wstring::npos ? L"[" + h + L"]" : h);
+    if (p && !((sc == L"http" && p == 80) || (sc == L"https" && p == 443))) o += L":" + std::to_wstring(p);
+    return o;
+}
+
+static std::wstring PwPath() { return KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME + L"\\passwords.dat"; }
+
+static void PwSaveLocked() {
+    std::string text = "NEONNET-PASSWORDS 1\n";
+    for (auto& e : g_pw) {
+        std::string hdr;
+        if (DpProtect(Utf8(e.origin) + "\x1f" + Utf8(e.user), hdr)) text += "E\t" + B64(hdr) + "\t" + B64(e.passBlob) + "\n";
+    }
+    for (auto& o : g_pwNever) {
+        std::string b;
+        if (DpProtect(Utf8(o), b)) text += "N\t" + B64(b) + "\n";
+    }
+    std::wstring path = PwPath(), tmp = path + L".tmp";
+    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD w = 0;
+    bool ok = WriteFile(h, text.data(), (DWORD)text.size(), &w, nullptr) && w == text.size();
+    CloseHandle(h);
+    if (!ok || !MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str());
+}
+
+static void PwLoad() {
+    std::lock_guard<std::mutex> lk(g_pwMu);
+    g_pw.clear(); g_pwNever.clear();
+    HANDLE h = CreateFileW(PwPath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD size = GetFileSize(h, nullptr), got = 0;
+    std::string data;
+    if (size > 0 && size < 16 * 1024 * 1024) {
+        data.resize(size);
+        if (!ReadFile(h, &data[0], size, &got, nullptr) || got != size) data.clear();
+    }
+    CloseHandle(h);
+    size_t pos = data.find('\n');
+    if (pos == std::string::npos || data.compare(0, pos, "NEONNET-PASSWORDS 1") != 0) return;
+    for (++pos; pos < data.size();) {
+        size_t e = data.find('\n', pos);
+        if (e == std::string::npos) e = data.size();
+        std::string line = data.substr(pos, e - pos);
+        pos = e + 1;
+        std::vector<std::string> f;
+        for (size_t s = 0;;) { size_t t = line.find('\t', s); f.push_back(line.substr(s, t == std::string::npos ? std::string::npos : t - s)); if (t == std::string::npos) break; s = t + 1; }
+        std::string hdr, plain;
+        if (f.size() == 3 && f[0] == "E" && UnB64(f[1], hdr) && DpUnprotect(hdr, plain)) {
+            size_t sep = plain.find('\x1f');
+            PwEntry en;
+            en.id = g_pwNextId++;
+            en.origin = Wide(plain.substr(0, sep));
+            en.user = sep == std::string::npos ? L"" : Wide(plain.substr(sep + 1));
+            if (UnB64(f[2], en.passBlob) && !en.origin.empty()) g_pw.push_back(std::move(en));
+        } else if (f.size() == 2 && f[0] == "N" && UnB64(f[1], hdr) && DpUnprotect(hdr, plain)) {
+            g_pwNever.insert(Wide(plain));
+        }
+        if (g_pw.size() > 5000) break;
+    }
+}
+
+static std::vector<std::wstring> PwUsers(const std::wstring& origin) {
+    std::lock_guard<std::mutex> lk(g_pwMu);
+    std::vector<std::wstring> v;
+    for (auto& e : g_pw) if (e.origin == origin) v.push_back(e.user);
+    return v;
+}
+static bool PwFind(const std::wstring& origin, const std::wstring& user, std::wstring& pass) {
+    std::lock_guard<std::mutex> lk(g_pwMu);
+    for (auto& e : g_pw) {
+        if (e.origin != origin || e.user != user) continue;
+        std::string plain;
+        if (!DpUnprotect(e.passBlob, plain)) return false;
+        pass = Wide(plain);
+        SecureZeroMemory(&plain[0], plain.size());
+        return true;
+    }
+    return false;
+}
+static bool PwHas(const std::wstring& origin, const std::wstring& user) {
+    std::lock_guard<std::mutex> lk(g_pwMu);
+    for (auto& e : g_pw) if (e.origin == origin && e.user == user) return true;
+    return false;
+}
+static bool PwNeverHas(const std::wstring& origin) { std::lock_guard<std::mutex> lk(g_pwMu); return g_pwNever.count(origin) != 0; }
+static bool PwSame(const std::wstring& origin, const std::wstring& user, const std::wstring& pass) {
+    std::wstring cur;
+    if (!PwFind(origin, user, cur)) return false;
+    bool same = cur == pass;
+    SecureZeroMemory(&cur[0], cur.size() * sizeof(wchar_t));
+    return same;
+}
+static void PwStore(const std::wstring& origin, const std::wstring& user, const std::wstring& pass) {
+    std::string blob;
+    if (!DpProtect(Utf8(pass), blob)) return;
+    std::lock_guard<std::mutex> lk(g_pwMu);
+    for (auto& e : g_pw) if (e.origin == origin && e.user == user) { e.passBlob = blob; PwSaveLocked(); return; }
+    if (g_pw.size() >= 5000) return;
+    PwEntry en; en.id = g_pwNextId++; en.origin = origin; en.user = user; en.passBlob = blob;
+    g_pw.push_back(std::move(en));
+    PwSaveLocked();
+}
+static void PwDelete(int id) {
+    std::lock_guard<std::mutex> lk(g_pwMu);
+    g_pw.erase(std::remove_if(g_pw.begin(), g_pw.end(), [&](const PwEntry& e) { return e.id == id; }), g_pw.end());
+    PwSaveLocked();
+}
+static void PwNeverAdd(const std::wstring& origin) { std::lock_guard<std::mutex> lk(g_pwMu); g_pwNever.insert(origin); PwSaveLocked(); }
+static void PwNeverRemove(const std::wstring& origin) { std::lock_guard<std::mutex> lk(g_pwMu); g_pwNever.erase(origin); PwSaveLocked(); }
+static void PwClear() { std::lock_guard<std::mutex> lk(g_pwMu); g_pw.clear(); PwSaveLocked(); }
+static size_t PwCount() { std::lock_guard<std::mutex> lk(g_pwMu); return g_pw.size(); }
+static std::string PwJsonList();   // below, next to JsonUtf8
+
+
+// The warning page (certificate errors, HTTPS-only mode). It is a NeonNet page, so its buttons can
+// talk to the app; "kind" is "cert" or "https", "url" the address the user asked for.
+static std::wstring WarningPageUrl(const wchar_t* kind, const std::wstring& url, int code) {
+    return std::wstring(L"https://neonnet.ui/warning.html?kind=") + kind + L"&code=" + std::to_wstring(code) +
+           L"&url=" + CefURIEncode(url, false).ToWString();
+}
+
 static std::wstring ErrorPageUrl(const std::wstring& url, int code) {
     std::wstring h =
         L"<!doctype html><html><head><meta charset='utf-8'><title>SIGNAL LOST</title><style>"
@@ -907,6 +1138,88 @@ static bool IsAttachment(const std::wstring& cd) {
 static std::vector<CefRefPtr<CefBrowser>> g_all;   // every live browser we own (for shutdown)
 static size_t OpenBrowsers() { return g_all.size(); }
 
+// ---------------------------------------------------------------------------
+// Tracker and ad blocking
+//
+// ui/blocklist.txt (embedded) lists advertising and tracking domains. A request to a listed domain
+// (or one of its subdomains) is cancelled when the page that makes it belongs to another site, and
+// never for the page itself: main frame navigations and a site's own requests are left alone.
+
+static std::unordered_set<std::string> g_blocklist;   // filled once (the first time blocking is on), then only read
+static std::atomic<bool> g_blocklistReady{ false };    // set after the fill: the IO thread reads the list only then
+
+static void LoadBlocklist() {
+    if (g_blocklistReady.load()) return;
+    std::string text;
+    if (!LoadUi(IDR_BLOCKLIST, text)) return;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        size_t e = text.find('\n', pos);
+        if (e == std::string::npos) e = text.size();
+        std::string line = text.substr(pos, e - pos);
+        pos = e + 1;
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) line.pop_back();
+        if (line.empty() || line[0] == '#') continue;
+        for (auto& c : line) c = (char)tolower((unsigned char)c);
+        g_blocklist.insert(line);
+    }
+    g_blocklistReady = true;
+}
+
+// The part of a host name a site is known by: example.com, or example.co.uk for the common two-part endings.
+static std::string SiteOf(const std::string& host) {
+    std::vector<std::string> parts;
+    for (size_t s = 0;;) {
+        size_t d = host.find('.', s);
+        parts.push_back(host.substr(s, d == std::string::npos ? std::string::npos : d - s));
+        if (d == std::string::npos) break;
+        s = d + 1;
+    }
+    size_t n = parts.size();
+    if (n <= 2) return host;
+    static const char* second[] = { "co", "com", "net", "org", "gov", "edu", "ac", "or", "go" };
+    bool two = parts[n - 1].size() == 2;
+    bool sld = false;
+    for (auto* x : second) if (parts[n - 2] == x) sld = true;
+    size_t keep = (two && sld) ? 3 : 2;
+    std::string r;
+    for (size_t i = n - keep; i < n; i++) { if (!r.empty()) r += '.'; r += parts[i]; }
+    return r;
+}
+
+static bool IsBlockedHost(const std::string& host) {
+    for (size_t s = 0; s < host.size();) {
+        if (host.find('.', s) == std::string::npos) break;   // never the bare ending (com, uk ...)
+        if (g_blocklist.count(host.substr(s))) return true;
+        size_t d = host.find('.', s);
+        if (d == std::string::npos) break;
+        s = d + 1;
+    }
+    return false;
+}
+
+class BlockHandler : public CefResourceRequestHandler {
+public:
+    ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefRefPtr<CefRequest>, CefRefPtr<CefCallback>) override {
+        g.blockedCount++;
+        return RV_CANCEL;
+    }
+    IMPLEMENT_REFCOUNTING(BlockHandler);
+};
+
+// Loads an address in a tab, from a task (not from inside the browser's own callback).
+class NavTask : public CefTask {
+public:
+    NavTask(int tabId, std::wstring url) : id_(tabId), url_(std::move(url)) {}
+    void Execute() override {
+        Tab* t = FindTab(id_);
+        if (t && t->browser) t->browser->GetMainFrame()->LoadURL(url_);
+    }
+private:
+    int id_; std::wstring url_;
+    IMPLEMENT_REFCOUNTING(NavTask);
+};
+
 class Client : public CefClient, public CefLifeSpanHandler, public CefDisplayHandler, public CefLoadHandler,
                public CefKeyboardHandler, public CefDownloadHandler, public CefContextMenuHandler,
                public CefRequestHandler, public CefFindHandler, public CefJSDialogHandler, public CefPermissionHandler {
@@ -1112,11 +1425,65 @@ public:
         if (!t) return;
         std::wstring url = failedUrl.ToWString();
         if (url.rfind(UI_HOST, 0) == 0 || url.rfind(L"data:", 0) == 0) return;
-        t->errorUrl = url;
+        std::wstring shown = url, page;
+        if (!t->upgradedTo.empty() && HostPortKey(url) == HostPortKey(t->upgradedTo)) {
+            // HTTPS-only mode: the secure address did not work, so ask before using plain http
+            shown = t->upgradedFrom;
+            g.warned.insert(L"http|" + HostOnly(shown));
+            page = WarningPageUrl(L"https", shown, (int)errorCode);
+            t->upgradedFrom.clear(); t->upgradedTo.clear();
+        } else if (IsCertError((int)errorCode)) {
+            g.warned.insert(L"cert|" + HostPortKey(url));
+            page = WarningPageUrl(L"cert", url, (int)errorCode);
+        } else page = ErrorPageUrl(url, (int)errorCode);
+        t->errorUrl = shown;
         t->errorPending = true;
-        store::Forget(t->histId, url);   // failed loads stay out of the history
+        store::Forget(t->histId, shown);   // failed loads stay out of the history
         t->histId = 0;
-        frame->LoadURL(ErrorPageUrl(url, (int)errorCode));
+        frame->LoadURL(page);
+    }
+
+    // --- certificates and HTTPS-only mode ---
+    bool OnCertificateError(CefRefPtr<CefBrowser> browser, cef_errorcode_t, const CefString& request_url, CefRefPtr<CefSSLInfo>,
+                            CefRefPtr<CefCallback> callback) override {
+        // Not allowed: the load is cancelled and OnLoadError() shows the warning page. Allowed: the user
+        // chose "proceed" for this host earlier in this run.
+        if (IsUiBrowser(browser) || !callback) return false;
+        if (g.certAllow.count(HostPortKey(request_url.ToWString()))) { callback->Continue(); return true; }
+        return false;
+    }
+    // Runs on the IO thread: only the atomics and the read-only block list are used here.
+    CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, CefRefPtr<CefRequest> request,
+                                                                   bool is_navigation, bool, const CefString&, bool&) override {
+        if (!g.blockAds.load() || is_navigation || !browser || !g_blocklistReady.load()) return nullptr;
+        int bid = browser->GetIdentifier();
+        if (bid == g.chromeId.load() || bid == g.panelId.load()) return nullptr;
+        std::wstring ru = request->GetURL().ToWString();
+        if (ru.rfind(L"http", 0) != 0) return nullptr;
+        std::wstring sc, rh; int rp;
+        SplitUrl(ru, sc, rh, rp);
+        std::string reqHost = Utf8(rh);
+        if (!IsBlockedHost(reqHost)) return nullptr;
+        // the site that is open, from its main frame
+        std::wstring page = browser->GetMainFrame() ? browser->GetMainFrame()->GetURL().ToWString() : L"";
+        std::wstring pHost = HostOnly(page);
+        if (page.rfind(L"https://neonnet.ui", 0) == 0 || (!pHost.empty() && SiteOf(Utf8(pHost)) == SiteOf(reqHost))) return nullptr;   // first party
+        static CefRefPtr<BlockHandler> handler = new BlockHandler();
+        return handler;
+    }
+    bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool, bool) override {
+        if (!frame->IsMain() || IsUiBrowser(browser)) return false;
+        Tab* t = TabOf(browser);
+        std::wstring url = request->GetURL().ToWString();
+        if (t && !t->upgradedTo.empty() && url != t->upgradedTo) { t->upgradedFrom.clear(); t->upgradedTo.clear(); }   // another page
+        if (!g.httpsOnly || !t || url.rfind(L"http://", 0) != 0 || request->GetMethod() != "GET") return false;
+        std::wstring host = HostOnly(url);
+        if (HttpsExempt(host) || g.httpAllow.count(host)) return false;
+        // upgrade: try the same address over https, and keep the original for the warning page
+        t->upgradedFrom = url;
+        t->upgradedTo = L"https://" + url.substr(7);
+        CefPostTask(TID_UI, new NavTask(t->id, t->upgradedTo));
+        return true;
     }
 
     // --- request ---
@@ -1302,6 +1669,58 @@ public:
         if (!PostMessageW(g.hwnd, WM_APP_CTXMENU, 0, (LPARAM)m)) { delete m; return false; }
         return true;
     }
+    // Password manager messages from a page (see PW_HOOK_JS). The browser process decides everything from
+    // what it knows itself: the address of the frame, never what the page says its address is.
+    void OnPw(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefListValue> a) {
+        if (g.incognito || !frame || !frame->IsMain()) return;
+        Tab* t = TabOf(browser);
+        if (!t) return;
+        std::wstring origin = OriginOf(frame->GetURL().ToWString());
+        if (origin.rfind(L"http://", 0) != 0 && origin.rfind(L"https://", 0) != 0) return;
+        std::string kind = a->GetString(0);
+        auto reply = [&](const char* k, const std::wstring& x) {
+            CefRefPtr<CefProcessMessage> m = CefProcessMessage::Create("nn.pw");
+            CefRefPtr<CefListValue> l = m->GetArgumentList();
+            l->SetString(0, k); l->SetString(1, x); l->SetString(2, std::wstring());
+            return m;
+        };
+        auto wipe = [](PwPending& p) { if (!p.pass.empty()) SecureZeroMemory(&p.pass[0], p.pass.size() * sizeof(wchar_t)); p = PwPending(); };
+        auto ask = [&]() {
+            if (t->pw.origin.empty() || GetTickCount64() - t->pw.at > 25000) { wipe(t->pw); return; }
+            auto* r = new DlgReq;
+            r->kind = DlgReq::PWSAVE; r->tabId = t->id; r->origin = t->pw.origin; r->defText = t->pw.user; r->secret = t->pw.pass;
+            wipe(t->pw);
+            if (!QueueDialog(r)) {}   // QueueDialog deletes r when it fails
+        };
+        if (kind == "list") {
+            std::vector<std::wstring> users = PwUsers(origin);
+            if (users.empty()) return;
+            std::wstring j = L"[";
+            for (size_t i = 0; i < users.size(); i++) { if (i) j += L","; j += JsonStr(users[i]); }
+            frame->SendProcessMessage(PID_RENDERER, reply("list", j + L"]"));
+        } else if (kind == "get") {
+            std::wstring user = a->GetString(1).ToWString(), pass;
+            if (!PwFind(origin, user, pass)) return;
+            CefRefPtr<CefProcessMessage> m = reply("fill", user);
+            m->GetArgumentList()->SetString(2, pass);
+            frame->SendProcessMessage(PID_RENDERER, m);
+            SecureZeroMemory(&pass[0], pass.size() * sizeof(wchar_t));
+        } else if (kind == "submit") {
+            if (!g.savePasswords || PwNeverHas(origin)) return;
+            CefRefPtr<CefValue> v = CefParseJSON(a->GetString(1), JSON_PARSER_RFC);
+            if (!v || v->GetType() != VTYPE_DICTIONARY) return;
+            CefRefPtr<CefDictionaryValue> d = v->GetDictionary();
+            std::wstring u = d->GetString("u").ToWString(), p = d->GetString("p").ToWString();
+            if (p.empty() || p.size() > 500 || u.size() > 300 || PwSame(origin, u, p)) return;
+            wipe(t->pw);
+            t->pw.origin = origin; t->pw.user = u; t->pw.pass = p; t->pw.at = GetTickCount64();
+        } else if (kind == "ok") {
+            ask();   // the login form went away on the same page
+        } else if (kind == "page") {
+            if (t->pw.origin.empty()) return;
+            if (a->GetString(1) == "0") ask(); else wipe(t->pw);   // a new page with no password field: the login worked
+        }
+    }
     // The renderer reports videos this build cannot play and sites that ask for DRM.
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId,
                                   CefRefPtr<CefProcessMessage> message) override {
@@ -1309,6 +1728,7 @@ public:
             if (Tab* pt = TabOf(browser)) { pt->pid = (DWORD)message->GetArgumentList()->GetInt(0); ApplyBackgroundLimit(); }
             return true;
         }
+        if (message->GetName() == "nn.pw") { OnPw(browser, frame, message->GetArgumentList()); return true; }
         if (message->GetName() != "nn.media") return false;
         std::string kind = message->GetArgumentList()->GetString(0);
         if (kind == "audio") {   // a media element in the page is playing sound; repeated every second while it does
@@ -1460,6 +1880,19 @@ static std::string JsonUtf8(const std::wstring& w) {
     return o + "\"";
 }
 
+static std::string PwJsonList() {
+    std::lock_guard<std::mutex> lk(g_pwMu);
+    std::string o = "{\"saved\":[";
+    for (size_t i = 0; i < g_pw.size(); i++) {
+        if (i) o += ",";
+        o += "{\"id\":" + std::to_string(g_pw[i].id) + ",\"origin\":" + JsonUtf8(g_pw[i].origin) + ",\"user\":" + JsonUtf8(g_pw[i].user) + "}";
+    }
+    o += "],\"never\":[";
+    bool first = true;
+    for (const auto& n : g_pwNever) { if (!first) o += ","; first = false; o += JsonUtf8(n); }
+    return o + "]}";
+}
+
 // Settings for the settings page. Runs on the IO thread: only atomics and the registry.
 static std::string SettingsJson() {
     auto b = [](bool v) { return v ? "true" : "false"; };
@@ -1472,7 +1905,7 @@ static std::string SettingsJson() {
                             std::to_wstring(cef_version_info(6)) + L"." + std::to_wstring(cef_version_info(7));
     o += std::string("],\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
          ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
-         ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
+         ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
          ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
     return o;
@@ -1529,12 +1962,17 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         WPARAM act = path == L"api/downloads/cancel" ? DLA_CANCEL : path == L"api/downloads/open" ? DLA_OPEN : DLA_SHOW;
         PostMessageW(g.hwnd, WM_APP_DOWNLOAD, act, (LPARAM)id);
     }
+    else if (path == L"api/passwords") out = PwJsonList();
+    else if (path == L"api/passwords/delete") PwDelete((int)id);
+    else if (path == L"api/passwords/never/remove") PwNeverRemove(QueryParam(query, L"origin"));
+    else if (path == L"api/passwords/clear") PwClear();
     else if (path == L"api/settings") out = SettingsJson();
     else if (path == L"api/settings/set") {
         std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
         bool ok = false;
         if (key == L"search") { for (const auto& e : SEARCH_ENGINES) if (val == e.id) ok = true; }
-        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons") ok = (val == L"0" || val == L"1");
+        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons" || key == L"httpsOnly" || key == L"blockAds" || key == L"savePasswords") ok = (val == L"0" || val == L"1");
+        else if (key == L"proceed") ok = val.size() < 2100 && (val.rfind(L"cert|https://", 0) == 0 || val.rfind(L"http|http://", 0) == 0);
         else if (key == L"home") {
             std::wstring low = val; for (auto& ch : low) ch = towlower(ch);
             ok = val.empty() || (val.size() < 500 && (low.rfind(L"http://", 0) == 0 || low.rfind(L"https://", 0) == 0 || low.rfind(L"file:///", 0) == 0));
@@ -1592,6 +2030,8 @@ public:
         else if (path == L"downloads.html") id = IDR_DOWNLOADS;
         else if (path == L"settings.html") id = IDR_SETTINGS;
         else if (path == L"performance.html") id = IDR_PERFORMANCE;
+        else if (path == L"warning.html") id = IDR_WARNING;
+        else if (path == L"passwords.html") id = IDR_PASSWORDS;
         std::string body;
         if (id && LoadUi(id, body)) return new StringResource(std::move(body), "text/html", 200);
         // Unknown neonnet:// page: a themed page with a proper title (the tab would otherwise
@@ -2268,6 +2708,15 @@ static void ExecCmd(int cmd) {
     case CMD_ZOOMIN: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_IN); break;
     case CMD_ZOOMOUT: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_OUT); break;
     case CMD_ZOOMRESET: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_RESET); break;
+    case CMD_BLOCKADS: {
+        bool on = !g.blockAds.load();
+        if (on) LoadBlocklist();   // about 82 000 names: only read into memory when blocking is wanted
+        g.blockAds = on;
+        DWORD v = on ? 1 : 0;
+        RegSetBin(L"BlockAds", REG_DWORD, &v, sizeof(v));
+        if (g.chrome) ShowAlert(on ? L"TRACKERS AND ADS BLOCKED - RELOAD A PAGE TO SEE THE EFFECT" : L"TRACKER AND AD BLOCKING IS OFF");
+        break;
+    }
     case CMD_SCAN: {
         g.scan = !g.scan;
         DWORD v = g.scan ? 1 : 0;
@@ -2871,6 +3320,15 @@ static void ShowDlgReq(DlgReq& r) {
         st.message = r.isReload ? L"Reload this site?\nChanges you made may not be saved." : L"Leave this site?\nChanges you made may not be saved.";
         st.buttons = { { r.isReload ? L"RELOAD" : L"LEAVE", 1 }, { L"STAY", 0 } }; st.defId = 1; st.cancelId = 0;
         break;
+    case DlgReq::PWSAVE: {
+        bool exists = PwHas(r.origin, r.defText);
+        st.title = host + (exists ? L" - UPDATE PASSWORD?" : L" - SAVE PASSWORD?");
+        st.message = (exists ? L"Replace the saved password for " : L"Save the password for ") + (r.defText.empty() ? std::wstring(L"this account") : r.defText) +
+                     L" on " + r.origin + L"?" + (r.origin.rfind(L"http://", 0) == 0 ? L"\nThis site is not encrypted (http)." : L"") +
+                     L"\nIt is stored encrypted with your Windows account.";
+        st.buttons = { { exists ? L"UPDATE" : L"SAVE", 1 }, { L"NEVER FOR THIS SITE", 2 }, { L"NOT NOW", 0 } }; st.defId = 1; st.cancelId = 0;
+        break;
+    }
     case DlgReq::PERM: case DlgReq::MEDIA:
         st.title = host + L" WANTS TO";
         st.message = PermissionLines(r.kind == DlgReq::MEDIA, r.perms);
@@ -2883,6 +3341,10 @@ static void ShowDlgReq(DlgReq& r) {
     case DlgReq::ALERT: case DlgReq::CONFIRM: r.js->Continue(res == 1, CefString()); break;
     case DlgReq::PROMPT: r.js->Continue(res == 1, st.fields[0].value); break;
     case DlgReq::UNLOAD: r.js->Continue(res == 1, CefString()); break;
+    case DlgReq::PWSAVE:
+        if (res == 1) PwStore(r.origin, r.defText, r.secret); else if (res == 2) PwNeverAdd(r.origin);
+        if (!r.secret.empty()) SecureZeroMemory(&r.secret[0], r.secret.size() * sizeof(wchar_t));
+        break;
     case DlgReq::PERM:
         if (res) g.permMemo[memo] = res;
         r.perm->Continue(res == 1 ? CEF_PERMISSION_RESULT_ACCEPT : res == 2 ? CEF_PERMISSION_RESULT_DENY : CEF_PERMISSION_RESULT_DISMISS);
@@ -2937,6 +3399,7 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
     add(CMD_ZOOMRESET, L"Reset zoom", L"Ctrl+0");
     sep();
     add(CMD_PRINT, L"Print", L"Ctrl+P");
+    add(CMD_BLOCKADS, L"Block trackers and ads", L"", false, g.blockAds.load());
     add(CMD_SCAN, L"Scanlines", L"", false, g.scan);
     add(CMD_FULLSCREEN, L"Fullscreen", L"F11", false, g.fullscreen);
     add(CMD_DEVTOOLS, L"Developer tools", L"F12");
@@ -3267,6 +3730,83 @@ static const char* MEDIA_HOOK_JS =
     "['input','change'].forEach(function(n){document.addEventListener(n,function(){clearTimeout(dt);dt=setTimeout(scan,500);},true);});}catch(e){}"
     "})();";
 
+static const char* PW_HOOK_JS = R"NNJS(
+(function(){
+var send=window.__nnp,reg=window.__nnpr;
+try{delete window.__nnp;delete window.__nnpr;}catch(e){}
+if(typeof send!=='function'||typeof reg!=='function'||window!==window.top)return;
+var users=null,asked=false,focusEl=null,host=null,lastSub=0;
+function vis(e){var s=e.getBoundingClientRect();return s.width>0&&s.height>0;}
+function isPw(e){return !!e&&e.tagName==='INPUT'&&String(e.type).toLowerCase()==='password';}
+function pwIn(scope){var q=scope.querySelectorAll('input[type=password]');for(var i=0;i<q.length;i++)if(vis(q[i]))return q[i];return null;}
+function userOf(pw){var sc=pw.form||document,q=sc.querySelectorAll('input'),p=null;
+for(var i=0;i<q.length;i++){var e=q[i];if(e===pw)break;var t=String(e.type||'text').toLowerCase();
+if((t==='text'||t==='email'||t==='tel')&&vis(e)&&!e.disabled)p=e;}return p;}
+function setv(e,v){try{var d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');d.set.call(e,v);
+e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));}catch(x){}}
+function hide(){if(host){host.remove();host=null;}}
+// the list of saved user names, shown under the field the user clicked into (closed shadow DOM: the page cannot read it)
+function show(list,el){hide();if(!list.length||document.activeElement!==el)return;
+host=document.createElement('div');var sh=host.attachShadow({mode:'closed'});
+var st=document.createElement('style');
+st.textContent='div{font:13px Consolas,monospace;background:#0a0420;border:1px solid #00e5ff;color:#e8d8ff;box-shadow:0 4px 18px #000a}'
++'b{display:block;padding:3px 10px;color:#ffd600;font-weight:normal;font-size:11px;letter-spacing:1px}'
++'a{display:block;padding:7px 10px;cursor:pointer}a:hover{background:#00e5ff;color:#12062c}';
+var box=document.createElement('div');var h=document.createElement('b');h.textContent='> SAVED PASSWORDS';box.appendChild(h);
+list.forEach(function(u){var a=document.createElement('a');a.textContent=u||'(no user name)';
+a.addEventListener('mousedown',function(e){e.preventDefault();});
+a.addEventListener('click',function(e){if(!e.isTrusted)return;hide();try{send('get',u);}catch(x){}});box.appendChild(a);});
+sh.appendChild(st);sh.appendChild(box);
+var r=el.getBoundingClientRect();
+host.style.cssText='all:initial;position:fixed;z-index:2147483647;left:'+Math.max(0,r.left)+'px;top:'+(r.bottom+2)+'px;min-width:'+Math.max(180,r.width)+'px';
+(document.body||document.documentElement).appendChild(host);}
+reg(function(kind,a,b){
+if(kind==='list'){try{users=JSON.parse(a);}catch(x){users=[];}show(users,focusEl);}
+else if(kind==='fill'){var pw=pwIn(document);if(!pw)return;var u=userOf(pw);if(u&&a)setv(u,a);setv(pw,b);}
+});
+document.addEventListener('focusin',function(e){var el=e.target;if(!el||el.tagName!=='INPUT')return;
+var pw=isPw(el)?el:(el.form?pwIn(el.form):null);if(!pw){hide();return;}
+if(!isPw(el)&&userOf(pw)!==el){hide();return;}
+focusEl=el;if(users===null&&!asked){asked=true;try{send('list');}catch(x){}}else if(users)show(users,el);},true);
+document.addEventListener('mousedown',function(e){if(host&&e.target!==host)hide();},true);
+document.addEventListener('keydown',function(e){if(e.key==='Escape')hide();},true);
+// a login being sent: remember what was typed, the browser process asks to save it once the login worked
+function watch(pw){var n=0,iv=setInterval(function(){n++;if(!pw.isConnected||!vis(pw)){clearInterval(iv);try{send('ok');}catch(x){}}else if(n>10)clearInterval(iv);},1000);}
+function snap(sc){var pw=sc&&pwIn(sc);if(!pw||!pw.value)return;var now=Date.now();if(now-lastSub<1500)return;lastSub=now;
+var u=userOf(pw);try{send('submit',JSON.stringify({u:u?u.value:'',p:pw.value}));}catch(x){}watch(pw);}
+document.addEventListener('submit',function(e){if(e.isTrusted)snap(e.target);},true);
+document.addEventListener('click',function(e){var t=e.target;if(!e.isTrusted||!t||!t.closest)return;
+var b=t.closest('button,input[type=submit],input[type=button],[role=button]');if(!b)return;snap(b.form||b.closest('form')||document);},true);
+document.addEventListener('keydown',function(e){if(e.key==='Enter'&&e.isTrusted&&isPw(e.target))snap(e.target.form||document);},true);
+// every page reports whether it shows a password field: a page without one after a login means the login worked
+function page(){setTimeout(function(){try{send('page',pwIn(document)?'1':'0');}catch(x){}},800);}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',page);else page();
+})();
+)NNJS";
+
+// Renderer side of the password manager. "send" passes a message to the browser process; "reg" gives the
+// renderer the page function that receives the answers (it is kept here, out of the page's reach).
+struct PwRecv { CefRefPtr<CefV8Context> ctx; CefRefPtr<CefV8Value> fn; };
+static std::map<std::string, PwRecv> g_pwRecv;   // renderer process: by frame
+
+class PwReporter : public CefV8Handler {
+public:
+    bool Execute(const CefString& name, CefRefPtr<CefV8Value>, const CefV8ValueList& args, CefRefPtr<CefV8Value>&, CefString&) override {
+        CefRefPtr<CefV8Context> ctx = CefV8Context::GetCurrentContext();
+        if (!ctx || !ctx->GetFrame() || !ctx->GetFrame()->IsMain()) return true;
+        if (name == "reg") {
+            if (args.size() == 1 && args[0]->IsFunction()) g_pwRecv[ctx->GetFrame()->GetIdentifier().ToString()] = { ctx, args[0] };
+            return true;
+        }
+        if (args.empty() || args.size() > 3 || !args[0]->IsString()) return true;
+        CefRefPtr<CefProcessMessage> msg = CefProcessMessage::Create("nn.pw");
+        for (size_t i = 0; i < args.size(); i++) if (args[i]->IsString()) msg->GetArgumentList()->SetString(i, args[i]->GetStringValue());
+        ctx->GetFrame()->SendProcessMessage(PID_BROWSER, msg);
+        return true;
+    }
+    IMPLEMENT_REFCOUNTING(PwReporter);
+};
+
 class NeonApp : public CefApp, public CefBrowserProcessHandler, public CefRenderProcessHandler {
 public:
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
@@ -3285,6 +3825,28 @@ public:
         context->GetGlobal()->SetValue("__nn", CefV8Value::CreateFunction("r", new MediaReporter()), V8_PROPERTY_ATTRIBUTE_NONE);
         CefRefPtr<CefV8Value> ret; CefRefPtr<CefV8Exception> ex;
         context->Eval(MEDIA_HOOK_JS, "", 0, ret, ex);
+        if (frame->IsMain()) {
+            CefRefPtr<PwReporter> pw = new PwReporter();
+            context->GetGlobal()->SetValue("__nnp", CefV8Value::CreateFunction("send", pw), V8_PROPERTY_ATTRIBUTE_NONE);
+            context->GetGlobal()->SetValue("__nnpr", CefV8Value::CreateFunction("reg", pw), V8_PROPERTY_ATTRIBUTE_NONE);
+            context->Eval(PW_HOOK_JS, "", 0, ret, ex);
+        }
+    }
+    void OnContextReleased(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context>) override {
+        g_pwRecv.erase(frame->GetIdentifier().ToString());
+    }
+    // The browser process answers the password manager: the list of saved user names, or the login to fill in.
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefProcessId, CefRefPtr<CefProcessMessage> message) override {
+        if (message->GetName() != "nn.pw") return false;
+        auto it = g_pwRecv.find(frame->GetIdentifier().ToString());
+        if (it == g_pwRecv.end()) return true;
+        CefRefPtr<CefListValue> a = message->GetArgumentList();
+        CefV8ValueList args;
+        for (size_t i = 0; i < 3; i++) args.push_back(CefV8Value::CreateString(a->GetString(i)));
+        it->second.ctx->Enter();
+        it->second.fn->ExecuteFunction(nullptr, args);
+        it->second.ctx->Exit();
+        return true;
     }
 
     void OnBeforeCommandLineProcessing(const CefString& process_type, CefRefPtr<CefCommandLine> cl) override {
@@ -3310,6 +3872,20 @@ public:
         noBubble->SetBool(false);
         CefRequestContext::GetGlobalContext()->SetPreference("download_bubble.partial_view_enabled", noBubble, err);
 
+        // Chromium's own password manager and autofill show unthemed bubbles ("Save password?", "Save
+        // address?") and would keep a second, unprotected copy of what NeonNet's password manager holds.
+        auto noAutofill = [](CefRefPtr<CefRequestContext> ctx) {
+            static const char* prefs[] = { "credentials_enable_service", "profile.password_manager_enabled", "credentials_enable_autosignin",
+                                           "autofill.credit_card_enabled", "autofill.profile_enabled" };
+            for (const char* p : prefs) {
+                CefRefPtr<CefValue> off = CefValue::Create();
+                off->SetBool(false);
+                CefString e;
+                ctx->SetPreference(p, off, e);
+            }
+        };
+        noAutofill(CefRequestContext::GetGlobalContext());
+
         CefRegisterSchemeHandlerFactory("https", "neonnet.ui", new UiSchemeFactory());
         CefRegisterSchemeHandlerFactory("https", "chrome.neonnet.ui", new UiSchemeFactory());
         if (g.incognito) {
@@ -3319,6 +3895,7 @@ public:
             CefRequestContextSettings rs;
             g.reqCtx = CefRequestContext::CreateContext(rs, nullptr);
             g.reqCtx->SetPreference("download_bubble.partial_view_enabled", noBubble, err);
+            noAutofill(g.reqCtx);
             g.reqCtx->RegisterSchemeHandlerFactory("https", "neonnet.ui", new UiSchemeFactory());
             g.reqCtx->RegisterSchemeHandlerFactory("https", "chrome.neonnet.ui", new UiSchemeFactory());
         }
@@ -3425,6 +4002,26 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
     } else if (key == L"askDownload") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"AskDownload", REG_DWORD, &v, sizeof(v));
+    } else if (key == L"httpsOnly") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"HttpsOnly", REG_DWORD, &v, sizeof(v));
+        g.httpsOnly = v != 0;
+    } else if (key == L"savePasswords") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"SavePasswords", REG_DWORD, &v, sizeof(v));
+        g.savePasswords = v != 0;
+    } else if (key == L"blockAds") {
+        if ((val == L"1") != g.blockAds.load()) ExecCmd(CMD_BLOCKADS);
+    } else if (key == L"proceed") {
+        // "cert|<url>" or "http|<url>" from the warning page. Only what NeonNet itself warned about
+        // counts, so a web page that links to the warning page cannot open an exception.
+        bool cert = val.rfind(L"cert|", 0) == 0;
+        std::wstring url = val.substr(val.find(L'|') + 1);
+        std::wstring key2 = cert ? HostPortKey(url) : HostOnly(url);
+        if (g.warned.count((cert ? L"cert|" : L"http|") + key2)) {
+            if (cert) g.certAllow.insert(key2); else g.httpAllow.insert(key2);
+            // the page that sent this stays on screen until it navigates itself
+        }
     } else if (key == L"favicons") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"ShowFavicons", REG_DWORD, &v, sizeof(v));
@@ -3836,6 +4433,11 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     EnableDarkMenus();
     g.scan = RegGetDword(L"Scanlines", 1) != 0;
     g.favicons = RegGetDword(L"ShowFavicons", 1) != 0;
+    g.httpsOnly = RegGetDword(L"HttpsOnly", 0) != 0;
+    g.savePasswords = RegGetDword(L"SavePasswords", 1) != 0;
+    if (!g.incognito) PwLoad();
+    g.blockAds = RegGetDword(L"BlockAds", 0) != 0;
+    if (g.blockAds) LoadBlocklist();
     { DWORD r = RegGetDword(L"RamLimitMB", 0); g.ramLimitMB = (r >= 512 && r <= 65536) ? r : 0; }
     g.bgLimit = RegGetDword(L"BgLimit", 0) != 0;
     {

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WARNING</title>
+<style>
+:root{--bg:#12062c;--bg2:#0a0420;--pink:#ff2e97;--cyan:#00e5ff;--yellow:#ffd600;--text:#e8d8ff;--muted:#8a6fc0;--red:#ff4d6d}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:14px "Cascadia Mono",Consolas,monospace}
+body{display:flex;align-items:center;justify-content:center}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.18) 2px 3px)}
+.b{border:1px solid var(--red);padding:28px 34px;max-width:660px;background:var(--bg2);
+  clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}
+h1{margin:0 0 8px;font:italic 900 38px Impact,"Arial Black",sans-serif;letter-spacing:3px;color:var(--red);text-shadow:3px 3px 0 #5c1c5e}
+.y{color:var(--yellow);margin:0 0 14px}
+.u{color:var(--cyan);word-break:break-all;margin:0 0 14px}
+p{margin:0 0 14px;line-height:1.55;color:var(--text)}
+.m{color:var(--muted)}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:20px}
+button{font:bold 14px "Cascadia Mono",Consolas,monospace;border:0;padding:10px 22px;cursor:pointer}
+#back{background:var(--pink);color:var(--bg)}
+#back:hover,#back:focus{background:var(--cyan);outline:0}
+#adv{background:none;color:var(--muted);padding:10px 4px;font-weight:normal}
+#adv:hover{color:var(--cyan)}
+#go{background:none;color:var(--red);border:1px solid var(--red)}
+#go:hover{background:var(--red);color:var(--bg)}
+#more{display:none;margin-top:18px;padding-top:16px;border-top:1px solid #5c1c5e}
+#more.on{display:block}
+</style>
+</head>
+<body>
+<div class="b">
+  <h1 id="h"></h1>
+  <div class="y" id="sub"></div>
+  <div class="u" id="u"></div>
+  <p id="why"></p>
+  <div class="row"><button id="back" autofocus>GO BACK TO SAFETY</button><button id="adv">ADVANCED</button></div>
+  <div id="more">
+    <p class="m" id="detail"></p>
+    <button id="go"></button>
+  </div>
+</div>
+<script>
+const q = new URLSearchParams(location.search);
+const kind = q.get('kind') === 'https' ? 'https' : 'cert';
+const code = parseInt(q.get('code') || '0', 10);
+let target = q.get('url') || '';
+let host = target;
+try { host = new URL(target).host; } catch (e) {}
+const $ = s => document.querySelector(s);
+const CERT = {
+  '-200': 'The certificate is for a different site name than the one you asked for.',
+  '-201': 'The certificate has expired, or your computer\'s clock is wrong.',
+  '-202': 'The certificate was not issued by an authority this computer trusts.',
+  '-203': 'The certificate has errors.',
+  '-206': 'The certificate has been revoked by the authority that issued it.',
+  '-207': 'The certificate is not valid.',
+  '-208': 'The certificate is signed with an algorithm that is no longer safe.',
+  '-210': 'The certificate uses a name that cannot be checked.',
+  '-211': 'The certificate uses a key that is too weak.',
+  '-213': 'The certificate is valid for longer than is allowed.'
+};
+if (kind === 'cert') {
+  document.title = 'CONNECTION NOT PRIVATE';
+  $('#h').textContent = 'NOT PRIVATE';
+  $('#sub').textContent = '> THE CERTIFICATE OF THIS SITE CANNOT BE TRUSTED';
+  $('#u').textContent = target;
+  $('#why').textContent = 'Someone may be pretending to be ' + host + ' to steal what you type there, such as passwords or card numbers. Nothing has been sent to the site.';
+  $('#detail').textContent = (CERT[String(code)] || 'The certificate failed the safety checks (code ' + code + ').') + ' If you continue, the site is opened without protection against impersonation, until NeonNet is closed.';
+  $('#go').textContent = 'PROCEED TO ' + host.toUpperCase() + ' (UNSAFE)';
+} else {
+  document.title = 'NO SECURE CONNECTION';
+  $('#h').textContent = 'NOT SECURE';
+  $('#sub').textContent = '> THIS SITE DOES NOT OFFER A SECURE (HTTPS) CONNECTION';
+  $('#u').textContent = target;
+  $('#why').textContent = 'HTTPS-only mode is on, so NeonNet tried the secure address first and it did not work. Over plain HTTP, anyone on the network can read or change what you send and receive.';
+  $('#detail').textContent = 'If you continue, ' + host + ' is opened over plain HTTP until NeonNet is closed. Do not type passwords or personal data there.';
+  $('#go').textContent = 'CONTINUE TO ' + host.toUpperCase() + ' OVER HTTP (UNSAFE)';
+}
+$('#back').onclick = () => { if (history.length > 1) history.back(); else location.href = 'https://neonnet.ui/newtab.html'; };
+$('#adv').onclick = () => { $('#more').classList.toggle('on'); };
+$('#go').onclick = async () => {
+  try { await fetch('/api/settings/set?key=proceed&value=' + encodeURIComponent((kind === 'cert' ? 'cert|' : 'http|') + target), {cache: 'no-store'}); } catch (e) {}
+  location.href = target;
+};
+</script>
+</body>
+</html>

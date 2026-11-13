@@ -22,3 +22,10 @@ Copyright (c) 2008-2020 Marshall A. Greenblatt. Portions Copyright (c)
 - The complete list of components and their license texts is in `CREDITS.html` in the install folder.
 
 Chromium is a trademark of Google LLC. NeonNet is not affiliated with or endorsed by Google.
+
+## Filter lists (tracker and ad blocking)
+
+`ui/blocklist.txt`, built into NeonNet, is a list of domain names made by `tools/make_blocklist.py` from:
+
+- **EasyList** and **EasyPrivacy** - https://easylist.to - dual licensed under the GNU GPL v3 or later and Creative Commons Attribution-ShareAlike 3.0. Only domain names taken from the lists' rules are used. The resulting list stays under the same licenses.
+- **Peter Lowe's ad server list** - https://pgl.yoyo.org/adservers/ - free to use.

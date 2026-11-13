@@ -90,6 +90,27 @@ select option{background:var(--bg2);color:var(--cyan)}
     </div>
   </div>
 
+  <h2 id="passwords">PASSWORDS</h2>
+  <div class="row">
+    <div class="lab"><b>Offer to save passwords</b><span id="pwHint"></span></div>
+    <button class="tog" id="savePasswords">ON</button>
+  </div>
+  <div class="row">
+    <div class="lab"><b>Saved passwords</b><span>Locked with your Windows account. You can delete them, but not read them.</span></div>
+    <a class="btn" href="https://neonnet.ui/passwords.html">MANAGE</a>
+  </div>
+
+  <h2>SECURITY</h2>
+  <div class="row">
+    <div class="lab"><b>HTTPS-only mode</b><span>Opens every http:// address over https:// instead. If the site has no secure version, NeonNet asks before using plain http. Addresses on this computer or the local network are left alone.</span></div>
+    <button class="tog" id="httpsOnly">OFF</button>
+  </div>
+
+  <div class="row">
+    <div class="lab"><b>Block trackers and ads</b><span id="adHint"></span></div>
+    <button class="tog" id="blockAds">OFF</button>
+  </div>
+
   <h2>DOWNLOADS</h2>
   <div class="row">
     <div class="lab"><b>Ask where to save each file</b><span id="dlHint"></span></div>
@@ -129,6 +150,11 @@ async function load(){
   $('#dlHint').textContent = cfg.askDownload ? 'A save dialog opens for every download.'
     : 'Files are saved straight into ' + cfg.downloadDir + ' (a number is added if the name is taken).';
   setTog('#favicons', cfg.favicons);
+  setTog('#httpsOnly', cfg.httpsOnly);
+  setTog('#savePasswords', cfg.savePasswords);
+  $('#pwHint').textContent = cfg.incognito ? 'Incognito windows never save or fill passwords.' : cfg.passwordCount + ' saved. After you log in, NeonNet asks whether to keep the password; saved ones are offered when you click into a login field.';
+  setTog('#blockAds', cfg.blockAds);
+  $('#adHint').textContent = 'Cancels requests to well-known advertising and tracking sites, only when another site asks for them. Uses the EasyList, EasyPrivacy and Peter Lowe lists (about 82 000 sites). Reload a page after changing it. ' + (cfg.blocked ? cfg.blocked + ' requests blocked since NeonNet started.' : '');
   setTog('#restoreSession', cfg.restoreSession);
   $('#restoreHint').textContent = cfg.restoreSession
     ? 'All tabs of the last session come back at start-up. They load when you click them. Pinned tabs always come back.'
@@ -154,7 +180,7 @@ async function set(key, value){
 }
 
 $('#engine').onchange = async () => { await set('search', $('#engine').value); load(); };
-for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons']]){
+for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#httpsOnly','httpsOnly'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds']]){
   $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };
 }
 async function saveHome(){

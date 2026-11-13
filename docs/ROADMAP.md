@@ -54,10 +54,10 @@ Done without being planned here first (the planned ones are ticked in the lists 
 
 ## Security and privacy
 
-- [ ] **Certificate error page** (S). Show a clear warning page with a "go back" default instead of the engine's page.
-- [ ] **HTTPS-only mode** (S).
-- [ ] **Tracker and ad blocking** (L). A built-in filter list, off by default or easy to toggle.
-- [ ] **Saved passwords** (L). Only with encryption through Windows DPAPI; a poor implementation is worse than none.
+- [x] **Certificate error page** (S, unreleased). A NeonNet warning with GO BACK as the default; the site can be opened anyway under ADVANCED, for the rest of the run.
+- [x] **HTTPS-only mode** (S, unreleased). Off by default; asks before falling back to http.
+- [x] **Tracker and ad blocking** (L, unreleased). About 82 000 domains from EasyList, EasyPrivacy and Peter Lowe, off by default, switch in settings and the menu. Not done: per-site exceptions, cosmetic (page element) filtering and rules with paths or scripts, which a full filter engine would add.
+- [x] **Saved passwords** (L, unreleased). DPAPI, ask-to-save, fill only after a click, manager page. Not done: showing a password, import and export, a password check against leaked lists, and HTTP sign-in pop-ups (see the HTTP sign-in item under Next: everyday use).
 
 ## Platform
 

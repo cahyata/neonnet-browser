@@ -151,6 +151,24 @@ Ctrl+F opens the find bar under the address bar. Matches are highlighted as you 
 
 The find bar belongs to the tab it was opened in and closes when you switch to another tab. Ctrl+F or F3 brings it back with the last search.
 
+## Certificate warnings and HTTPS-only mode
+
+When a site shows a certificate NeonNet cannot trust (expired, made for another name, issued by an unknown authority ...), the page is not loaded. A warning explains the problem. **GO BACK TO SAFETY** is the default button. **ADVANCED** shows the reason and a button to open the site anyway. That choice lasts for that site until NeonNet is closed, and nothing is saved. Anything you type into such a site can be read by an attacker.
+
+**HTTPS-only mode** (Settings > SECURITY, off by default) opens every `http://` address over `https://`. If the secure address fails, a warning says the site is not secure, with **GO BACK TO SAFETY** as the default and a button to continue over plain http for that site until NeonNet is closed. Addresses on this computer or the local network (`localhost`, `*.local`, IP addresses and one-word names) are never changed.
+
+## Blocking trackers and ads
+
+Turn it on in **Settings > SECURITY** or with **Block trackers and ads** in the `≡` menu. It is off by default, because a blocker can break a site now and then. When it is on, a request that a page makes to a known advertising or tracking site is cancelled, so the ad or tracker never loads. The list has about 82 000 domains, from EasyList, EasyPrivacy and Peter Lowe's list. What is never blocked: the page you open, and requests a site makes to itself or to its own parts (`example.com` and `cdn.example.com`). Reload a page after changing the switch. The settings page counts the requests blocked since NeonNet started. There is no per-site exception yet: if a site breaks, switch the blocker off for a moment.
+
+## Saved passwords
+
+After you send a login form, and the page that follows no longer asks for a password, NeonNet asks **Save password?** with **SAVE**, **NEVER FOR THIS SITE** and **NOT NOW** (the question says **UPDATE** when the user name is already saved with another password). Later, click into the user name or password field of that site: a small list of saved user names opens under the field. Click one and the user name and password are filled in. NeonNet never fills a password without that click, and only for the exact site (address and port) it was saved for.
+
+Passwords are stored in `%LOCALAPPDATA%\NeonNet\passwords.dat`, encrypted with Windows DPAPI: only your Windows account on this computer can read them, so copying the file elsewhere is of no use. `neonnet://passwords` (or **MANAGE** in the settings) lists the sites and user names, deletes one or all, and shows the sites you chose **NEVER** for. It cannot show a password. **Settings > PASSWORDS > Offer to save passwords** turns the question off; saved passwords can still be filled. An incognito window never saves or fills. Chromium's own password manager and address and card autofill are turned off, so no other copy of a password is kept.
+
+Limits: sign-in on sites that ask in a separate pop-up (HTTP authentication) is not supported, see [Page dialogs](#page-dialogs-and-permission-prompts). Logins done with a script and no click or Enter key (and sites that change the page without leaving the form on screen) may not be offered.
+
 ## Page dialogs and permission prompts
 
 When a page shows an alert, a question (OK / CANCEL), a box to type in, or asks "leave this site?", the dialog opens in the middle of the window in the NeonNet theme, with the name of the site in its title. The window behind it waits until you answer. Enter presses the highlighted button, Esc is the same as CANCEL (or STAY). In a prompt the text is selected, so you can type over it.
@@ -194,6 +212,8 @@ Ctrl+, , the `≡` menu (**Settings**), or **SETTINGS** on the new tab page open
 | **Search engine** | Google, DuckDuckGo, Bing, Brave or Ecosia. Used for text that is not an address, in the address bar and on the new tab page. |
 | **Home page** | Opened at start-up (when NeonNet is started without an address) and by the home button. Empty means the NeonNet new tab page. Only `http://`, `https://` and `file:///` addresses are accepted. New tabs always show the new tab page. |
 | **Site icons on tabs** | On (default): each tab shows the site's own icon between its number and its title (a pinned tab shows it in place of the pin). The icon is fetched from the site by the toolbar page, like an image on a web page. Off: no icons, nothing is fetched. |
+| **HTTPS-only mode**, **Block trackers and ads** | See [Certificate warnings and HTTPS-only mode](#certificate-warnings-and-https-only-mode) and [Blocking trackers and ads](#blocking-trackers-and-ads). Both are off by default. |
+| **Offer to save passwords** | On (default): NeonNet asks to save a password after a login. See [Saved passwords](#saved-passwords). |
 | **Continue where you left off** | Off (default): NeonNet starts with the home page. On: the tabs of the last session come back, asleep, and the home page is not opened. Pinned tabs come back either way. See [Tabs of the last session](#tabs-of-the-last-session). |
 | **Clear browsing data** | Deletes cookies and site data, the cache and the browsing history, in any combination, for the last hour, 24 hours, 7 days, 4 weeks or all time. History goes by the time of the visit. Cookies and site data also sign you out of sites. Cookies go by the time they were created. Site data (local storage, offline data) is cleared for the sites that lost a cookie, the sites in your history for that period and the pages open now, so it can miss a site you have not visited recently. The cache is always cleared completely. Single visits, or everything at once, can also be removed on the history page. In an incognito window the incognito session is cleared. |
 | **Ask where to save each file** | On (default): a save dialog opens for every download. Off: files go straight into your Downloads folder, and a number is added when the name is taken (`report (1).pdf`). |
@@ -251,6 +271,7 @@ Automatic updates only work for the installed copy (in `%LOCALAPPDATA%\Programs\
 |---|---|
 | Application | `%LOCALAPPDATA%\Programs\NeonNet` |
 | Profile (cookies, cache, sign-ins, site data) | `%LOCALAPPDATA%\NeonNet\Profile` |
+| Saved passwords (encrypted) | `%LOCALAPPDATA%\NeonNet\passwords.dat` |
 | Tabs of the last session | `%LOCALAPPDATA%\NeonNet\session.txt` |
 | History, bookmarks and downloads list | `%LOCALAPPDATA%\NeonNet\history.txt`, `bookmarks.txt` and `downloads.txt` (plain UTF-8 text) |
 | Downloaded updates (deleted after installing) | `%LOCALAPPDATA%\NeonNet\Updates` |

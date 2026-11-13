@@ -16,6 +16,7 @@ NeonNet ships its own Chromium engine. It does not need Edge, WebView2 or any ot
 - **Scanlines:** a CRT line effect over every page, toggled with the `SCAN` button.
 - **"SIGNAL LOST" error page:** shown when a site fails to load, with a RETRY button.
 - **Standard browser features:** fullscreen (including video), zoom, print, downloads with a save dialog, and developer tools.
+- **Privacy and security:** incognito window, clear browsing data, certificate warnings, HTTPS-only mode, tracker and ad blocking, and saved passwords locked with your Windows account.
 - **Single window:** running `NeonNet.exe <url>` while NeonNet is open adds a tab to the existing window.
 - **Chromium sandbox enabled:** renderer and GPU processes run isolated.
 - **Per-user installer:** no admin rights needed, uninstall from Settings > Apps.
