@@ -20,3 +20,6 @@
 // GitHub repository (owner/name) whose latest release the auto-updater checks.
 // Forks: change this to your own repository.
 #define UPDATE_REPO    L"cahyata/neonnet-browser"
+
+// Public documentation URL opened by F1 / Help (GitHub Pages).
+#define DOCS_URL       L"https://cahyata.github.io/neonnet-browser/"

@@ -111,7 +111,7 @@ enum Cmd {
     CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
     CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE,
     CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_BOOKMARKS_BAR, CMD_HISTORY,
-    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS, CMD_EXTENSIONS
+    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS, CMD_EXTENSIONS, CMD_HELP
 };
 enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW };
 
@@ -1365,7 +1365,8 @@ public:
             else if (vk == VK_OEM_COMMA) cmd = CMD_SETTINGS;
             else if (vk == VK_TAB) cmd = shift ? CMD_PREVTAB : CMD_NEXTTAB;
         } else if (!ctrl && !alt && !shift) {
-            if (vk == VK_F11) cmd = CMD_FULLSCREEN;
+            if (vk == VK_F1) cmd = CMD_HELP;
+            else if (vk == VK_F11) cmd = CMD_FULLSCREEN;
             else if (vk == VK_F12) cmd = CMD_DEVTOOLS;   // closes the tools
         }
         if (!cmd) return false;
@@ -1962,7 +1963,8 @@ public:
             else if (vk == VK_RIGHT) cmd = CMD_FWD;
             else if (vk == VK_HOME) cmd = CMD_HOME;
         } else if (!ctrl && !alt) {
-            if (vk == VK_F5) cmd = CMD_RELOAD;
+            if (vk == VK_F1 && !repeat) cmd = CMD_HELP;
+            else if (vk == VK_F5) cmd = CMD_RELOAD;
             else if (vk == VK_F3) cmd = shift ? CMD_FINDPREV : CMD_FINDNEXT;
             else if (vk == VK_F11 && !repeat) cmd = CMD_FULLSCREEN;
             else if (vk == VK_F12 && !repeat) cmd = CMD_DEVTOOLS;
@@ -2952,7 +2954,8 @@ static void ShowAbout() {
         L"  Ctrl+L  address bar      Ctrl+Tab  next tab\n"
         L"  F5      reload           Alt+Left/Right  back/forward\n"
         L"  Ctrl +/-/0  zoom         F11  fullscreen\n"
-        L"  Ctrl+P  print            F12  developer tools";
+        L"  Ctrl+P  print            F12  developer tools\n"
+        L"  F1      user guide";
     MessageBoxW(g.hwnd, v.c_str(), L"About NeonNet", MB_OK | MB_ICONINFORMATION);
 }
 
@@ -3338,6 +3341,7 @@ static void ExecCmd(int cmd) {
         }
         break;
     case CMD_ABOUT: ShowAbout(); break;
+    case CMD_HELP: CreateTab(DOCS_URL, true); break;
     case CMD_UPDATE_CHECK: StartUpdateCheck(true); break;
     case CMD_UPDATE_AUTO: {
         DWORD v = AutoUpdateEnabled() ? 0 : 1;
@@ -4018,6 +4022,7 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
         add(CMD_UPDATE_CHECK, L"Check for updates", L"", g.upd == U_CHECKING || g.upd == U_DOWNLOADING);
         if (IsInstalledCopy()) add(CMD_UPDATE_AUTO, L"Automatic updates", L"", false, AutoUpdateEnabled());
     }
+    add(CMD_HELP, L"User guide", L"F1");
     add(CMD_ABOUT, L"About NeonNet");
 
     RECT c = ChromeRect();
