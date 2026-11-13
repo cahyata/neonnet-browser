@@ -117,8 +117,9 @@ Every response carries `X-Frame-Options: DENY`, so websites cannot load NeonNet'
   |---|---|
   | `history?q=` | Up to 1,500 visits, newest first, filtered by title or URL |
   | `history/delete?id=` | Remove one visit. Removing history by period is `cleardata/run` (see "Clear browsing data"); the history page links to it |
-  | `bookmarks` | All bookmarks, oldest first |
-  | `bookmarks/delete?id=`, `bookmarks/edit?id=&title=&url=` | Change bookmarks; `edit` rejects anything that is not http, https or file |
+  | `bookmarks` | All bookmarks and folders, oldest first |
+  | `bookmarks/add?title=&url=&parent=`, `bookmarks/folder?title=&parent=`, `bookmarks/delete?id=`, `bookmarks/edit?id=&title=&url=&parent=` | Create, edit, move or delete bookmarks and folders (`folder://` on disk with optional 4th `parent` column); `edit` and `add` reject anything that is not http, https or file |
+  | `bookmarks/import`, `bookmarks/export` | Import and export Netscape Bookmark HTML files |
   | `downloads` | Up to 300 downloads, newest first (state, sizes, speed, `exists`, `openable`) |
   | `downloads/remove?id=`, `downloads/clear` | Remove one finished download from the list, or all finished ones |
   | `downloads/cancel?id=`, `downloads/open?id=`, `downloads/show?id=` | Posted to the UI thread as `WM_APP_DOWNLOAD` (see Downloads below) |

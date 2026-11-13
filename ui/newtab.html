@@ -117,7 +117,7 @@ tick(); setInterval(tick, 10000);
 
 // Once there are bookmarks, the newest nine replace the default quick links.
 fetch('/api/bookmarks', {cache:'no-store'}).then(r => r.json()).then(list => {
-  const items = list.filter(b => /^(https?:|file:)/i.test(b.url)).reverse().slice(0, 9);
+  const items = list.filter(b => !b.folder && /^(https?:|file:)/i.test(b.url)).reverse().slice(0, 9);
   if(!items.length) return;
   const box = document.getElementById('links'); box.innerHTML = '';
   items.forEach((b, i) => {

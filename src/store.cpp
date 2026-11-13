@@ -18,7 +18,8 @@ namespace {
 struct Entry {
     long long id = 0;
     long long time = 0;   // unix ms
-    std::wstring url, title;
+    bool folder = false;  // bookmarks only: saved on disk as url = "folder://"
+    std::wstring url, title, parent;
 };
 
 const size_t MAX_HISTORY = 20000;
@@ -113,14 +114,193 @@ void Json(std::string& o, const std::wstring& w) {
 }
 
 void EntryJson(std::string& o, const Entry& e) {
-    o += "{\"id\":" + std::to_string(e.id) + ",\"time\":" + std::to_string(e.time) + ",\"url\":";
+    o += "{\"id\":" + std::to_string(e.id) + ",\"time\":" + std::to_string(e.time) +
+         ",\"folder\":" + (e.folder ? "true" : "false") + ",\"url\":";
     Json(o, e.url);
     o += ",\"title\":";
     Json(o, e.title);
+    o += ",\"parent\":";
+    Json(o, e.parent);
     o += '}';
 }
 
-template <class C> void ReadFile(const std::wstring& path, C& out) {
+std::wstring TrimW(std::wstring s) {
+    size_t a = 0, b = s.size();
+    while (a < b && (s[a] == L' ' || s[a] == L'\t')) a++;
+    while (b > a && (s[b - 1] == L' ' || s[b - 1] == L'\t')) b--;
+    return s.substr(a, b - a);
+}
+
+std::wstring CleanFolderName(const std::wstring& raw) {
+    std::wstring s = Clean(raw, 120);
+    for (wchar_t& c : s) if (c == L'/' || c == L'\\') c = L'-';
+    return TrimW(std::move(s));
+}
+
+std::wstring CleanParentPath(const std::wstring& raw) {
+    std::wstring out;
+    size_t i = 0;
+    while (i < raw.size()) {
+        size_t sl = raw.find(L'/', i);
+        if (sl == std::wstring::npos) sl = raw.size();
+        std::wstring seg = CleanFolderName(raw.substr(i, sl - i));
+        if (!seg.empty()) {
+            if (!out.empty()) out += L'/';
+            out += seg;
+        }
+        i = sl + 1;
+    }
+    return out;
+}
+
+std::wstring JoinPath(const std::wstring& parent, const std::wstring& name) {
+    return parent.empty() ? name : parent + L'/' + name;
+}
+
+bool FolderExistsLocked(const std::wstring& parent, const std::wstring& name, long long ignoreId = 0) {
+    std::wstring low = Lower(name);
+    for (const Entry& e : bookmarks)
+        if (e.folder && e.id != ignoreId && Lower(e.parent) == Lower(parent) && Lower(e.title) == low) return true;
+    return false;
+}
+
+int EnsureFolderLocked(const std::wstring& path, long long tm) {
+    std::wstring clean = CleanParentPath(path);
+    if (clean.empty()) return 0;
+    int added = 0;
+    std::wstring cur;
+    size_t i = 0;
+    while (i < clean.size()) {
+        size_t sl = clean.find(L'/', i);
+        if (sl == std::wstring::npos) sl = clean.size();
+        std::wstring seg = clean.substr(i, sl - i);
+        if (!seg.empty()) {
+            if (!FolderExistsLocked(cur, seg)) {
+                Entry f;
+                f.id = nextId++;
+                f.time = tm > 0 ? tm : UnixMs();
+                f.folder = true;
+                f.title = seg;
+                f.parent = cur;
+                bookmarks.push_back(std::move(f));
+                added++;
+            }
+            cur = JoinPath(cur, seg);
+        }
+        i = sl + 1;
+    }
+    return added;
+}
+
+void EnsureAllFoldersLocked() {
+    std::vector<std::pair<std::wstring, long long>> need;
+    for (const Entry& e : bookmarks) if (!e.parent.empty()) need.emplace_back(e.parent, e.time);
+    for (const auto& p : need) EnsureFolderLocked(p.first, p.second);
+}
+
+std::string HtmlEsc(const std::wstring& w) {
+    std::string o;
+    for (char c : Utf8(w)) {
+        switch (c) {
+        case '&': o += "&amp;"; break;
+        case '<': o += "&lt;"; break;
+        case '>': o += "&gt;"; break;
+        case '"': o += "&quot;"; break;
+        default: o += c;
+        }
+    }
+    return o;
+}
+
+void AppendCodePoint(std::wstring& out, unsigned cp) {
+    if (cp == 0 || cp > 0x10FFFF) return;
+    if (cp <= 0xFFFF) { out += (wchar_t)cp; return; }
+    cp -= 0x10000;
+    out += (wchar_t)(0xD800 + (cp >> 10));
+    out += (wchar_t)(0xDC00 + (cp & 0x3FF));
+}
+
+std::wstring HtmlUnesc(const std::wstring& s) {
+    std::wstring out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] != L'&') { out += s[i]; continue; }
+        size_t semi = s.find(L';', i + 1);
+        if (semi == std::wstring::npos || semi - i > 12) { out += s[i]; continue; }
+        std::wstring ent = s.substr(i + 1, semi - i - 1);
+        std::wstring low = Lower(ent);
+        if (low == L"amp") out += L'&';
+        else if (low == L"lt") out += L'<';
+        else if (low == L"gt") out += L'>';
+        else if (low == L"quot") out += L'"';
+        else if (low == L"apos") out += L'\'';
+        else if (low == L"nbsp") out += L' ';
+        else if (!ent.empty() && ent[0] == L'#') {
+            unsigned cp = 0;
+            if (ent.size() > 2 && (ent[1] == L'x' || ent[1] == L'X')) cp = (unsigned)wcstoul(ent.c_str() + 2, nullptr, 16);
+            else cp = (unsigned)wcstoul(ent.c_str() + 1, nullptr, 10);
+            AppendCodePoint(out, cp);
+        } else {
+            out += s[i];
+            continue;
+        }
+        i = semi;
+    }
+    return out;
+}
+
+std::wstring DecodeHtmlBytes(const std::string& raw) {
+    if (raw.size() >= 2 && (unsigned char)raw[0] == 0xFF && (unsigned char)raw[1] == 0xFE) {
+        std::wstring w((raw.size() - 2) / 2, L'\0');
+        memcpy(w.data(), raw.data() + 2, w.size() * 2);
+        return w;
+    }
+    if (raw.size() >= 2 && (unsigned char)raw[0] == 0xFE && (unsigned char)raw[1] == 0xFF) {
+        size_t n = (raw.size() - 2) / 2;
+        std::wstring w(n, L'\0');
+        for (size_t i = 0; i < n; i++) w[i] = ((unsigned char)raw[2 + i * 2] << 8) | (unsigned char)raw[3 + i * 2];
+        return w;
+    }
+    size_t off = (raw.size() >= 3 && (unsigned char)raw[0] == 0xEF && (unsigned char)raw[1] == 0xBB && (unsigned char)raw[2] == 0xBF) ? 3 : 0;
+    return Wide(raw.substr(off));
+}
+
+std::wstring HtmlAttr(const std::wstring& tag, const wchar_t* name) {
+    std::wstring low = Lower(tag);
+    std::wstring key = Lower(name) + L"=";
+    size_t pos = 0;
+    while (pos < low.size()) {
+        size_t p = low.find(key, pos);
+        if (p == std::wstring::npos) return {};
+        if (p > 0 && iswalnum(low[p - 1])) { pos = p + 1; continue; }
+        size_t v = p + key.size();
+        while (v < tag.size() && iswspace(tag[v])) v++;
+        if (v >= tag.size()) return {};
+        if (tag[v] == L'"' || tag[v] == L'\'') {
+            wchar_t q = tag[v++];
+            size_t e = tag.find(q, v);
+            if (e == std::wstring::npos) return {};
+            return HtmlUnesc(tag.substr(v, e - v));
+        }
+        size_t e = v;
+        while (e < tag.size() && !iswspace(tag[e]) && tag[e] != L'>') e++;
+        return HtmlUnesc(tag.substr(v, e - v));
+    }
+    return {};
+}
+
+std::wstring StripTags(const std::wstring& html) {
+    std::wstring out;
+    bool inTag = false;
+    for (wchar_t c : html) {
+        if (c == L'<') inTag = true;
+        else if (c == L'>') inTag = false;
+        else if (!inTag) out += c;
+    }
+    return TrimW(HtmlUnesc(out));
+}
+
+template <class C> void ReadFile(const std::wstring& path, C& out, bool isBookmarks = false) {
     HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
     if (f == INVALID_HANDLE_VALUE) return;
     LARGE_INTEGER size{};
@@ -140,11 +320,18 @@ template <class C> void ReadFile(const std::wstring& path, C& out) {
         pos = nl + 1;
         size_t t1 = line.find('\t'), t2 = t1 == std::string::npos ? t1 : line.find('\t', t1 + 1);
         if (t2 == std::string::npos) continue;
+        size_t t3 = isBookmarks ? line.find('\t', t2 + 1) : std::string::npos;
         Entry e;
         e.time = _atoi64(line.substr(0, t1).c_str());
         e.url = Unesc(line.substr(t1 + 1, t2 - t1 - 1));
-        e.title = Unesc(line.substr(t2 + 1));
-        if (e.url.empty() || e.time <= 0) continue;
+        e.title = Unesc(t3 == std::string::npos ? line.substr(t2 + 1) : line.substr(t2 + 1, t3 - t2 - 1));
+        if (t3 != std::string::npos) e.parent = CleanParentPath(Unesc(line.substr(t3 + 1)));
+        if (isBookmarks && e.url == L"folder://") {
+            e.folder = true;
+            e.url.clear();
+            e.title = CleanFolderName(e.title);
+            if (e.title.empty() || e.time <= 0) continue;
+        } else if (e.url.empty() || e.time <= 0) continue;
         e.id = nextId++;
         out.push_back(std::move(e));
     }
@@ -152,7 +339,11 @@ template <class C> void ReadFile(const std::wstring& path, C& out) {
 
 template <class C> bool WriteFile(const std::wstring& path, const C& items) {
     std::string data;
-    for (const Entry& e : items) data += std::to_string(e.time) + '\t' + Esc(e.url) + '\t' + Esc(e.title) + '\n';
+    for (const Entry& e : items) {
+        data += std::to_string(e.time) + '\t' + (e.folder ? "folder://" : Esc(e.url)) + '\t' + Esc(e.title);
+        if (!e.parent.empty()) data += '\t' + Esc(e.parent);
+        data += '\n';
+    }
     std::wstring tmp = path + L".tmp";
     HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE) return false;
@@ -269,7 +460,8 @@ void Load(const std::wstring& dir) {
     dlFile = dir + L"\\downloads.txt";
     history.clear(); bookmarks.clear(); downloads.clear();
     ReadFile(histFile, history);
-    ReadFile(bmFile, bookmarks);
+    ReadFile(bmFile, bookmarks, true);
+    EnsureAllFoldersLocked();
     ReadDownloads(dlFile);
     long long cutoff = UnixMs() - HISTORY_DAYS * 24 * 60 * 60 * 1000;
     size_t before = history.size();
@@ -284,7 +476,8 @@ void LoadBookmarksReadOnly(const std::wstring& dir) {
     incognito = true;
     histFile.clear(); bmFile.clear(); dlFile.clear();   // SaveIfDirty() writes nothing without a file name
     history.clear(); bookmarks.clear(); downloads.clear();
-    ReadFile(dir + L"\\bookmarks.txt", bookmarks);
+    ReadFile(dir + L"\\bookmarks.txt", bookmarks, true);
+    EnsureAllFoldersLocked();
 }
 
 bool SaveIfDirty() {
@@ -404,17 +597,40 @@ void ClearHistory() {
 
 long long FindBookmark(const std::wstring& url) {
     Shared s;
-    for (const Entry& e : bookmarks) if (e.url == url) return e.id;
+    for (const Entry& e : bookmarks) if (!e.folder && e.url == url) return e.id;
     return 0;
 }
 
-long long AddBookmark(const std::wstring& url, const std::wstring& title) {
+long long AddBookmark(const std::wstring& url, const std::wstring& title, const std::wstring& parent) {
     if (incognito || !Recordable(url)) return 0;
+    std::wstring p = CleanParentPath(parent);
     Excl x;
-    for (const Entry& e : bookmarks) if (e.url == url) return e.id;
+    if (p.empty()) {
+        for (const Entry& e : bookmarks) if (!e.folder && e.url == url) return e.id;
+    } else {
+        for (const Entry& e : bookmarks) if (!e.folder && e.url == url && Lower(e.parent) == Lower(p)) return e.id;
+    }
+    EnsureFolderLocked(p, UnixMs());
     Entry e; e.id = nextId++; e.time = UnixMs(); e.url = url;
     e.title = Clean(title.empty() ? url : title, 500);
+    e.parent = p;
     bookmarks.push_back(std::move(e));
+    bmDirty = true;
+    return bookmarks.back().id;
+}
+
+long long AddFolder(const std::wstring& name, const std::wstring& parent) {
+    if (incognito) return 0;
+    std::wstring n = CleanFolderName(name);
+    std::wstring p = CleanParentPath(parent);
+    if (n.empty()) return 0;
+    Excl x;
+    if (FolderExistsLocked(p, n)) return 0;
+    EnsureFolderLocked(p, UnixMs());
+    Entry f;
+    f.id = nextId++; f.time = UnixMs(); f.folder = true;
+    f.title = n; f.parent = p;
+    bookmarks.push_back(std::move(f));
     bmDirty = true;
     return bookmarks.back().id;
 }
@@ -422,22 +638,69 @@ long long AddBookmark(const std::wstring& url, const std::wstring& title) {
 bool DeleteBookmark(long long id) {
     Excl x;
     if (incognito) return false;
-    for (auto it = bookmarks.begin(); it != bookmarks.end(); ++it)
-        if (it->id == id) { bookmarks.erase(it); bmDirty = true; return true; }
-    return false;
-}
-
-bool EditBookmark(long long id, const std::wstring& title, const std::wstring& url) {
-    if (incognito || !Recordable(url)) return false;
-    Excl x;
-    for (Entry& e : bookmarks) {
-        if (e.id != id) continue;
-        e.title = Clean(title.empty() ? url : title, 500);
-        e.url = url;
+    for (size_t i = 0; i < bookmarks.size(); i++) {
+        if (bookmarks[i].id != id) continue;
+        if (!bookmarks[i].folder) {
+            bookmarks.erase(bookmarks.begin() + i);
+            bmDirty = true;
+            return true;
+        }
+        std::wstring path = JoinPath(bookmarks[i].parent, bookmarks[i].title);
+        std::wstring prefix = Lower(path) + L"/";
+        std::wstring lowPath = Lower(path);
+        bookmarks.erase(std::remove_if(bookmarks.begin(), bookmarks.end(), [&](const Entry& e) {
+            if (e.id == id) return true;
+            std::wstring ep = Lower(e.parent);
+            return ep == lowPath || ep.rfind(prefix, 0) == 0;
+        }), bookmarks.end());
         bmDirty = true;
         return true;
     }
     return false;
+}
+
+bool EditBookmark(long long id, const std::wstring& title, const std::wstring& url,
+                  const std::wstring& parent, bool updateParent) {
+    if (incognito) return false;
+    Excl x;
+    size_t idx = bookmarks.size();
+    for (size_t i = 0; i < bookmarks.size(); i++) if (bookmarks[i].id == id) { idx = i; break; }
+    if (idx == bookmarks.size()) return false;
+
+    std::wstring targetParent = updateParent ? CleanParentPath(parent) : bookmarks[idx].parent;
+    if (bookmarks[idx].folder) {
+        std::wstring newName = CleanFolderName(title);
+        if (newName.empty()) return false;
+        std::wstring oldPath = JoinPath(bookmarks[idx].parent, bookmarks[idx].title);
+        std::wstring lowOld = Lower(oldPath), lowTarget = Lower(targetParent);
+        if (lowTarget == lowOld || lowTarget.rfind(lowOld + L"/", 0) == 0) return false;
+        if (FolderExistsLocked(targetParent, newName, id)) return false;
+        EnsureFolderLocked(targetParent, UnixMs());
+        bookmarks[idx].title = newName;
+        bookmarks[idx].parent = targetParent;
+        std::wstring newPath = JoinPath(targetParent, newName);
+        if (newPath != oldPath) {
+            std::wstring oldPrefix = lowOld + L"/";
+            for (Entry& e : bookmarks) {
+                std::wstring ep = Lower(e.parent);
+                if (ep == lowOld) e.parent = newPath;
+                else if (ep.rfind(oldPrefix, 0) == 0) e.parent = newPath + e.parent.substr(oldPath.size());
+            }
+        }
+        bmDirty = true;
+        return true;
+    }
+    if (!Recordable(url)) return false;
+    EnsureFolderLocked(targetParent, UnixMs());
+    bookmarks[idx].title = Clean(title.empty() ? url : title, 500);
+    bookmarks[idx].url = url;
+    bookmarks[idx].parent = targetParent;
+    bmDirty = true;
+    return true;
+}
+
+bool EditBookmark(long long id, const std::wstring& title, const std::wstring& url) {
+    return EditBookmark(id, title, url, L"", false);
 }
 
 std::string BookmarksJson() {
@@ -448,6 +711,166 @@ std::string BookmarksJson() {
         EntryJson(o, bookmarks[i]);
     }
     return o + "]";
+}
+
+std::string BookmarksBarJson(const std::wstring& parent) {
+    std::wstring p = Lower(CleanParentPath(parent));
+    std::string o = "[";
+    bool first = true;
+    Shared s;
+    for (const Entry& e : bookmarks) {
+        if (Lower(e.parent) != p) continue;
+        if (!first) o += ',';
+        first = false;
+        o += "{\"id\":" + std::to_string(e.id) + ",\"folder\":" + (e.folder ? "true" : "false") +
+             ",\"title\":";
+        Json(o, e.title);
+        o += ",\"url\":";
+        Json(o, e.url);
+        o += ",\"path\":";
+        Json(o, e.folder ? JoinPath(e.parent, e.title) : L"");
+        o += '}';
+    }
+    return o + "]";
+}
+
+static void ExportFolderHtml(std::string& o, const std::vector<Entry>& all, const std::wstring& parent, int depth) {
+    std::string pad(depth * 4, ' ');
+    std::wstring lowP = Lower(parent);
+    for (const Entry& e : all) {
+        if (Lower(e.parent) != lowP) continue;
+        std::string sec = std::to_string(std::max(0LL, e.time / 1000));
+        if (e.folder) {
+            o += pad + "<DT><H3 ADD_DATE=\"" + sec + "\" LAST_MODIFIED=\"" + sec + "\">" + HtmlEsc(e.title) + "</H3>\n";
+            o += pad + "<DL><p>\n";
+            ExportFolderHtml(o, all, JoinPath(e.parent, e.title), depth + 1);
+            o += pad + "</DL><p>\n";
+        } else {
+            o += pad + "<DT><A HREF=\"" + HtmlEsc(e.url) + "\" ADD_DATE=\"" + sec + "\">" + HtmlEsc(e.title.empty() ? e.url : e.title) + "</A>\n";
+        }
+    }
+}
+
+std::string ExportBookmarksHtml() {
+    std::vector<Entry> snap;
+    {
+        Shared s;
+        snap = bookmarks;
+    }
+    std::string now = std::to_string(std::max(0LL, UnixMs() / 1000));
+    std::string o =
+        "<!DOCTYPE NETSCAPE-Bookmark-file-1>\n"
+        "<!-- This is an automatically generated file.\n"
+        "     It will be read and overwritten.\n"
+        "     DO NOT EDIT! -->\n"
+        "<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">\n"
+        "<TITLE>Bookmarks</TITLE>\n"
+        "<H1>Bookmarks</H1>\n"
+        "<DL><p>\n"
+        "    <DT><H3 ADD_DATE=\"" + now + "\" LAST_MODIFIED=\"" + now + "\" PERSONAL_TOOLBAR_FOLDER=\"true\">Bookmarks bar</H3>\n"
+        "    <DL><p>\n";
+    ExportFolderHtml(o, snap, L"", 2);
+    o += "    </DL><p>\n</DL><p>\n";
+    return o;
+}
+
+bool ImportBookmarksHtml(const std::string& html, int& addedBookmarks, int& addedFolders) {
+    addedBookmarks = 0; addedFolders = 0;
+    if (incognito) return false;
+    std::wstring w = DecodeHtmlBytes(html);
+    if (w.empty()) return false;
+
+    std::vector<std::wstring> stack;
+    std::wstring pendingFolder;
+    bool pendingToolbar = false;
+    long long pendingTime = 0;
+    long long now = UnixMs();
+
+    Excl x;
+    auto hasBookmark = [&](const std::wstring& url, const std::wstring& parent) {
+        std::wstring lowP = Lower(parent);
+        for (const Entry& e : bookmarks) if (!e.folder && e.url == url && Lower(e.parent) == lowP) return true;
+        return false;
+    };
+
+    for (size_t i = 0; i < w.size();) {
+        size_t lt = w.find(L'<', i);
+        if (lt == std::wstring::npos) break;
+        size_t gt = w.find(L'>', lt + 1);
+        if (gt == std::wstring::npos) break;
+        std::wstring tag = w.substr(lt + 1, gt - lt - 1);
+        i = gt + 1;
+
+        size_t n0 = 0;
+        while (n0 < tag.size() && iswspace(tag[n0])) n0++;
+        size_t n1 = n0;
+        while (n1 < tag.size() && !iswspace(tag[n1]) && tag[n1] != L'/') n1++;
+        std::wstring name = Lower(tag.substr(n0, n1 - n0));
+        if (name.empty() && n0 < tag.size() && tag[n0] == L'/') {
+            n1 = n0 + 1;
+            while (n1 < tag.size() && !iswspace(tag[n1])) n1++;
+            name = Lower(tag.substr(n0, n1 - n0));
+        }
+
+        if (name == L"h3") {
+            size_t close = std::wstring::npos;
+            for (size_t p = i; (p = w.find(L'<', p)) != std::wstring::npos; p++) {
+                if (p + 4 < w.size() && Lower(w.substr(p, 4)) == L"</h3") { close = p; break; }
+            }
+            if (close != std::wstring::npos) {
+                pendingFolder = CleanFolderName(StripTags(w.substr(i, close - i)));
+                pendingToolbar = Lower(HtmlAttr(tag, L"PERSONAL_TOOLBAR_FOLDER")) == L"true";
+                long long sec = _wtoi64(HtmlAttr(tag, L"ADD_DATE").c_str());
+                pendingTime = sec > 0 ? sec * 1000 : now;
+                size_t endGt = w.find(L'>', close);
+                if (endGt != std::wstring::npos) i = endGt + 1;
+            }
+        } else if (name == L"dl") {
+            std::wstring cur = stack.empty() ? L"" : stack.back();
+            if (!pendingFolder.empty()) {
+                // Top-level PERSONAL_TOOLBAR_FOLDER maps directly to NeonNet's Bookmarks bar (root)
+                if (pendingToolbar && cur.empty()) {
+                    stack.push_back(L"");
+                } else {
+                    std::wstring nextPath = JoinPath(cur, pendingFolder);
+                    addedFolders += EnsureFolderLocked(nextPath, pendingTime);
+                    stack.push_back(nextPath);
+                }
+                pendingFolder.clear();
+                pendingToolbar = false;
+            } else {
+                stack.push_back(cur);
+            }
+        } else if (name == L"/dl") {
+            if (!stack.empty()) stack.pop_back();
+            pendingFolder.clear();
+            pendingToolbar = false;
+        } else if (name == L"a") {
+            size_t close = std::wstring::npos;
+            for (size_t p = i; (p = w.find(L'<', p)) != std::wstring::npos; p++) {
+                if (p + 3 < w.size() && Lower(w.substr(p, 3)) == L"</a") { close = p; break; }
+            }
+            if (close != std::wstring::npos) {
+                std::wstring href = TrimW(HtmlAttr(tag, L"href"));
+                std::wstring title = StripTags(w.substr(i, close - i));
+                long long sec = _wtoi64(HtmlAttr(tag, L"ADD_DATE").c_str());
+                long long tm = sec > 0 ? sec * 1000 : now;
+                std::wstring cur = stack.empty() ? L"" : stack.back();
+                if (Recordable(href) && !hasBookmark(href, cur)) {
+                    addedFolders += EnsureFolderLocked(cur, tm);
+                    Entry e; e.id = nextId++; e.time = tm; e.url = href;
+                    e.title = Clean(title.empty() ? href : title, 500);
+                    e.parent = cur;
+                    bookmarks.push_back(std::move(e));
+                    addedBookmarks++;
+                }
+                size_t endGt = w.find(L'>', close);
+                if (endGt != std::wstring::npos) i = endGt + 1;
+            }
+        }
+    }
+    if (addedBookmarks > 0 || addedFolders > 0) bmDirty = true;
+    return true;
 }
 
 // Address bar suggestions: bookmarks and history entries that contain every word of the
@@ -486,7 +909,7 @@ std::string SuggestJson(const std::wstring& query, size_t limit) {
 
     Shared s;
     for (const Entry& e : bookmarks) {
-        if (!matches(e.url, e.title)) continue;
+        if (e.folder || !matches(e.url, e.title)) continue;
         Cand& c = slot(e.url);
         c.bookmark = true;
         if (!e.title.empty()) c.title = e.title;

@@ -4,121 +4,300 @@
 <meta charset="utf-8">
 <title>BOOKMARKS</title>
 <style>
-:root{--bg:#12062c;--bg2:#0a0420;--row:#1b0b3d;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0}
+:root{--bg:#12062c;--bg2:#0a0420;--row:#1b0b3d;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0;--green:#35ffa0}
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
 main{max-width:920px;margin:0 auto;padding:28px 20px 60px}
+.top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
 h1{margin:0;font:italic 900 40px Impact,"Arial Black",sans-serif;letter-spacing:3px;color:var(--cyan);text-shadow:3px 3px 0 var(--pink)}
-.sub{color:var(--yellow);letter-spacing:2px;margin:4px 0 20px}
-.search{display:flex;align-items:center;height:36px;margin-bottom:16px;border:1px solid var(--cyan);background:var(--bg2);
+.sub{color:var(--yellow);letter-spacing:2px;margin:4px 0 0}
+.bar{display:flex;gap:8px;flex-wrap:wrap}
+button,select,input{font:inherit}
+button{cursor:pointer;border:0;background:none}
+.btn{height:32px;padding:0 12px;border:1px solid var(--cyan);color:var(--cyan);font-weight:bold;letter-spacing:1px}
+.btn:hover:not(:disabled){background:var(--cyan);color:var(--bg)}
+.btn.alt{border-color:var(--pink);color:var(--pink)}
+.btn.alt:hover:not(:disabled){background:var(--pink);color:var(--bg)}
+.btn:disabled{opacity:.4;cursor:default}
+.search{display:flex;align-items:center;height:36px;margin-bottom:12px;border:1px solid var(--cyan);background:var(--bg2);
   clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))}
 .search span{color:var(--pink);padding:0 6px 0 12px}
 .search input{flex:1;height:100%;background:none;border:0;outline:0;color:var(--cyan);font:14px "Cascadia Mono","Consolas",monospace}
 .search input::placeholder{color:#5a4a8a}
-button{font:inherit;cursor:pointer;border:0;background:none}
+.crumbs{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;min-height:24px;color:var(--muted)}
+.crumbs button{color:var(--yellow);padding:2px 6px;border:1px solid transparent}
+.crumbs button:hover{border-color:var(--yellow);background:rgba(255,214,0,.08)}
+.crumbs button.cur{color:var(--cyan);cursor:default;border-color:transparent;background:none}
+#msg{min-height:18px;margin-bottom:8px;color:var(--green)}
+#msg.err{color:var(--pink2)}
+#newBox{display:none;gap:8px;padding:10px 8px;margin-bottom:10px;background:var(--row);border:1px solid var(--pink);flex-wrap:wrap;align-items:center}
+#newBox.on{display:flex}
+#newBox input{height:28px;background:var(--bg2);border:1px solid var(--cyan);outline:0;color:var(--cyan);padding:0 8px;min-width:160px;flex:1}
+#newBox button{height:28px;padding:0 12px;font-weight:bold}
 .row{display:flex;align-items:center;gap:12px;padding:7px 8px;min-height:36px;border-bottom:1px solid rgba(138,111,192,.18)}
 .row:hover{background:var(--row)}
 .n{color:var(--yellow);width:28px;flex:none}
-.row a{flex:1;min-width:0;display:flex;gap:10px;color:var(--cyan);text-decoration:none;overflow:hidden;white-space:nowrap}
-.row a:hover .t{text-decoration:underline}
+.row a,.row .dirbtn{flex:1;min-width:0;display:flex;align-items:center;gap:10px;color:var(--cyan);text-decoration:none;overflow:hidden;white-space:nowrap;text-align:left;padding:0}
+.row .dirbtn{color:var(--yellow);font-weight:bold}
+.row a:hover .t,.row .dirbtn:hover .t{text-decoration:underline}
 .t{overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
-.u{color:var(--muted);overflow:hidden;text-overflow:ellipsis;flex:1 1 0;min-width:60px}
+.u{color:var(--muted);overflow:hidden;text-overflow:ellipsis;flex:1 1 0;min-width:60px;font-weight:normal}
+.badge{font-size:10px;padding:1px 5px;border:1px solid rgba(138,111,192,.5);color:var(--muted);flex:none}
 .act{display:flex;gap:4px;visibility:hidden;flex:none}
 .row:hover .act{visibility:visible}
 .act button{height:24px;padding:0 8px;color:var(--muted)}
 .act .e:hover{background:var(--cyan);color:var(--bg)}
 .act .d:hover{background:var(--pink);color:var(--bg)}
-.edit{display:flex;gap:8px;flex:1;min-width:0}
-.edit input{height:28px;background:var(--bg2);border:1px solid var(--pink);outline:0;color:var(--cyan);padding:0 8px;font:13px "Cascadia Mono","Consolas",monospace;min-width:0}
-.edit input:focus{border-color:var(--cyan)}
-.edit .ti{flex:1}.edit .ui{flex:1.4}
+.edit{display:flex;gap:8px;flex:1;min-width:0;flex-wrap:wrap}
+.edit input,.edit select{height:28px;background:var(--bg2);border:1px solid var(--pink);outline:0;color:var(--cyan);padding:0 8px;font:13px "Cascadia Mono","Consolas",monospace;min-width:0}
+.edit input:focus,.edit select:focus{border-color:var(--cyan)}
+.edit .ti{flex:1 1 160px}.edit .ui{flex:1.4 1 200px}.edit select{flex:0 1 170px}
 .edit button{height:28px;padding:0 12px;font-weight:bold}
 .save{background:var(--pink);color:var(--bg)}.save:hover{background:var(--cyan)}
 .cancel{color:var(--muted);border:1px solid var(--muted)}.cancel:hover{color:var(--cyan);border-color:var(--cyan)}
-.err{color:var(--pink);margin-left:40px}
+.err{color:var(--pink2);margin-left:40px;font-size:12px}
 .empty{color:var(--muted);margin-top:40px;text-align:center;letter-spacing:1px;line-height:1.8}
 .empty b{color:var(--yellow);font-weight:normal}
 </style>
 </head>
 <body>
 <main>
-  <h1>BOOKMARKS</h1>
-  <div class="sub">&gt; SAVED COORDINATES</div>
-  <div class="search"><span>&gt;&gt;</span><input id="q" spellcheck="false" autocomplete="off" placeholder="search bookmarks" autofocus></div>
+  <div class="top">
+    <div>
+      <h1>BOOKMARKS</h1>
+      <div class="sub">&gt; SAVED COORDINATES</div>
+    </div>
+    <div class="bar">
+      <button class="btn" id="newDir">+ NEW FOLDER</button>
+      <button class="btn" id="newBm">+ BOOKMARK</button>
+      <button class="btn alt" id="impBtn">IMPORT HTML</button>
+      <button class="btn alt" id="expBtn">EXPORT HTML</button>
+      <input type="file" id="impFile" accept=".html,.htm" hidden>
+    </div>
+  </div>
+  <div class="search"><span>&gt;&gt;</span><input id="q" spellcheck="false" autocomplete="off" placeholder="search bookmarks and folders" autofocus></div>
+  <div class="crumbs" id="crumbs"></div>
+  <div id="newBox">
+    <input id="newTitle" placeholder="folder name">
+    <input id="newUrl" placeholder="https://..." spellcheck="false">
+    <button class="save" id="newSave">CREATE</button>
+    <button class="cancel" id="newCancel">CANCEL</button>
+  </div>
+  <div id="msg"></div>
   <div id="list"></div>
 </main>
 <script>
 const $ = s => document.querySelector(s);
 const safe = u => /^(https?:|file:)/i.test(u);
-let all = [];
+let all = [], cwd = '', readonly = false, newMode = '';
+
+function say(text, isErr){
+  const m = $('#msg'); m.className = isErr ? 'err' : ''; m.textContent = text || '';
+}
+function folderPath(f){ return f.parent ? f.parent + '/' + f.title : f.title; }
+function allFolderPaths(excludePath){
+  const list = [''];
+  all.filter(x => x.folder).forEach(f => {
+    const p = folderPath(f);
+    if(excludePath && (p === excludePath || p.startsWith(excludePath + '/'))) return;
+    list.push(p);
+  });
+  return [...new Set(list)].sort((a, b) => a.localeCompare(b));
+}
 
 async function load(){
-  try { all = await (await fetch('/api/bookmarks', {cache:'no-store'})).json(); } catch(e){ all = []; }
+  try {
+    const [bm, cfg] = await Promise.all([
+      fetch('/api/bookmarks', {cache:'no-store'}).then(r => r.json()),
+      fetch('/api/settings', {cache:'no-store'}).then(r => r.json()).catch(() => ({}))
+    ]);
+    all = bm;
+    readonly = !!cfg.incognito;
+    $('#newDir').disabled = $('#newBm').disabled = $('#impBtn').disabled = readonly;
+    if(cwd && !all.some(x => x.folder && folderPath(x).toLowerCase() === cwd.toLowerCase())) cwd = '';
+  } catch(e){ all = []; }
   render();
 }
 
+function renderCrumbs(){
+  const c = $('#crumbs'); c.textContent = '';
+  const parts = cwd ? cwd.split('/') : [];
+  const mk = (label, path, cur) => {
+    const b = document.createElement('button');
+    if(cur) b.className = 'cur';
+    b.textContent = label;
+    if(!cur) b.onclick = () => { cwd = path; render(); };
+    c.appendChild(b);
+  };
+  mk('ROOT', '', !parts.length);
+  let acc = '';
+  parts.forEach((p, i) => {
+    acc = acc ? acc + '/' + p : p;
+    const sep = document.createElement('span'); sep.textContent = '/'; c.appendChild(sep);
+    mk(p.toUpperCase(), acc, i === parts.length - 1);
+  });
+}
+
 function render(){
+  renderCrumbs();
   const q = $('#q').value.trim().toLowerCase();
   const list = $('#list'); list.innerHTML = '';
-  const items = all.slice().reverse().filter(b => !q || b.title.toLowerCase().includes(q) || b.url.toLowerCase().includes(q));
+  let items;
+  if(q){
+    items = all.slice().reverse().filter(b => b.title.toLowerCase().includes(q) || (!b.folder && b.url.toLowerCase().includes(q)));
+  } else {
+    const lowCwd = cwd.toLowerCase();
+    const cur = all.filter(b => (b.parent || '').toLowerCase() === lowCwd);
+    const dirs = cur.filter(b => b.folder);
+    const links = cur.filter(b => !b.folder).reverse();
+    items = dirs.concat(links);
+  }
   if(!items.length){
     const e = document.createElement('div'); e.className = 'empty';
     if(q) e.textContent = 'NO MATCHES FOR "' + q.toUpperCase() + '"';
-    else e.innerHTML = 'NO BOOKMARKS YET.<br>PRESS <b>CTRL+D</b> OR THE <b>&#9734;</b> IN THE ADDRESS BAR TO SAVE A PAGE.';
+    else if(cwd) e.innerHTML = 'THIS FOLDER IS EMPTY.<br>USE <b>+ NEW FOLDER</b> OR <b>+ BOOKMARK</b> ABOVE.';
+    else e.innerHTML = 'NO BOOKMARKS YET.<br>PRESS <b>CTRL+D</b> OR THE <b>&#9734;</b> IN THE ADDRESS BAR TO SAVE A PAGE, OR <b>IMPORT HTML</b>.';
     list.appendChild(e); return;
   }
-  items.forEach((b, i) => list.appendChild(row(b, i)));
+  items.forEach((b, i) => list.appendChild(row(b, i, !!q)));
 }
 
-function row(b, i){
+function row(b, i, searching){
   const r = document.createElement('div'); r.className = 'row';
-  const n = document.createElement('span'); n.className = 'n'; n.textContent = String(i + 1).padStart(2, '0');
-  const a = document.createElement('a');
-  if(safe(b.url)) a.href = b.url;
-  a.title = b.url;
-  const t = document.createElement('span'); t.className = 't'; t.textContent = b.title || b.url;
-  const u = document.createElement('span'); u.className = 'u'; u.textContent = b.url;
-  a.append(t, u);
-  const act = document.createElement('div'); act.className = 'act';
-  const e = document.createElement('button'); e.className = 'e'; e.textContent = 'EDIT';
-  const d = document.createElement('button'); d.className = 'd'; d.textContent = 'DELETE';
-  e.onclick = () => r.replaceWith(editor(b, i));
-  d.onclick = async () => {
-    await fetch('/api/bookmarks/delete?id=' + b.id, {cache:'no-store'}).catch(() => {});
-    all = all.filter(x => x.id !== b.id); render();
-  };
-  act.append(e, d);
-  r.append(n, a, act);
+  const n = document.createElement('span'); n.className = 'n'; n.textContent = b.folder ? 'DIR' : String(i + 1).padStart(2, '0');
+  if(b.folder){
+    const btn = document.createElement('button'); btn.className = 'dirbtn';
+    const t = document.createElement('span'); t.className = 't'; t.textContent = '[+] ' + b.title;
+    const p = folderPath(b);
+    const cnt = all.filter(x => (x.parent || '').toLowerCase() === p.toLowerCase()).length;
+    const sub = document.createElement('span'); sub.className = 'u'; sub.textContent = cnt + ' item' + (cnt === 1 ? '' : 's');
+    btn.append(t, sub);
+    btn.onclick = () => { $('#q').value = ''; cwd = p; render(); };
+    r.append(n, btn);
+  } else {
+    const a = document.createElement('a');
+    if(safe(b.url)) a.href = b.url;
+    a.title = b.url;
+    const t = document.createElement('span'); t.className = 't'; t.textContent = b.title || b.url;
+    const u = document.createElement('span'); u.className = 'u'; u.textContent = b.url;
+    a.append(t, u);
+    r.append(n, a);
+  }
+  if(searching && b.parent){
+    const bg = document.createElement('span'); bg.className = 'badge'; bg.textContent = b.parent;
+    r.appendChild(bg);
+  }
+  if(!readonly){
+    const act = document.createElement('div'); act.className = 'act';
+    const e = document.createElement('button'); e.className = 'e'; e.textContent = 'EDIT';
+    const d = document.createElement('button'); d.className = 'd'; d.textContent = 'DELETE';
+    e.onclick = () => r.replaceWith(editor(b, i));
+    d.onclick = async () => {
+      await fetch('/api/bookmarks/delete?id=' + b.id, {cache:'no-store'}).catch(() => {});
+      load();
+    };
+    act.append(e, d);
+    r.appendChild(act);
+  }
   return r;
 }
 
 function editor(b, i){
   const wrap = document.createElement('div');
   const r = document.createElement('div'); r.className = 'row';
-  const n = document.createElement('span'); n.className = 'n'; n.textContent = String(i + 1).padStart(2, '0');
+  const n = document.createElement('span'); n.className = 'n'; n.textContent = b.folder ? 'DIR' : String(i + 1).padStart(2, '0');
   const f = document.createElement('div'); f.className = 'edit';
-  const ti = document.createElement('input'); ti.className = 'ti'; ti.value = b.title; ti.placeholder = 'title';
+  const ti = document.createElement('input'); ti.className = 'ti'; ti.value = b.title; ti.placeholder = b.folder ? 'folder name' : 'title';
   const ui = document.createElement('input'); ui.className = 'ui'; ui.value = b.url; ui.placeholder = 'https://...'; ui.spellcheck = false;
+  if(b.folder) ui.style.display = 'none';
+  const pf = document.createElement('select');
+  allFolderPaths(b.folder ? folderPath(b) : '').forEach(p => {
+    const o = document.createElement('option'); o.value = p; o.textContent = p ? 'DIR: ' + p : 'ROOT'; pf.appendChild(o);
+  });
+  pf.value = b.parent || '';
   const s = document.createElement('button'); s.className = 'save'; s.textContent = 'SAVE';
   const c = document.createElement('button'); c.className = 'cancel'; c.textContent = 'CANCEL';
   const err = document.createElement('div'); err.className = 'err';
   const save = async () => {
-    const url = ui.value.trim(), title = ti.value.trim();
-    if(!safe(url)){ err.textContent = 'ADDRESS MUST START WITH http://, https:// OR file:///'; return; }
-    const res = await fetch('/api/bookmarks/edit?id=' + b.id + '&title=' + encodeURIComponent(title) + '&url=' + encodeURIComponent(url),
-                            {cache:'no-store'}).catch(() => null);
-    if(!res || !res.ok){ err.textContent = 'COULD NOT SAVE THIS BOOKMARK'; return; }
+    const title = ti.value.trim(), url = ui.value.trim(), parent = pf.value;
+    if(b.folder){
+      if(!title){ err.textContent = 'ENTER A FOLDER NAME'; return; }
+    } else if(!safe(url)){
+      err.textContent = 'ADDRESS MUST START WITH http://, https:// OR file:///'; return;
+    }
+    const q = 'id=' + b.id + '&title=' + encodeURIComponent(title) + '&url=' + encodeURIComponent(b.folder ? '' : url) + '&parent=' + encodeURIComponent(parent);
+    const res = await fetch('/api/bookmarks/edit?' + q, {cache:'no-store'}).catch(() => null);
+    if(!res || !res.ok){ err.textContent = b.folder ? 'COULD NOT SAVE FOLDER (DUPLICATE NAME?)' : 'COULD NOT SAVE THIS BOOKMARK'; return; }
     load();
   };
   s.onclick = save;
   c.onclick = render;
   [ti, ui].forEach(x => x.addEventListener('keydown', e => { if(e.key === 'Enter') save(); else if(e.key === 'Escape') render(); }));
-  f.append(ti, ui, s, c);
+  f.append(ti, ui, pf, s, c);
   r.append(n, f);
   wrap.append(r, err);
   setTimeout(() => ti.focus(), 0);
   return wrap;
 }
+
+function openNew(mode){
+  newMode = mode; say('');
+  $('#newBox').classList.add('on');
+  $('#newTitle').value = ''; $('#newUrl').value = '';
+  $('#newTitle').placeholder = mode === 'dir' ? 'new folder name' : 'bookmark title';
+  $('#newUrl').style.display = mode === 'dir' ? 'none' : '';
+  setTimeout(() => $('#newTitle').focus(), 0);
+}
+function closeNew(){ newMode = ''; $('#newBox').classList.remove('on'); }
+async function submitNew(){
+  const title = $('#newTitle').value.trim(), url = $('#newUrl').value.trim();
+  if(newMode === 'dir'){
+    if(!title){ say('ENTER A FOLDER NAME', true); return; }
+    const res = await fetch('/api/bookmarks/folder?title=' + encodeURIComponent(title) + '&parent=' + encodeURIComponent(cwd), {cache:'no-store'}).catch(() => null);
+    if(!res || !res.ok){ say('COULD NOT CREATE FOLDER (ALREADY EXISTS?)', true); return; }
+    closeNew(); say('FOLDER CREATED'); load();
+  } else {
+    if(!safe(url)){ say('ADDRESS MUST START WITH http://, https:// OR file:///', true); return; }
+    const res = await fetch('/api/bookmarks/add?title=' + encodeURIComponent(title) + '&url=' + encodeURIComponent(url) + '&parent=' + encodeURIComponent(cwd), {cache:'no-store'}).catch(() => null);
+    if(!res || !res.ok){ say('COULD NOT ADD THIS BOOKMARK', true); return; }
+    closeNew(); say('BOOKMARK ADDED'); load();
+  }
+}
+
+$('#newDir').onclick = () => openNew('dir');
+$('#newBm').onclick = () => openNew('bm');
+$('#newCancel').onclick = closeNew;
+$('#newSave').onclick = submitNew;
+[$('#newTitle'), $('#newUrl')].forEach(x => x.addEventListener('keydown', e => {
+  if(e.key === 'Enter') submitNew(); else if(e.key === 'Escape') closeNew();
+}));
+
+$('#impBtn').onclick = () => $('#impFile').click();
+$('#impFile').onchange = async () => {
+  const f = $('#impFile').files[0];
+  $('#impFile').value = '';
+  if(!f) return;
+  try {
+    const text = await f.text();
+    const res = await fetch('/api/bookmarks/import', {method:'POST', body: text, cache:'no-store'});
+    if(!res.ok) throw new Error();
+    const d = await res.json();
+    say('IMPORTED ' + d.added + ' BOOKMARK' + (d.added === 1 ? '' : 'S') + ' (' + d.folders + ' FOLDER' + (d.folders === 1 ? '' : 'S') + ')');
+    load();
+  } catch(e){ say('COULD NOT IMPORT THIS BOOKMARKS FILE', true); }
+};
+
+$('#expBtn').onclick = async () => {
+  try {
+    const html = await (await fetch('/api/bookmarks/export', {cache:'no-store'})).text();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([html], {type:'text/html'}));
+    a.download = 'neonnet-bookmarks.html';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    say('EXPORTED BOOKMARKS TO HTML');
+  } catch(e){ say('COULD NOT EXPORT BOOKMARKS', true); }
+};
 
 $('#q').addEventListener('input', render);
 load();
