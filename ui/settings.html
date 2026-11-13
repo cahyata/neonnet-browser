@@ -111,6 +111,20 @@ select option{background:var(--bg2);color:var(--cyan)}
     <button class="tog" id="blockAds">OFF</button>
   </div>
 
+  <h2>SCROLLING</h2>
+  <div class="row">
+    <div class="lab"><b>Smooth scrolling</b><span id="smHint">Mouse wheel and keyboard (arrows, space, page up and down, home, end) scroll with an easing animation, as the Smooth Scroll extension does. A touchpad is left alone, it is smooth already.</span></div>
+    <button class="tog" id="smoothScroll">ON</button>
+  </div>
+  <div class="row">
+    <div class="lab"><b>Scroll distance</b><span>How far one step of the mouse wheel moves the page.</span></div>
+    <select id="smoothStep"><option value="70">SHORT</option><option value="120">NORMAL</option><option value="200">LONG</option></select>
+  </div>
+  <div class="row">
+    <div class="lab"><b>Smoothness</b><span>How long the scrolling animation takes.</span></div>
+    <select id="smoothTime"><option value="250">SNAPPY</option><option value="400">SMOOTH</option><option value="700">VERY SMOOTH</option></select>
+  </div>
+
   <h2>DOWNLOADS</h2>
   <div class="row">
     <div class="lab"><b>Ask where to save each file</b><span id="dlHint"></span></div>
@@ -118,6 +132,10 @@ select option{background:var(--bg2);color:var(--cyan)}
   </div>
 
   <h2>LOOK</h2>
+  <div class="row">
+    <div class="lab"><b>Network speed in the status bar</b><span>Shows download (cyan) and upload (pink) speed at the bottom left. It is the speed of the whole computer over Ethernet, Wi-Fi and mobile data together, not of NeonNet alone.</span></div>
+    <button class="tog" id="netSpeed">ON</button>
+  </div>
   <div class="row">
     <div class="lab"><b>Scanlines</b><span>A thin CRT line effect over every page. Purely visual.</span></div>
     <button class="tog" id="scan">ON</button>
@@ -151,6 +169,11 @@ async function load(){
     : 'Files are saved straight into ' + cfg.downloadDir + ' (a number is added if the name is taken).';
   setTog('#favicons', cfg.favicons);
   setTog('#httpsOnly', cfg.httpsOnly);
+  setTog('#smoothScroll', cfg.smoothScroll);
+  $('#smoothStep').value = String(cfg.smoothStep);
+  $('#smoothTime').value = String(cfg.smoothTime);
+  $('#smoothStep').disabled = $('#smoothTime').disabled = !cfg.smoothScroll;
+  setTog('#netSpeed', cfg.netSpeed);
   setTog('#savePasswords', cfg.savePasswords);
   $('#pwHint').textContent = cfg.incognito ? 'Incognito windows never save or fill passwords.' : cfg.passwordCount + ' saved. After you log in, NeonNet asks whether to keep the password; saved ones are offered when you click into a login field.';
   setTog('#blockAds', cfg.blockAds);
@@ -180,7 +203,8 @@ async function set(key, value){
 }
 
 $('#engine').onchange = async () => { await set('search', $('#engine').value); load(); };
-for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#httpsOnly','httpsOnly'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds']]){
+for(const k of ['smoothStep', 'smoothTime']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
+for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds']]){
   $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };
 }
 async function saveHome(){

@@ -24,6 +24,8 @@
 #include <mutex>
 #include <wincrypt.h>
 #pragma comment(lib, "crypt32.lib")
+#include <iphlpapi.h>
+#pragma comment(lib, "iphlpapi.lib")
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -93,7 +95,7 @@ static const UINT WM_APP_CLEARSITES = WM_APP + 11;  // lParam = new ClearSites (
 
 static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5,
                       TIMER_ALERT = 6, TIMER_TEMP = 7, TIMER_PERF = 8, TIMER_TRIM = 9, TIMER_AUDIO = 10,
-                      TIMER_SESSION = 11;
+                      TIMER_SESSION = 11, TIMER_NET = 12;
 static const ULONGLONG UPDATE_INTERVAL_MS = 24ull * 60 * 60 * 1000;   // check at most once a day
 
 enum Cmd {
@@ -200,6 +202,12 @@ struct App {
     bool favicons = true;             // show site icons on tabs (registry ShowFavicons)
     bool httpsOnly = false;           // HTTPS-only mode (registry HttpsOnly)
     bool savePasswords = true;        // offer to save passwords (registry SavePasswords)
+    bool smooth = true;               // smooth scrolling (registry SmoothScroll), with the distance of a wheel step in px (100 = the normal step)
+    int smoothStep = 120, smoothTime = 400;   // and the length of the animation in ms
+    bool netSpeed = true;             // network speed in the status bar (registry NetSpeed)
+    double netDown = 0, netUp = 0;    // bytes per second, last second
+    ULONGLONG netTick = 0;
+    std::map<DWORD, std::pair<DWORD, DWORD>> netPrev;   // per adapter: last in and out byte counters
     std::atomic<bool> blockAds{ false };   // block trackers and ads (registry BlockAds); atomic: read on the IO thread
     std::atomic<int> blockedCount{ 0 };    // requests blocked since NeonNet started
     std::set<std::wstring> certAllow;  // host:port the user chose to open despite a certificate error, until NeonNet closes
@@ -814,6 +822,20 @@ static void PwNeverRemove(const std::wstring& origin) { std::lock_guard<std::mut
 static void PwClear() { std::lock_guard<std::mutex> lk(g_pwMu); g_pw.clear(); PwSaveLocked(); }
 static size_t PwCount() { std::lock_guard<std::mutex> lk(g_pwMu); return g_pw.size(); }
 static std::string PwJsonList();   // below, next to JsonUtf8
+
+// Smooth scrolling is done by SMOOTH_JS in the page; the browser process tells it whether it is on and how
+// far and how long to scroll (message nn.cfg), when the page starts and when the setting changes.
+static void SendSmooth(CefRefPtr<CefFrame> f) {
+    if (!f) return;
+    CefRefPtr<CefProcessMessage> m = CefProcessMessage::Create("nn.cfg");
+    CefRefPtr<CefListValue> l = m->GetArgumentList();
+    l->SetInt(0, g.smooth ? 1 : 0); l->SetInt(1, g.smoothStep); l->SetInt(2, g.smoothTime);
+    f->SendProcessMessage(PID_RENDERER, m);
+}
+static void BroadcastSmooth() {
+    for (auto& t : g.tabs) if (t->browser) SendSmooth(t->browser->GetMainFrame());
+}
+
 
 
 // The warning page (certificate errors, HTTPS-only mode). It is a NeonNet page, so its buttons can
@@ -1726,6 +1748,7 @@ public:
                                   CefRefPtr<CefProcessMessage> message) override {
         if (message->GetName() == "nn.pid") {
             if (Tab* pt = TabOf(browser)) { pt->pid = (DWORD)message->GetArgumentList()->GetInt(0); ApplyBackgroundLimit(); }
+            if (frame && frame->IsMain()) SendSmooth(frame);   // a new page: tell it the smooth scrolling settings
             return true;
         }
         if (message->GetName() == "nn.pw") { OnPw(browser, frame, message->GetArgumentList()); return true; }
@@ -1905,7 +1928,7 @@ static std::string SettingsJson() {
                             std::to_wstring(cef_version_info(6)) + L"." + std::to_wstring(cef_version_info(7));
     o += std::string("],\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
          ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
-         ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
+         ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) + ",\"smoothScroll\":" + b(RegGetDword(L"SmoothScroll", 1) != 0) + ",\"smoothStep\":" + std::to_string(RegGetDword(L"SmoothStep", 120)) + ",\"smoothTime\":" + std::to_string(RegGetDword(L"SmoothTime", 400)) + ",\"netSpeed\":" + b(RegGetDword(L"NetSpeed", 1) != 0) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
          ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
     return o;
@@ -1971,7 +1994,9 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
         bool ok = false;
         if (key == L"search") { for (const auto& e : SEARCH_ENGINES) if (val == e.id) ok = true; }
-        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons" || key == L"httpsOnly" || key == L"blockAds" || key == L"savePasswords") ok = (val == L"0" || val == L"1");
+        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons" || key == L"httpsOnly" || key == L"blockAds" || key == L"savePasswords" || key == L"smoothScroll" || key == L"netSpeed") ok = (val == L"0" || val == L"1");
+        else if (key == L"smoothStep") ok = (val == L"70" || val == L"120" || val == L"200");
+        else if (key == L"smoothTime") ok = (val == L"250" || val == L"400" || val == L"700");
         else if (key == L"proceed") ok = val.size() < 2100 && (val.rfind(L"cert|https://", 0) == 0 || val.rfind(L"http|http://", 0) == 0);
         else if (key == L"home") {
             std::wstring low = val; for (auto& ch : low) ch = towlower(ch);
@@ -3784,16 +3809,63 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 )NNJS";
 
+static const char* SMOOTH_JS = R"NNJS(
+(function(){
+var reg=window.__nnpc;try{delete window.__nnpc;}catch(e){}
+if(typeof reg!=='function'||window!==window.top)return;
+var on=false,step=120,time=400,anim=null,raf=0;
+reg(function(o,s,t){on=+o===1;step=+s||120;time=+t||400;if(!on)anim=null;});
+function can(el,dy){var cs=getComputedStyle(el);if(!/^(auto|scroll)$/.test(cs.overflowY))return false;
+if(el.scrollHeight<=el.clientHeight+1)return false;
+return dy>0?el.scrollTop+el.clientHeight<el.scrollHeight-1:el.scrollTop>0;}
+function targetFor(el,dy){for(;el&&el!==document.documentElement;el=el.parentElement)if(can(el,dy))return el;
+var r=document.scrollingElement||document.documentElement;
+return (dy>0?r.scrollTop+r.clientHeight<r.scrollHeight-1:r.scrollTop>0)?r:null;}
+function run(el,delta){var max=el.scrollHeight-el.clientHeight,cur=el.scrollTop,base=(anim&&anim.el===el)?anim.to:cur;
+var to=Math.max(0,Math.min(max,base+delta));if(to===cur&&!anim)return;
+anim={el:el,from:cur,to:to,t0:performance.now()};if(!raf)raf=requestAnimationFrame(tick);}
+function tick(now){raf=0;if(!anim)return;var p=Math.min(1,(now-anim.t0)/time),e=1-Math.pow(1-p,3);
+anim.el.scrollTo({top:anim.from+(anim.to-anim.from)*e,behavior:'instant'});
+if(p<1)raf=requestAnimationFrame(tick);else anim=null;}
+// mouse wheel: the page's own handlers run first (this one is on the window, in the bubbling phase), and a page that
+// already handled the wheel is left alone. A precision touchpad sends small fractional steps and is already smooth.
+addEventListener('wheel',function(e){
+if(!on||e.defaultPrevented||e.ctrlKey||e.shiftKey||e.altKey||e.metaKey||e.deltaMode===2)return;
+var dy=e.deltaY;if(!dy||Math.abs(e.deltaX)>Math.abs(dy))return;
+if(e.deltaMode===0&&(Math.abs(dy)<40||dy%1!==0))return;
+var el=targetFor(e.target,dy);if(!el)return;
+e.preventDefault();run(el,(e.deltaMode===1?dy*40:dy)*step/100);},{passive:false});
+// keyboard: arrows, space, page up and down, home and end, but never in a text field or on a control that uses the key
+addEventListener('keydown',function(e){
+if(!on||e.defaultPrevented||e.ctrlKey||e.altKey||e.metaKey)return;
+var t=e.target,tg=t&&t.tagName;
+if(tg==='INPUT'||tg==='TEXTAREA'||tg==='SELECT'||tg==='OBJECT'||tg==='EMBED'||tg==='VIDEO'||tg==='AUDIO'||(t&&t.isContentEditable))return;
+var k=e.key,r=document.scrollingElement||document.documentElement,h=r.clientHeight,d=0;
+if(k===' '){if(tg==='BUTTON'||tg==='A'||tg==='SUMMARY'||(t&&t.getAttribute&&t.getAttribute('role')))return;d=(e.shiftKey?-1:1)*h*0.87;}
+else if(e.shiftKey)return;
+else if(k==='ArrowDown')d=40*step/100;else if(k==='ArrowUp')d=-40*step/100;
+else if(k==='PageDown')d=h*0.87;else if(k==='PageUp')d=-h*0.87;
+else if(k==='Home')d=-r.scrollTop;else if(k==='End')d=r.scrollHeight;
+else return;
+if(!d)return;var el=targetFor(t,d>0?1:-1);if(!el)return;e.preventDefault();run(el,d);},{passive:false});
+})();
+)NNJS";
+
 // Renderer side of the password manager. "send" passes a message to the browser process; "reg" gives the
 // renderer the page function that receives the answers (it is kept here, out of the page's reach).
 struct PwRecv { CefRefPtr<CefV8Context> ctx; CefRefPtr<CefV8Value> fn; };
 static std::map<std::string, PwRecv> g_pwRecv;   // renderer process: by frame
+static std::map<std::string, PwRecv> g_cfgRecv;  // the smooth scrolling script's receiver, by frame
 
 class PwReporter : public CefV8Handler {
 public:
     bool Execute(const CefString& name, CefRefPtr<CefV8Value>, const CefV8ValueList& args, CefRefPtr<CefV8Value>&, CefString&) override {
         CefRefPtr<CefV8Context> ctx = CefV8Context::GetCurrentContext();
         if (!ctx || !ctx->GetFrame() || !ctx->GetFrame()->IsMain()) return true;
+        if (name == "regcfg") {
+            if (args.size() == 1 && args[0]->IsFunction()) g_cfgRecv[ctx->GetFrame()->GetIdentifier().ToString()] = { ctx, args[0] };
+            return true;
+        }
         if (name == "reg") {
             if (args.size() == 1 && args[0]->IsFunction()) g_pwRecv[ctx->GetFrame()->GetIdentifier().ToString()] = { ctx, args[0] };
             return true;
@@ -3830,13 +3902,27 @@ public:
             context->GetGlobal()->SetValue("__nnp", CefV8Value::CreateFunction("send", pw), V8_PROPERTY_ATTRIBUTE_NONE);
             context->GetGlobal()->SetValue("__nnpr", CefV8Value::CreateFunction("reg", pw), V8_PROPERTY_ATTRIBUTE_NONE);
             context->Eval(PW_HOOK_JS, "", 0, ret, ex);
+            context->GetGlobal()->SetValue("__nnpc", CefV8Value::CreateFunction("regcfg", pw), V8_PROPERTY_ATTRIBUTE_NONE);
+            context->Eval(SMOOTH_JS, "", 0, ret, ex);
         }
     }
     void OnContextReleased(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context>) override {
         g_pwRecv.erase(frame->GetIdentifier().ToString());
+        g_cfgRecv.erase(frame->GetIdentifier().ToString());
     }
     // The browser process answers the password manager: the list of saved user names, or the login to fill in.
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefProcessId, CefRefPtr<CefProcessMessage> message) override {
+        if (message->GetName() == "nn.cfg") {
+            auto ci = g_cfgRecv.find(frame->GetIdentifier().ToString());
+            if (ci == g_cfgRecv.end()) return true;
+            CefRefPtr<CefListValue> c = message->GetArgumentList();
+            CefV8ValueList cargs;
+            for (size_t i = 0; i < 3; i++) cargs.push_back(CefV8Value::CreateInt(c->GetInt(i)));
+            ci->second.ctx->Enter();
+            ci->second.fn->ExecuteFunction(nullptr, cargs);
+            ci->second.ctx->Exit();
+            return true;
+        }
         if (message->GetName() != "nn.pw") return false;
         auto it = g_pwRecv.find(frame->GetIdentifier().ToString());
         if (it == g_pwRecv.end()) return true;
@@ -3921,6 +4007,67 @@ public:
 // ---------------------------------------------------------------------------
 // Painting
 
+// ---------------------------------------------------------------------------
+// Network speed in the status bar: what all network adapters (Ethernet, Wi-Fi, mobile data) together
+// receive and send, measured once a second from the adapters' byte counters. Adapters that are
+// virtual (Hyper-V, VMware, VPN tunnels ...) are left out, so traffic is not counted twice. This is the
+// speed of the whole computer, not of NeonNet alone.
+
+static void NetSample() {
+    ULONG size = 0;
+    if (GetIfTable(nullptr, &size, FALSE) != ERROR_INSUFFICIENT_BUFFER || size == 0) return;
+    std::vector<BYTE> buf(size);
+    auto* t = (MIB_IFTABLE*)buf.data();
+    if (GetIfTable(t, &size, FALSE) != NO_ERROR) return;
+    ULONGLONG now = GetTickCount64();
+    double dIn = 0, dOut = 0;
+    std::map<DWORD, std::pair<DWORD, DWORD>> cur;
+    for (DWORD i = 0; i < t->dwNumEntries; i++) {
+        const MIB_IFROW& r = t->table[i];
+        if (r.dwOperStatus != IF_OPER_STATUS_OPERATIONAL && r.dwOperStatus != IF_OPER_STATUS_CONNECTED) continue;
+        if (r.dwType != IF_TYPE_ETHERNET_CSMACD && r.dwType != IF_TYPE_IEEE80211 && r.dwType != IF_TYPE_WWANPP && r.dwType != IF_TYPE_WWANPP2) continue;
+        std::string d((const char*)r.bDescr, r.dwDescrLen > 0 && r.dwDescrLen <= MAXLEN_IFDESCR ? r.dwDescrLen : 0);
+        for (auto& c : d) c = (char)tolower((unsigned char)c);
+        if (d.find("virtual") != std::string::npos || d.find("vmware") != std::string::npos || d.find("hyper-v") != std::string::npos ||
+            d.find("loopback") != std::string::npos || d.find("tap-") != std::string::npos || d.find("vpn") != std::string::npos ||
+            d.find("bluetooth") != std::string::npos || d.find("wan miniport") != std::string::npos) continue;
+        cur[r.dwIndex] = { r.dwInOctets, r.dwOutOctets };
+        auto it = g.netPrev.find(r.dwIndex);
+        if (it != g.netPrev.end()) {   // 32-bit counters: the difference is right even after a wrap
+            dIn += (double)(DWORD)(r.dwInOctets - it->second.first);
+            dOut += (double)(DWORD)(r.dwOutOctets - it->second.second);
+        }
+    }
+    double secs = g.netTick ? (now - g.netTick) / 1000.0 : 0;
+    g.netPrev = std::move(cur);
+    g.netTick = now;
+    if (secs > 0.2) { g.netDown = dIn / secs; g.netUp = dOut / secs; }
+}
+
+static void OnNetTimer() {
+    if (!g.netSpeed || IsIconic(g.hwnd)) return;
+    NetSample();
+    InvalidateStatus();
+}
+
+static void SetNetSpeed(bool on) {
+    g.netSpeed = on;
+    if (!g.hwnd) return;
+    g.netPrev.clear(); g.netTick = 0; g.netDown = g.netUp = 0;
+    if (on) { NetSample(); SetTimer(g.hwnd, TIMER_NET, 1000, nullptr); }
+    else KillTimer(g.hwnd, TIMER_NET);
+    InvalidateStatus();
+}
+
+static std::wstring Rate(double bps) {
+    wchar_t b[32];
+    if (bps < 1000) swprintf_s(b, L"%d B/s", (int)bps);
+    else if (bps < 1000 * 1000) swprintf_s(b, L"%.1f KB/s", bps / 1000);
+    else if (bps < 1000.0 * 1000 * 1000) swprintf_s(b, L"%.2f MB/s", bps / 1e6);
+    else swprintf_s(b, L"%.2f GB/s", bps / 1e9);
+    return b;
+}
+
 static void Paint(HDC hdc) {
     RECT rc; GetClientRect(g.hwnd, &rc);
     int w = rc.right, h = rc.bottom;
@@ -3969,6 +4116,18 @@ static void Paint(HDC hdc) {
         SetTextColor(mem, C_CYAN);
         DrawTextW(mem, right, -1, &tr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         RECT lr = tr; lr.right -= rs.cx + S(16);
+        if (g.netSpeed) {
+            // download and upload speed, at the far left; a fixed width keeps the status text from jumping
+            std::wstring dn = L"\x25BC " + Rate(g.netDown), up = L"\x25B2 " + Rate(g.netUp);
+            SIZE col; GetTextExtentPoint32W(mem, L"\x25BC 999.99 MB/s", 16, &col);
+            RECT dr = tr; dr.right = dr.left + col.cx;
+            SetTextColor(mem, C_CYAN);
+            DrawTextW(mem, dn.c_str(), -1, &dr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            RECT ur = tr; ur.left += col.cx + S(14); ur.right = ur.left + col.cx;
+            SetTextColor(mem, C_PINK);
+            DrawTextW(mem, up.c_str(), -1, &ur, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            lr.left = ur.right + S(22);
+        }
         SetTextColor(mem, lc);
         DrawTextW(mem, left.c_str(), -1, &lr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
@@ -4006,6 +4165,16 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"HttpsOnly", REG_DWORD, &v, sizeof(v));
         g.httpsOnly = v != 0;
+    } else if (key == L"smoothScroll" || key == L"smoothStep" || key == L"smoothTime") {
+        DWORD v = (DWORD)_wtoi(val.c_str());
+        if (key == L"smoothScroll") { RegSetBin(L"SmoothScroll", REG_DWORD, &v, sizeof(v)); g.smooth = v != 0; }
+        else if (key == L"smoothStep") { RegSetBin(L"SmoothStep", REG_DWORD, &v, sizeof(v)); g.smoothStep = (int)v; }
+        else { RegSetBin(L"SmoothTime", REG_DWORD, &v, sizeof(v)); g.smoothTime = (int)v; }
+        BroadcastSmooth();
+    } else if (key == L"netSpeed") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"NetSpeed", REG_DWORD, &v, sizeof(v));
+        SetNetSpeed(v != 0);
     } else if (key == L"savePasswords") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"SavePasswords", REG_DWORD, &v, sizeof(v));
@@ -4281,6 +4450,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else if (wp == TIMER_PERF) OnPerfTimer();
         else if (wp == TIMER_AUDIO) OnAudioTimer();
         else if (wp == TIMER_TRIM) { KillTimer(hwnd, TIMER_TRIM); g.lastTrimCount = perf::TrimWorkingSets(); SamplePerf(); PushPerf(); }
+        else if (wp == TIMER_NET) OnNetTimer();
         else if (wp == TIMER_UPDATE) MaybeAutoCheck();
         else if (wp == TIMER_SAVE) { KillTimer(hwnd, TIMER_SAVE); store::SaveIfDirty(); return 0; }
         else if (wp == TIMER_SESSION) { if (!g.closing) SaveSession(); else KillTimer(hwnd, TIMER_SESSION); return 0; }
@@ -4435,6 +4605,9 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     g.favicons = RegGetDword(L"ShowFavicons", 1) != 0;
     g.httpsOnly = RegGetDword(L"HttpsOnly", 0) != 0;
     g.savePasswords = RegGetDword(L"SavePasswords", 1) != 0;
+    g.smooth = RegGetDword(L"SmoothScroll", 1) != 0;
+    { DWORD s = RegGetDword(L"SmoothStep", 120), t = RegGetDword(L"SmoothTime", 400); g.smoothStep = (s >= 40 && s <= 400) ? (int)s : 120; g.smoothTime = (t >= 100 && t <= 1500) ? (int)t : 400; }
+    g.netSpeed = RegGetDword(L"NetSpeed", 1) != 0;
     if (!g.incognito) PwLoad();
     g.blockAds = RegGetDword(L"BlockAds", 0) != 0;
     if (g.blockAds) LoadBlocklist();
@@ -4514,6 +4687,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     UpdatePerfTimer();   // the limiters run without the panel
     LoadKeepHosts();
     SetTimer(g.hwnd, TIMER_AUDIO, 1000, nullptr);
+    if (g.netSpeed) { NetSample(); SetTimer(g.hwnd, TIMER_NET, 1000, nullptr); }
 
     CefRunMessageLoop();
     g_client = nullptr;

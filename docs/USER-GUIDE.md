@@ -25,7 +25,7 @@ Windows SmartScreen may warn that the app is unrecognized, because the installer
 | Navigation row | `[◀]` back, `[▶]` forward, `[⟳]` reload (turns into `[✕]` stop while loading), `[⌂]` home, address bar with the `☆` bookmark star, `GO`, `SCAN`, `≡` menu |
 | Find bar | Shown under the navigation row while you search the page (see [Find in page](#find-in-page)) |
 | Thin line under the address bar | Animated pink-cyan bar while a page is loading |
-| Status bar | Left: status (LINK STABLE, LOADING..., SIGNAL LOST, the hovered link address, or download progress). Right: zoom (when not 100%), SCAN ON and the clock |
+| Status bar | Left: download and upload speed of the computer, then the status (LINK STABLE, LOADING..., SIGNAL LOST, the hovered link address, or download progress). Right: zoom (when not 100%), SCAN ON and the clock |
 
 Moving and resizing:
 - **Move:** drag an empty part of the tab row, or the status bar.
@@ -151,6 +151,16 @@ Ctrl+F opens the find bar under the address bar. Matches are highlighted as you 
 
 The find bar belongs to the tab it was opened in and closes when you switch to another tab. Ctrl+F or F3 brings it back with the last search.
 
+## Smooth scrolling
+
+The mouse wheel and the keyboard scroll with an animation instead of jumping: each wheel step glides to its place, and fast turning adds up. It works for arrow keys, space and Shift+space, page up and down, home and end as well. **Settings > SCROLLING** has the switch, the **scroll distance** (short, normal or long: how far one wheel step moves the page) and the **smoothness** (snappy, smooth or very smooth: how long the glide takes). A change applies to the pages that are open, no reload needed.
+
+It stays out of the way where it would do harm: a touchpad (already smooth), a page that handles the wheel itself (maps, editors), text fields, video and audio controls, and scrolling with Ctrl, Shift or Alt held (zoom and sideways scrolling). Only normal web pages are smoothed; NeonNet's own pages scroll as usual.
+
+## Network speed
+
+The bottom left of the status bar shows the download speed (cyan, `▼`) and upload speed (pink, `▲`), in B/s, KB/s or MB/s, updated every second. It is the traffic of the whole computer on its Ethernet, Wi-Fi and mobile data adapters together, so a download in another program shows up too. Virtual adapters (VMware, VirtualBox, Hyper-V, VPN tunnels) are left out so nothing is counted twice. Switch it off in **Settings > LOOK > Network speed in the status bar**.
+
 ## Certificate warnings and HTTPS-only mode
 
 When a site shows a certificate NeonNet cannot trust (expired, made for another name, issued by an unknown authority ...), the page is not loaded. A warning explains the problem. **GO BACK TO SAFETY** is the default button. **ADVANCED** shows the reason and a button to open the site anyway. That choice lasts for that site until NeonNet is closed, and nothing is saved. Anything you type into such a site can be read by an attacker.
@@ -214,6 +224,8 @@ Ctrl+, , the `≡` menu (**Settings**), or **SETTINGS** on the new tab page open
 | **Site icons on tabs** | On (default): each tab shows the site's own icon between its number and its title (a pinned tab shows it in place of the pin). The icon is fetched from the site by the toolbar page, like an image on a web page. Off: no icons, nothing is fetched. |
 | **HTTPS-only mode**, **Block trackers and ads** | See [Certificate warnings and HTTPS-only mode](#certificate-warnings-and-https-only-mode) and [Blocking trackers and ads](#blocking-trackers-and-ads). Both are off by default. |
 | **Offer to save passwords** | On (default): NeonNet asks to save a password after a login. See [Saved passwords](#saved-passwords). |
+| **Smooth scrolling**, **Scroll distance**, **Smoothness** | See [Smooth scrolling](#smooth-scrolling). On by default. |
+| **Network speed in the status bar** | On (default). See [Network speed](#network-speed). |
 | **Continue where you left off** | Off (default): NeonNet starts with the home page. On: the tabs of the last session come back, asleep, and the home page is not opened. Pinned tabs come back either way. See [Tabs of the last session](#tabs-of-the-last-session). |
 | **Clear browsing data** | Deletes cookies and site data, the cache and the browsing history, in any combination, for the last hour, 24 hours, 7 days, 4 weeks or all time. History goes by the time of the visit. Cookies and site data also sign you out of sites. Cookies go by the time they were created. Site data (local storage, offline data) is cleared for the sites that lost a cookie, the sites in your history for that period and the pages open now, so it can miss a site you have not visited recently. The cache is always cleared completely. Single visits, or everything at once, can also be removed on the history page. In an incognito window the incognito session is cleared. |
 | **Ask where to save each file** | On (default): a save dialog opens for every download. Off: files go straight into your Downloads folder, and a number is added when the name is taken (`report (1).pdf`). |
