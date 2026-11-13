@@ -26,6 +26,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:#e8d8f
     linear-gradient(0deg,rgba(255,46,151,.9) 2px,transparent 2px);
   background-size:48px 48px;
   animation:run 1.2s linear infinite}
+html.idle #grid{animation-play-state:paused}
 #floor::after{content:"";position:absolute;inset:0;background:linear-gradient(var(--bg2) 0%,rgba(10,4,32,.6) 18%,transparent 45%);pointer-events:none}
 @keyframes run{from{background-position:0 0,0 0}to{background-position:0 0,0 48px}}
 #scan{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.16) 2px 3px)}
@@ -113,7 +114,19 @@ function tick(){
     d.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short'}).toUpperCase() + '  ' +
     d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
 }
-tick(); setInterval(tick, 10000);
+let clockTimer = 0;
+function syncVis(){
+  const hidden = document.hidden;
+  document.documentElement.classList.toggle('idle', hidden);
+  if (hidden) {
+    if (clockTimer) { clearInterval(clockTimer); clockTimer = 0; }
+  } else {
+    tick();
+    if (!clockTimer) clockTimer = setInterval(tick, 10000);
+  }
+}
+document.addEventListener('visibilitychange', syncVis);
+syncVis();
 
 // Once there are bookmarks, the newest nine replace the default quick links.
 fetch('/api/bookmarks', {cache:'no-store'}).then(r => r.json()).then(list => {

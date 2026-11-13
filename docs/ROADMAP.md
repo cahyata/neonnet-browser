@@ -75,8 +75,8 @@ Done without being planned here first (the planned ones are ticked in the lists 
 - [ ] **Look into the speed gap with Chrome** (M). Speedometer 3.1 scored about 18 in NeonNet 1.1.2 against about 24 in Chrome 157. Field trials, GPU and build type are ruled out; the engine is one major version older. Updating Chromium is the first thing to try (see "Updating Chromium" in [MAINTENANCE.md](MAINTENANCE.md)).
 - [ ] **Automated smoke test** (M). Start the app, load a page, close it and check the exit code is 0; this would have caught the crash on close earlier.
 - [ ] **Update Chromium regularly** (S each time). Follow "Updating Chromium" in [MAINTENANCE.md](MAINTENANCE.md).
-- [ ] **Crash log** (S). Write a short report when the app dies, so problems can be found without a debugger.
-- [ ] **New tab page: stop the background animation when the tab is hidden** (S). The grid animation runs all the time.
+- [x] **Crash log** (S). Write a short report when the app dies, so problems can be found without a debugger.
+- [x] **New tab page: stop the background animation when the tab is hidden** (S). The grid animation runs all the time.
 
 ## Suggested order
 

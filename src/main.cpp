@@ -42,6 +42,7 @@
 #include "updater.h"
 #include "store.h"
 #include "perf.h"
+#include "crash.h"
 #include "browserreg.h"
 #include <windowsx.h>   // after CEF headers: its macros (GetFirstChild...) clash with cef_dom.h
 
@@ -1839,7 +1840,8 @@ public:
     }
 
     // --- request ---
-    void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus, int error_code, const CefString&) override {
+    void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code, const CefString&) override {
+        crash::LogSubprocess(L"renderer", (int)status, error_code);
         if (Tab* t = TabOf(browser)) {
             std::wstring url = DisplayUrl(t);
             t->errorUrl = url;
@@ -5026,6 +5028,11 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     }
     if (argv) LocalFree(argv);
 
+    std::wstring crashDir = KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME;
+    std::wstring chromiumVer = std::to_wstring(cef_version_info(4)) + L"." + std::to_wstring(cef_version_info(5)) + L"." +
+                               std::to_wstring(cef_version_info(6)) + L"." + std::to_wstring(cef_version_info(7));
+    crash::Install(crashDir, APP_VERSION, chromiumVer, g.incognito);
+
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (g.incognito) {
         store::LoadBookmarksReadOnly(KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME);
@@ -5104,6 +5111,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
         DestroyWindow(g.hwnd);
         return CefGetExitCode();
     }
+    crash::Install(crashDir, APP_VERSION, chromiumVer, g.incognito);   // re-assert after Chromium setup
 
     WINDOWPLACEMENT wp{ sizeof(wp) };
     DWORD sz = sizeof(wp);
