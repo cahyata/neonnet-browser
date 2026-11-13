@@ -495,7 +495,7 @@ function renderSug(){
   sug.style.left = r.left + 'px'; sug.style.width = r.width + 'px'; sug.style.top = r.bottom + 'px';
   sug.classList.add('on'); sugOpen = true;
   const need = Math.ceil(sug.getBoundingClientRect().bottom) + 8;
-  if(need !== sugNeed){ sugNeed = need; send('dropdown', need); }
+  if(need !== sugNeed){ sugNeed = need; send('dropdown', need, Math.floor(r.left), Math.ceil(r.right)); }   // clipped to the list: the page shows beside it
 }
 // "git" -> "hub.com/user" when the best suggestion starts with what was typed
 function completion(q, best){
