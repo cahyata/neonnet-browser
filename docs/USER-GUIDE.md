@@ -101,7 +101,7 @@ Sound is detected from audio and video elements on the page that are playing, no
 | Ctrl+= / Ctrl+- / Ctrl+0 | Zoom in / zoom out / reset zoom |
 | Ctrl+P | Print |
 | F11 | Fullscreen (Esc to leave) |
-| F12 | Developer tools (docked in the window, press again to close; position in Settings > DEVELOPER TOOLS) |
+| F12 | Developer tools (docked in the window, press again to close; choose the position in the tools' three-dot menu > Dock side, or in Settings > DEVELOPER TOOLS) |
 | Middle-click a tab | Close that tab |
 
 ## The `≡` menu

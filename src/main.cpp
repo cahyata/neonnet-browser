@@ -91,6 +91,7 @@ static const UINT WM_APP_MEDIA = WM_APP + 8;    // lParam = new MediaAsk (a vide
 static const UINT WM_APP_CTXMENU = WM_APP + 9;  // lParam = new CtxMenu (a right-click menu to show in the NeonNet theme)
 static const UINT WM_APP_CLEARDATA = WM_APP + 10;   // lParam = new ClearReq (from the settings page)
 static const UINT WM_APP_DIALOG = WM_APP + 12;      // lParam = new DlgReq (a page dialog, permission prompt or sign-in to show in the NeonNet theme)
+static const UINT WM_APP_DEVOPEN = WM_APP + 13;     // wParam = tab id: open its developer tools again (after a change of their position)
 static const UINT WM_APP_CLEARSITES = WM_APP + 11;  // lParam = new ClearSites (cookies are done, site data is next)
 
 static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5,
@@ -126,7 +127,8 @@ struct Tab {
     int id = 0;
     CefRefPtr<CefBrowser> browser;
     CefRefPtr<CefBrowser> dev;   // its developer tools (null = closed)
-    int devDock = 0;             // where they were opened (g.devDock at that time): 0 bottom, 1 right, 2 left, 3 own window
+    int devDock = 0;             // where they are: 0 bottom, 1 right, 2 left, 3 own window
+    bool devReopen = false;      // being closed only to open again at another kind of place (window <-> docked)
     std::wstring title = L"NEW TAB";
     std::wstring url;
     std::wstring errorUrl;
@@ -1230,11 +1232,50 @@ static void MaybeFinishClose() {
 // ---------------------------------------------------------------------------
 // CEF client (shared by the chrome UI browser and all tab browsers)
 
-class DevToolsClient : public CefClient, public CefLifeSpanHandler, public CefKeyboardHandler {
+// The tools' own "Dock side" menu (the three dots) reports a choice to the embedder with
+// DevToolsHost.sendMessageToEmbedder({method:'setPreference', params:['currentDockState','"right"']}). This
+// wrapper passes it on as a console message that DevToolsClient::OnConsoleMessage turns into the new position.
+static const char DEVTOOLS_DOCK_JS[] =
+    "(function(){var d=window.DevToolsHost;if(!d||d.__nnDock)return;d.__nnDock=1;var o=d.sendMessageToEmbedder;"
+    "d.sendMessageToEmbedder=function(m){try{var j=JSON.parse(m);"
+    "if(j.method==='setPreference'&&j.params&&j.params[0]==='currentDockState')console.log('__NN_DOCK__'+JSON.parse(j.params[1]));}catch(e){}"
+    "return o.apply(this,arguments);};"
+    // The tools start out believing they are in a window of their own ("undocked"), which would also make the menu
+    // mark the wrong place and ignore a choice of that place. Tell them where they really are once they are ready.
+    "var want=window.__nnWant,n=0;if(want&&want!=='undocked')import('devtools://devtools/bundled/ui/legacy/legacy.js').then(function(m){"
+    "(function t(){try{var c=m.DockController.DockController.instance();if(c.dockSide()!==want)c.setDockSide(want);}catch(e){if(++n<40)setTimeout(t,250);}})();}).catch(function(){});"
+    "})();";
+
+class DevToolsClient : public CefClient, public CefLifeSpanHandler, public CefKeyboardHandler, public CefLoadHandler, public CefDisplayHandler {
 public:
     explicit DevToolsClient(int tabId) : tabId_(tabId) {}
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
+    CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+    CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
+    void OnLoadEnd(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int) override {
+        if (!frame->IsMain()) return;
+        Tab* t = FindTab(tabId_);
+        static const char* SIDES[] = { "bottom", "right", "left", "undocked" };
+        std::string js = std::string("window.__nnWant='") + SIDES[t ? t->devDock : 3] + "';" + DEVTOOLS_DOCK_JS;
+        frame->ExecuteJavaScript(js, "devtools://neonnet-dock", 0);
+    }
+    bool OnConsoleMessage(CefRefPtr<CefBrowser>, cef_log_severity_t, const CefString& message, const CefString&, int) override {
+        std::wstring m = message.ToWString();
+        if (m.rfind(L"__NN_DOCK__", 0) != 0) return false;
+        std::wstring side = m.substr(11);
+        int nd = side == L"bottom" ? 0 : side == L"right" ? 1 : side == L"left" ? 2 : side == L"undocked" ? 3 : -1;
+        Tab* t = FindTab(tabId_);
+        if (nd < 0 || !t || !t->dev || nd == t->devDock || g.closing) return true;
+        DWORD v = (DWORD)nd;
+        RegSetBin(L"DevToolsDock", REG_DWORD, &v, sizeof(v));   // the next tools open where this choice put them
+        g.devDock = nd;
+        if ((nd == 3) != (t->devDock == 3)) {   // to or from a window of its own: reopen, the kind of host window changes
+            t->devReopen = true;
+            t->browser->GetHost()->CloseDevTools();
+        } else { t->devDock = nd; Layout(); }
+        return true;
+    }
     // The developer tools are a Chromium page: without this, Chromium would answer window shortcuts itself
     // (Ctrl+Shift+N would open a Chromium window). Only the shortcuts the tools do not use themselves are taken;
     // the rest (Ctrl+F, Ctrl+P, Ctrl+Shift+P, Ctrl+Shift+M, zoom ...) stay with the tools.
@@ -1265,7 +1306,11 @@ public:
     }
     void OnBeforeClose(CefRefPtr<CefBrowser>) override {
         g.devtools--;
-        if (Tab* t = FindTab(tabId_)) { t->dev = nullptr; if (!g.closing) Layout(); }
+        if (Tab* t = FindTab(tabId_)) {
+            t->dev = nullptr;
+            if (!g.closing) Layout();
+            if (t->devReopen) { t->devReopen = false; if (!g.closing) PostMessageW(g.hwnd, WM_APP_DEVOPEN, (WPARAM)t->id, 0); }
+        }
         MaybeFinishClose();
     }
 private:
@@ -1277,7 +1322,20 @@ private:
 // docked in the NeonNet window below the page.
 static void OpenDevTools(Tab* t, CefPoint at) {
     if (!t || !t->browser) return;
-    if (!t->dev) t->devDock = g.devDock;
+    if (!t->dev) {
+        t->devDock = g.devDock;
+        // Tell the tools where they are, so their Dock side menu marks the right choice (they would start as "undocked")
+        if (CefRefPtr<CefRequestContext> ctx = t->browser->GetHost()->GetRequestContext()) {
+            CefRefPtr<CefValue> cur = ctx->GetPreference("devtools.preferences");
+            CefRefPtr<CefDictionaryValue> d = cur && cur->GetType() == VTYPE_DICTIONARY ? cur->GetDictionary()->Copy(false) : CefDictionaryValue::Create();
+            static const char* SIDES[] = { "\"bottom\"", "\"right\"", "\"left\"", "\"undocked\"" };
+            d->SetString("currentDockState", SIDES[t->devDock]);
+            CefRefPtr<CefValue> nv = CefValue::Create();
+            nv->SetDictionary(d);
+            CefString err;
+            ctx->SetPreference("devtools.preferences", nv, err);
+        }
+    }
     CefWindowInfo wi;
     if (t->devDock == 3) wi.SetAsPopup(nullptr, "NeonNet DevTools");
     else {
@@ -4751,6 +4809,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APP_DOWNLOAD: DoDownloadAction((int)wp, (long long)lp); return 0;
     case WM_APP_MEDIA: AskMedia(std::unique_ptr<MediaAsk>((MediaAsk*)lp)); return 0;
     case WM_APP_DIALOG: OnDialogMsg(std::unique_ptr<DlgReq>((DlgReq*)lp)); return 0;
+    case WM_APP_DEVOPEN: if (Tab* t = FindTab((int)wp)) if (!t->dev) OpenDevTools(t, CefPoint()); return 0;
     case WM_APP_CTXMENU: ShowContextMenu(std::unique_ptr<CtxMenu>((CtxMenu*)lp)); return 0;
     case WM_APP_CLEARDATA: StartClearData(std::unique_ptr<ClearReq>((ClearReq*)lp)); return 0;
     case WM_APP_CLEARSITES: ClearSiteData(std::unique_ptr<ClearSites>((ClearSites*)lp)); return 0;
