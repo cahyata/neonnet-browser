@@ -161,9 +161,18 @@ struct Tab {
     std::wstring upgradedFrom, upgradedTo;   // HTTPS-only mode: the http address asked for, and the https address tried instead
     std::wstring icon;             // address of the page's favicon (http/https), shown in the tab strip
     bool pinned = false;           // pinned tabs sit at the left, are narrow and come back at the next start
+    int wsId = 1;                  // workspace this tab belongs to
 };
 
-struct ClosedTab { std::wstring url; int index; bool pinned = false; };
+struct ClosedTab { std::wstring url; int index; bool pinned = false; int wsId = 1; };
+
+struct Workspace {
+    int id = 1;
+    std::wstring name = L"MAIN";
+    std::wstring icon = L"\u25C6";
+    std::wstring color = L"#00e5ff";
+    int activeTabId = 0;
+};
 
 // Something Chromium would ask the user in a window of its own: a page's alert, confirm or prompt,
 // the "leave this site?" question, or a permission prompt (camera, location ...). The
@@ -204,6 +213,9 @@ struct App {
     ULONGLONG lastLimitAct = 0;
     int lastTrimCount = 0;
     std::vector<std::unique_ptr<Tab>> tabs;
+    std::vector<Workspace> workspaces;
+    int activeWs = 1, nextWsId = 2;
+    std::string lastWorkspaces;
     std::deque<int> pendingPopups;  // tab ids waiting for their popup browser
     int creatingTab = 0;            // tab id while CreateBrowserSync runs
     bool creatingChrome = false;
@@ -556,15 +568,120 @@ static void RunInChrome(const std::wstring& js) {
 
 static std::wstring SiteJson(const std::wstring& url);   // the site panel's data, below with the site permissions
 
+static Workspace* FindWs(int id) {
+    for (auto& w : g.workspaces) if (w.id == id) return &w;
+    return nullptr;
+}
+
+static void EnsureDefaultWorkspaces() {
+    if (g.workspaces.empty()) {
+        Workspace w; w.id = 1; w.name = L"MAIN"; w.icon = L"\u25C6"; w.color = L"#00e5ff";
+        g.workspaces.push_back(std::move(w));
+        g.activeWs = 1;
+        if (g.nextWsId < 2) g.nextWsId = 2;
+    }
+    if (!FindWs(g.activeWs)) g.activeWs = g.workspaces.front().id;
+}
+
+static std::wstring WorkspacesPath() {
+    return KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME + L"\\workspaces.txt";
+}
+
+static std::wstring SanitizeWsField(std::wstring s, size_t maxLen) {
+    for (auto& c : s) if (c < 0x20 || c == L'\t') c = L' ';
+    while (!s.empty() && s.front() == L' ') s.erase(s.begin());
+    while (!s.empty() && s.back() == L' ') s.pop_back();
+    if (s.size() > maxLen) s.resize(maxLen);
+    return s;
+}
+
+static void SaveWorkspaces() {
+    if (g.incognito) return;
+    EnsureDefaultWorkspaces();
+    std::string out = "NEONNET-WORKSPACES 1\n" + std::to_string(g.activeWs) + "\t" + std::to_string(g.nextWsId) + "\n";
+    for (auto& w : g.workspaces) {
+        out += std::to_string(w.id) + "\t" + Utf8(w.icon) + "\t" + Utf8(w.color) + "\t" + Utf8(w.name) + "\n";
+    }
+    if (out == g.lastWorkspaces) return;
+    std::wstring path = WorkspacesPath(), tmp = path + L".tmp";
+    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD wr = 0;
+    bool ok = WriteFile(h, out.data(), (DWORD)out.size(), &wr, nullptr) && wr == out.size();
+    CloseHandle(h);
+    if (ok && MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) g.lastWorkspaces = out;
+    else DeleteFileW(tmp.c_str());
+}
+
+static void LoadWorkspaces() {
+    g.workspaces.clear();
+    g.activeWs = 1;
+    g.nextWsId = 2;
+    if (!g.incognito) {
+        HANDLE h = CreateFileW(WorkspacesPath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h != INVALID_HANDLE_VALUE) {
+            DWORD size = GetFileSize(h, nullptr), got = 0;
+            std::string data;
+            if (size > 0 && size < 256 * 1024) {
+                data.resize(size);
+                if (!ReadFile(h, &data[0], size, &got, nullptr) || got != size) data.clear();
+            }
+            CloseHandle(h);
+            size_t pos = data.find('\n');
+            if (pos != std::string::npos && data.compare(0, pos, "NEONNET-WORKSPACES 1") == 0) {
+                g.lastWorkspaces = data;
+                size_t nl2 = data.find('\n', ++pos);
+                if (nl2 != std::string::npos) {
+                    std::string hdr = data.substr(pos, nl2 - pos);
+                    size_t tb = hdr.find('\t');
+                    if (tb != std::string::npos) {
+                        int aw = atoi(hdr.substr(0, tb).c_str());
+                        int nw = atoi(hdr.substr(tb + 1).c_str());
+                        if (aw > 0) g.activeWs = aw;
+                        if (nw > 1) g.nextWsId = nw;
+                    }
+                    pos = nl2 + 1;
+                }
+                for (; pos < data.size() && g.workspaces.size() < 12;) {
+                    size_t e = data.find('\n', pos);
+                    if (e == std::string::npos) e = data.size();
+                    std::string line = data.substr(pos, e - pos);
+                    pos = e + 1;
+                    while (!line.empty() && line.back() == '\r') line.pop_back();
+                    size_t t1 = line.find('\t');
+                    size_t t2 = t1 == std::string::npos ? t1 : line.find('\t', t1 + 1);
+                    size_t t3 = t2 == std::string::npos ? t2 : line.find('\t', t2 + 1);
+                    if (t3 == std::string::npos) continue;
+                    Workspace w;
+                    w.id = atoi(line.substr(0, t1).c_str());
+                    w.icon = SanitizeWsField(Wide(line.substr(t1 + 1, t2 - t1 - 1)), 4);
+                    w.color = SanitizeWsField(Wide(line.substr(t2 + 1, t3 - t2 - 1)), 16);
+                    w.name = SanitizeWsField(Wide(line.substr(t3 + 1)), 24);
+                    if (w.id <= 0 || w.name.empty()) continue;
+                    if (w.icon.empty()) w.icon = L"\u25C6";
+                    if (w.color.empty() || w.color[0] != L'#') w.color = L"#00e5ff";
+                    if (w.id >= g.nextWsId) g.nextWsId = w.id + 1;
+                    if (!FindWs(w.id)) g.workspaces.push_back(std::move(w));
+                }
+            }
+        }
+    }
+    EnsureDefaultWorkspaces();
+}
+
 static void SendState() {
+    EnsureDefaultWorkspaces();
     Tab* a = Active();
     if (a) SetWindowTextW(g.hwnd, ((a->title.empty() ? std::wstring(L"New tab") : a->title) +
                                    (g.incognito ? L" - NeonNet (Incognito)" : L" - NeonNet")).c_str());
     if (!g.chrome) return;
     std::wstring j = L"{\"type\":\"state\",\"tabs\":[";
+    bool firstTab = true;
     for (size_t i = 0; i < g.tabs.size(); i++) {
         Tab* t = g.tabs[i].get();
-        if (i) j += L",";
+        if (t->wsId != g.activeWs) continue;
+        if (!firstTab) j += L",";
+        firstTab = false;
         j += L"{\"id\":" + std::to_wstring(t->id) + L",\"title\":" + JsonStr(t->title) +
              L",\"loading\":" + (t->loading ? L"true" : L"false") + L",\"discarded\":" + (t->discarded ? L"true" : L"false") +
              L",\"audible\":" + (t->audible ? L"true" : L"false") + L",\"muted\":" + (t->muted ? L"true" : L"false") +
@@ -572,6 +689,17 @@ static void SendState() {
              (g.favicons && !t->icon.empty() ? L",\"icon\":" + JsonStr(t->icon) : L"") + L"}";
     }
     j += L"],\"active\":" + std::to_wstring(g.active);
+    j += L",\"activeWs\":" + std::to_wstring(g.activeWs) + L",\"workspaces\":[";
+    for (size_t i = 0; i < g.workspaces.size(); i++) {
+        const auto& w = g.workspaces[i];
+        int cnt = 0;
+        for (auto& t : g.tabs) if (t->wsId == w.id) cnt++;
+        if (i) j += L",";
+        j += L"{\"id\":" + std::to_wstring(w.id) + L",\"name\":" + JsonStr(w.name) +
+             L",\"icon\":" + JsonStr(w.icon) + L",\"color\":" + JsonStr(w.color) +
+             L",\"count\":" + std::to_wstring(cnt) + L"}";
+    }
+    j += L"]";
     ScheduleSession();   // every change of the tab strip (and of titles and addresses) ends up here
     j += L",\"url\":" + JsonStr(a ? DisplayUrl(a) : L"");
     j += std::wstring(L",\"canBack\":") + (a && a->canBack ? L"true" : L"false");
@@ -1142,6 +1270,10 @@ static void SelectTab(int id, bool focus) {
     if (!sel) return;
     if (id != g.active) HideFind();
     g.active = id;
+    if (FindWs(sel->wsId)) {
+        g.activeWs = sel->wsId;
+        FindWs(sel->wsId)->activeTabId = id;
+    }
     sel->lastActive = GetTickCount64();
     if (sel->discarded) RestoreTab(sel);
     if (g.fsElement) { g.fsElement = false; UpdateFullscreen(); }
@@ -1175,6 +1307,7 @@ static void CreateTab(const std::wstring& url, bool activate, int at) {
     auto tab = std::make_unique<Tab>();
     int id = tab->id = g.nextId++;
     tab->url = url;
+    tab->wsId = g.activeWs;
     tab->lastActive = GetTickCount64();
     int cur = IndexOf(g.active);
     int pos = at >= 0 ? std::min(at, (int)g.tabs.size()) : (cur < 0 ? (int)g.tabs.size() : cur + 1);
@@ -1209,12 +1342,15 @@ static void RestoreTab(Tab* t) {
 static void CloseTab(int id) {
     int i = IndexOf(id);
     if (i < 0) return;
+    int ws = g.tabs[i]->wsId;
+    int wsPos = 0;
+    for (int k = 0; k < i; k++) if (g.tabs[k]->wsId == ws) wsPos++;
     std::unique_ptr<Tab> t = std::move(g.tabs[i]);
     g.tabs.erase(g.tabs.begin() + i);
     if (!g.closing) {
         std::wstring u = DisplayUrl(t.get());
         if (!u.empty() && u.rfind(NEWTAB, 0) != 0 && u.rfind(L"data:", 0) != 0) {
-            g.closed.push_back({ u, i, t->pinned });
+            g.closed.push_back({ u, i, t->pinned, t->wsId });
             if (g.closed.size() > 25) g.closed.erase(g.closed.begin());
         }
     }
@@ -1223,8 +1359,10 @@ static void CloseTab(int id) {
         if (w) ShowWindow(w, SW_HIDE);
         t->browser->GetHost()->CloseBrowser(false);
     }
-    if (g.tabs.empty()) { g.active = 0; CreateTab(NEWTAB, true); return; }
-    if (g.active == id) SelectTab(g.tabs[std::min(i, (int)g.tabs.size() - 1)]->id, true);
+    std::vector<int> sameWs;
+    for (auto& o : g.tabs) if (o->wsId == g.activeWs) sameWs.push_back(o->id);
+    if (sameWs.empty()) { if (g.active == id) g.active = 0; CreateTab(NEWTAB, true); return; }
+    if (g.active == id) SelectTab(sameWs[std::min(wsPos, (int)sameWs.size() - 1)], true);
     else SendState();
 }
 
@@ -1240,20 +1378,112 @@ static void SetPinned(int id, bool pin) {
     SendState();
 }
 
-// Drag and drop in the tab strip. A tab stays inside its own group: pinned tabs among the
-// pinned ones, the others among the others.
-static void MoveTab(int id, int to) {
+// Drag and drop in the tab strip. A tab stays inside its own group (pinned vs unpinned)
+// within the active workspace.
+static void MoveTab(int id, int visTo) {
     int from = IndexOf(id);
     if (from < 0) return;
-    int pins = PinnedCount(), n = (int)g.tabs.size();
+    int ws = g.tabs[from]->wsId;
+    std::vector<int> vis;
+    int visPins = 0, visFrom = -1;
+    for (int k = 0; k < (int)g.tabs.size(); k++) {
+        if (g.tabs[k]->wsId != ws) continue;
+        if (k == from) visFrom = (int)vis.size();
+        if (g.tabs[k]->pinned) visPins++;
+        vis.push_back(k);
+    }
+    if (visFrom < 0 || vis.empty()) { SendState(); return; }
     bool p = g.tabs[from]->pinned;
-    to = std::max(p ? 0 : pins, std::min(to, p ? pins - 1 : n - 1));
+    visTo = std::max(p ? 0 : visPins, std::min(visTo, p ? visPins - 1 : (int)vis.size() - 1));
+    int to = vis[visTo];
     if (to != from) {
         std::unique_ptr<Tab> t = std::move(g.tabs[from]);
         g.tabs.erase(g.tabs.begin() + from);
         g.tabs.insert(g.tabs.begin() + to, std::move(t));
     }
     SendState();   // also when nothing moved: the strip then snaps back to the real order
+}
+
+static void SwitchWorkspace(int wsId) {
+    Workspace* target = FindWs(wsId);
+    if (!target) return;
+    if (Workspace* cur = FindWs(g.activeWs)) cur->activeTabId = g.active;
+    g.activeWs = wsId;
+    SaveWorkspaces();
+    int pick = 0;
+    if (target->activeTabId) {
+        if (Tab* t = FindTab(target->activeTabId)) if (t->wsId == wsId) pick = t->id;
+    }
+    if (!pick) {
+        for (auto& t : g.tabs) if (t->wsId == wsId) { pick = t->id; break; }
+    }
+    if (pick) SelectTab(pick, true);
+    else CreateTab(NEWTAB, true);
+}
+
+static int CreateWorkspace(std::wstring name, std::wstring icon, std::wstring color, int moveTabId = 0) {
+    EnsureDefaultWorkspaces();
+    if (g.workspaces.size() >= 12) return 0;
+    name = SanitizeWsField(std::move(name), 24);
+    if (name.empty()) name = L"WS " + std::to_wstring(g.nextWsId);
+    icon = SanitizeWsField(std::move(icon), 4);
+    if (icon.empty()) icon = L"\u25C6";
+    color = SanitizeWsField(std::move(color), 16);
+    if (color.empty() || color[0] != L'#') color = L"#00e5ff";
+
+    Workspace w;
+    w.id = g.nextWsId++;
+    w.name = std::move(name);
+    w.icon = std::move(icon);
+    w.color = std::move(color);
+    g.workspaces.push_back(w);
+    if (moveTabId > 0) {
+        if (Tab* t = FindTab(moveTabId)) t->wsId = w.id;
+    }
+    SaveWorkspaces();
+    SwitchWorkspace(w.id);
+    return w.id;
+}
+
+static void UpdateWorkspace(int wsId, std::wstring name, std::wstring icon, std::wstring color) {
+    Workspace* w = FindWs(wsId);
+    if (!w) return;
+    name = SanitizeWsField(std::move(name), 24);
+    icon = SanitizeWsField(std::move(icon), 4);
+    color = SanitizeWsField(std::move(color), 16);
+    if (!name.empty()) w->name = std::move(name);
+    if (!icon.empty()) w->icon = std::move(icon);
+    if (!color.empty() && color[0] == L'#') w->color = std::move(color);
+    SaveWorkspaces();
+    SendState();
+}
+
+static void MoveTabToWorkspace(int tabId, int wsId) {
+    Tab* t = FindTab(tabId);
+    if (!t || !FindWs(wsId) || t->wsId == wsId) return;
+    int oldWs = t->wsId;
+    t->wsId = wsId;
+    if (Workspace* dst = FindWs(wsId)) dst->activeTabId = tabId;
+    if (tabId == g.active) {
+        int nextInOld = 0;
+        for (auto& o : g.tabs) if (o->wsId == oldWs) { nextInOld = o->id; break; }
+        if (nextInOld) SelectTab(nextInOld, true);
+        else CreateTab(NEWTAB, true);
+    } else {
+        SendState();
+    }
+}
+
+static void DeleteWorkspace(int wsId) {
+    if (g.workspaces.size() <= 1) return;
+    int idx = -1;
+    for (int i = 0; i < (int)g.workspaces.size(); i++) if (g.workspaces[i].id == wsId) { idx = i; break; }
+    if (idx < 0) return;
+    int fallback = g.workspaces[idx == 0 ? 1 : 0].id;
+    for (auto& t : g.tabs) if (t->wsId == wsId) t->wsId = fallback;
+    g.workspaces.erase(g.workspaces.begin() + idx);
+    if (g.activeWs == wsId) SwitchWorkspace(fallback);
+    else { SaveWorkspaces(); SendState(); }
 }
 
 // ---------------------------------------------------------------------------
@@ -1953,15 +2183,23 @@ public:
             case VK_OEM_MINUS: case VK_SUBTRACT: cmd = CMD_ZOOMOUT; break;
             case '0': case VK_NUMPAD0: cmd = CMD_ZOOMRESET; break;
             default:
-                if (vk >= '1' && vk <= '9' && !g.tabs.empty()) {
-                    size_t i = (vk == '9') ? g.tabs.size() - 1 : (size_t)(vk - '1');
-                    if (i < g.tabs.size()) { SelectTab(g.tabs[i]->id, true); return true; }
+                if (vk >= '1' && vk <= '9') {
+                    std::vector<int> vis;
+                    for (auto& t : g.tabs) if (t->wsId == g.activeWs) vis.push_back(t->id);
+                    if (!vis.empty()) {
+                        size_t i = (vk == '9') ? vis.size() - 1 : (size_t)(vk - '1');
+                        if (i < vis.size()) { SelectTab(vis[i], true); return true; }
+                    }
                 }
             }
         } else if (alt && !ctrl) {
             if (vk == VK_LEFT) cmd = CMD_BACK;
             else if (vk == VK_RIGHT) cmd = CMD_FWD;
             else if (vk == VK_HOME) cmd = CMD_HOME;
+            else if (vk >= '1' && vk <= '9' && !repeat) {
+                size_t wi = (size_t)(vk - '1');
+                if (wi < g.workspaces.size()) { SwitchWorkspace(g.workspaces[wi].id); return true; }
+            }
         } else if (!ctrl && !alt) {
             if (vk == VK_F1 && !repeat) cmd = CMD_HELP;
             else if (vk == VK_F5) cmd = CMD_RELOAD;
@@ -2666,7 +2904,7 @@ static std::wstring HomeUrl() {
 // tabs start asleep (no page loaded), so thirty tabs do not mean thirty pages loading at once.
 // An incognito window neither writes nor reads the file.
 
-struct SavedTab { std::wstring url, title; bool pinned = false, active = false; };
+struct SavedTab { std::wstring url, title; bool pinned = false, active = false; int wsId = 1; };
 
 static bool SessionUrlOk(const std::wstring& u) {
     if (u.empty() || u.size() > 8000) return false;
@@ -2689,6 +2927,7 @@ static std::string SessionText() {
         std::string flags;
         if (t->pinned) flags += 'P';
         if (t->id == g.active) flags += 'A';
+        if (t->wsId > 1) flags += "W" + std::to_string(t->wsId);
         if (flags.empty()) flags = "-";
         o += flags + "\t" + Utf8(ti) + "\t" + Utf8(u) + "\n";
     }
@@ -2735,8 +2974,14 @@ static std::vector<SavedTab> LoadSession() {
         size_t t2 = t1 == std::string::npos ? t1 : line.find('\t', t1 + 1);
         if (t2 == std::string::npos) continue;
         SavedTab s;
-        s.pinned = line.substr(0, t1).find('P') != std::string::npos;
-        s.active = line.substr(0, t1).find('A') != std::string::npos;
+        std::string fl = line.substr(0, t1);
+        s.pinned = fl.find('P') != std::string::npos;
+        s.active = fl.find('A') != std::string::npos;
+        size_t wp = fl.find('W');
+        if (wp != std::string::npos) {
+            int wv = atoi(fl.substr(wp + 1).c_str());
+            if (wv > 0) s.wsId = wv;
+        }
         s.title = Wide(line.substr(t1 + 1, t2 - t1 - 1));
         s.url = Wide(line.substr(t2 + 1));
         if (SessionUrlOk(s.url)) v.push_back(std::move(s));
@@ -2747,6 +2992,7 @@ static std::vector<SavedTab> LoadSession() {
 // The first tabs of a new window: the saved ones that come back, then (or instead) the
 // address NeonNet was started with, or the home page.
 static void OpenStartTabs() {
+    LoadWorkspaces();
     std::vector<SavedTab> saved;
     bool all = false;
     if (!g.incognito) {
@@ -2763,6 +3009,7 @@ static void OpenStartTabs() {
         tab->url = s.url;
         if (!s.title.empty()) tab->title = s.title;
         tab->pinned = s.pinned;
+        tab->wsId = FindWs(s.wsId) ? s.wsId : g.activeWs;
         tab->discarded = true;   // asleep until selected, see RestoreTab
         tab->loading = false;
         tab->lastActive = GetTickCount64();
@@ -2770,9 +3017,18 @@ static void OpenStartTabs() {
         g.tabs.push_back(std::move(tab));
     }
     KeepPinsFirst();
-    bool openNew = saved.empty() || !all || !g.startUrl.empty();
+    bool hasActiveWsTab = false;
+    for (auto& t : g.tabs) if (t->wsId == g.activeWs) { hasActiveWsTab = true; break; }
+    bool openNew = saved.empty() || !all || !g.startUrl.empty() || !hasActiveWsTab;
     if (openNew) CreateTab(g.startUrl.empty() ? HomeUrl() : g.startUrl, true);
-    else SelectTab(activeId ? activeId : g.tabs.front()->id, true);
+    else {
+        int pick = activeId;
+        if (Tab* act = FindTab(activeId)) {
+            if (act->wsId != g.activeWs) pick = 0;
+        }
+        if (!pick) for (auto& t : g.tabs) if (t->wsId == g.activeWs) { pick = t->id; break; }
+        SelectTab(pick, true);
+    }
 }
 
 static void PostUpdate(const UpdateMsg& m) {
@@ -3308,8 +3564,14 @@ static void ExecCmd(int cmd) {
     case CMD_FOCUSURL: FocusUrl(); break;
     case CMD_PRINT: if (b) b->GetHost()->Print(); break;
     case CMD_NEXTTAB: case CMD_PREVTAB: {
-        int n = (int)g.tabs.size(), i = IndexOf(g.active);
-        if (n > 1 && i >= 0) SelectTab(g.tabs[(i + (cmd == CMD_NEXTTAB ? 1 : n - 1)) % n]->id, true);
+        std::vector<int> vis;
+        int cur = -1;
+        for (auto& t : g.tabs) if (t->wsId == g.activeWs) {
+            if (t->id == g.active) cur = (int)vis.size();
+            vis.push_back(t->id);
+        }
+        int n = (int)vis.size();
+        if (n > 1 && cur >= 0) SelectTab(vis[(cur + (cmd == CMD_NEXTTAB ? 1 : n - 1)) % n], true);
         break;
     }
     case CMD_ZOOMIN: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_IN); break;
@@ -3360,6 +3622,7 @@ static void ExecCmd(int cmd) {
         if (!g.closed.empty()) {
             ClosedTab c = g.closed.back();
             g.closed.pop_back();
+            if (FindWs(c.wsId) && c.wsId != g.activeWs) SwitchWorkspace(c.wsId);
             CreateTab(c.url, true, c.index);
             if (c.pinned) SetPinned(g.active, true);
         }
@@ -4041,7 +4304,7 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
 static void ShowTabMenu(int id, int cssX, int cssY, double ratio) {
     Tab* t = FindTab(id);
     if (!t || GetTickCount64() - g_menuClosedAt < 250) return;
-    enum { T_PIN = 1, T_DUP, T_MUTE, T_CLOSE_OTHERS, T_CLOSE };
+    enum { T_PIN = 1, T_DUP, T_MUTE, T_CLOSE_OTHERS, T_CLOSE, T_NEW_WS, T_MOVE_BASE = 100 };
     std::vector<MenuItem> m;
     auto add = [&](int cmd, std::wstring text, bool disabled = false) {
         MenuItem it; it.cmd = cmd; it.text = std::move(text); it.disabled = disabled;
@@ -4051,8 +4314,17 @@ static void ShowTabMenu(int id, int cssX, int cssY, double ratio) {
     add(T_DUP, L"Duplicate tab", DisplayUrl(t).empty());
     if (t->audible || t->muted) add(T_MUTE, t->muted ? L"Unmute tab" : L"Mute tab");
     m.push_back(MenuItem());
+    std::vector<int> moveTargets;
+    for (const auto& w : g.workspaces) {
+        if (w.id == t->wsId) continue;
+        int cmdId = T_MOVE_BASE + (int)moveTargets.size();
+        moveTargets.push_back(w.id);
+        add(cmdId, L"Move to " + w.icon + L" " + w.name);
+    }
+    if (g.workspaces.size() < 12) add(T_NEW_WS, L"Move to new workspace");
+    m.push_back(MenuItem());
     int others = 0;
-    for (auto& o : g.tabs) if (o->id != id && !o->pinned) others++;
+    for (auto& o : g.tabs) if (o->id != id && o->wsId == t->wsId && !o->pinned) others++;
     add(T_CLOSE_OTHERS, L"Close other tabs", others == 0);   // pinned tabs stay
     add(T_CLOSE, L"Close tab");
 
@@ -4062,18 +4334,53 @@ static void ShowTabMenu(int id, int cssX, int cssY, double ratio) {
     ClientToScreen(g.hwnd, &p);
     int cmd = RunMenu(std::move(m), p, L"TAB", true);
     if (g.closing || !FindTab(id)) return;
+    if (cmd >= T_MOVE_BASE && cmd < T_MOVE_BASE + (int)moveTargets.size()) {
+        MoveTabToWorkspace(id, moveTargets[cmd - T_MOVE_BASE]);
+        return;
+    }
     switch (cmd) {
     case T_PIN: SetPinned(id, !FindTab(id)->pinned); break;
     case T_DUP: { Tab* s = FindTab(id); CreateTab(DisplayUrl(s), true, IndexOf(id) + 1); break; }
     case T_MUTE: ToggleMute(id); break;
+    case T_NEW_WS: CreateWorkspace(L"WS " + std::to_wstring(g.nextWsId), L"\u26A1", L"#ff2e97", id); break;
     case T_CLOSE_OTHERS: {
+        int ws = FindTab(id)->wsId;
         std::vector<int> ids;
-        for (auto& o : g.tabs) if (o->id != id && !o->pinned) ids.push_back(o->id);
+        for (auto& o : g.tabs) if (o->id != id && o->wsId == ws && !o->pinned) ids.push_back(o->id);
         for (int i : ids) CloseTab(i);
         SelectTab(id, true);
         break;
     }
     case T_CLOSE: CloseTab(id); break;
+    }
+}
+
+static void ShowWsMenu(int wsId, int cssX, int cssY, double ratio) {
+    Workspace* w = FindWs(wsId);
+    if (!w || GetTickCount64() - g_menuClosedAt < 250) return;
+    enum { W_SWITCH = 1, W_EDIT, W_NEW, W_DEL };
+    std::vector<MenuItem> m;
+    auto add = [&](int cmd, std::wstring text, bool disabled = false) {
+        MenuItem it; it.cmd = cmd; it.text = std::move(text); it.disabled = disabled;
+        m.push_back(std::move(it));
+    };
+    if (wsId != g.activeWs) add(W_SWITCH, L"Switch to " + w->name);
+    add(W_EDIT, L"Edit workspace...");
+    add(W_NEW, L"New workspace...", g.workspaces.size() >= 12);
+    m.push_back(MenuItem());
+    add(W_DEL, L"Delete workspace", g.workspaces.size() <= 1);
+
+    RECT c = ChromeRect();
+    if (!(ratio >= 0.5 && ratio <= 8)) ratio = g.dpi / 96.0;
+    POINT p{ c.left + (int)lround(cssX * ratio), c.top + (int)lround(cssY * ratio) };
+    ClientToScreen(g.hwnd, &p);
+    int cmd = RunMenu(std::move(m), p, L"WORKSPACE", true);
+    if (g.closing) return;
+    switch (cmd) {
+    case W_SWITCH: SwitchWorkspace(wsId); break;
+    case W_EDIT: RunInChrome(L"window.__nn&&window.__nn({type:'wsEdit',id:" + std::to_wstring(wsId) + L"})"); break;
+    case W_NEW: RunInChrome(L"window.__nn&&window.__nn({type:'wsEdit',id:0})"); break;
+    case W_DEL: DeleteWorkspace(wsId); break;
     }
 }
 
@@ -4270,9 +4577,9 @@ static void OnChromeCommand(const std::wstring& msg) {
     }
     else if (cmd == L"close") CloseTab(_wtoi(arg.c_str()));
     else if (cmd == L"pin") { if (Tab* t = FindTab(_wtoi(arg.c_str()))) SetPinned(t->id, !t->pinned); }
-    else if (cmd == L"move" || cmd == L"tabmenu" || cmd == L"bmmenu") {
+    else if (cmd == L"move" || cmd == L"tabmenu" || cmd == L"bmmenu" || cmd == L"wsmenu" || cmd == L"wscreate" || cmd == L"wsupdate") {
         // arguments: the tab, then the new place (move) or the click position in CSS pixels and
-        // the page's devicePixelRatio (tabmenu / bmmenu)
+        // the page's devicePixelRatio (tabmenu / bmmenu / wsmenu)
         std::vector<std::wstring> v;
         for (size_t s = 0;;) {
             size_t e = arg.find(L'\n', s);
@@ -4283,7 +4590,12 @@ static void OnChromeCommand(const std::wstring& msg) {
         if (cmd == L"move" && v.size() > 1) MoveTab(_wtoi(v[0].c_str()), _wtoi(v[1].c_str()));
         else if (cmd == L"tabmenu" && v.size() > 3) ShowTabMenu(_wtoi(v[0].c_str()), _wtoi(v[1].c_str()), _wtoi(v[2].c_str()), wcstod(v[3].c_str(), nullptr));
         else if (cmd == L"bmmenu" && v.size() > 5) ShowBookmarkMenu(_wtoi64(v[0].c_str()), v[1] == L"1", v[2], _wtoi(v[3].c_str()), _wtoi(v[4].c_str()), wcstod(v[5].c_str(), nullptr));
+        else if (cmd == L"wsmenu" && v.size() > 3) ShowWsMenu(_wtoi(v[0].c_str()), _wtoi(v[1].c_str()), _wtoi(v[2].c_str()), wcstod(v[3].c_str(), nullptr));
+        else if (cmd == L"wscreate" && v.size() > 2) CreateWorkspace(v[0], v[1], v[2]);
+        else if (cmd == L"wsupdate" && v.size() > 3) UpdateWorkspace(_wtoi(v[0].c_str()), v[1], v[2], v[3]);
     }
+    else if (cmd == L"wsswitch") SwitchWorkspace(_wtoi(arg.c_str()));
+    else if (cmd == L"wsdelete") DeleteWorkspace(_wtoi(arg.c_str()));
     else if (cmd == L"select") SelectTab(_wtoi(arg.c_str()), arg.find(L'\n') == std::wstring::npos);   // "<id>\nnofocus": a press that may become a drag
     else if (cmd == L"scan") ExecCmd(CMD_SCAN);
     else if (cmd == L"bookmark") ExecCmd(CMD_BOOKMARK);
@@ -5060,6 +5372,7 @@ static void BeginClose() {
     if (g.closing) return;
     SavePlacement();
     store::SaveIfDirty();
+    SaveWorkspaces();
     SaveSession();   // before the browsers start closing and take the tabs with them
     SweepTemp();
     g.closing = true;

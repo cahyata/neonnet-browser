@@ -182,11 +182,44 @@ body.find #find{display:flex}
 .sg.q .i{color:var(--pink)}
 .sg:hover,.sg.sel{background:rgba(0,229,255,.14)}
 .sg:hover .tt,.sg.sel .tt{color:var(--cyan)}
+
+/* workspaces bar (Opera GX-style) */
+#wsbar{app-region:no-drag;display:flex;align-items:center;gap:4px;align-self:center;flex:none;max-width:340px;overflow-x:auto;scrollbar-width:none;padding:2px 4px;border:1px solid rgba(138,111,192,.35);background:var(--bg2)}
+#wsbar::-webkit-scrollbar{display:none}
+.ws{app-region:no-drag;height:22px;padding:0 7px;display:inline-flex;align-items:center;gap:5px;color:var(--muted);border:1px solid transparent;font-size:11px;white-space:nowrap;flex:none;transition:all .12s}
+.ws:hover{color:var(--cyan);background:rgba(0,229,255,.08)}
+.ws.active{color:var(--wsc,var(--cyan));border-color:var(--wsc,var(--cyan));background:rgba(45,17,96,.85);box-shadow:inset 0 -2px 0 var(--wsc,var(--cyan))}
+.ws .wi{font-size:11px;color:var(--wsc,var(--cyan))}
+.ws .wn{max-width:74px;overflow:hidden;text-overflow:ellipsis}
+.ws .wc{font-size:10px;opacity:.65}
+#wsAdd{app-region:no-drag;height:24px;width:22px;align-self:center;color:var(--muted);border:1px solid rgba(138,111,192,.35);font-size:14px;flex:none;margin-right:4px}
+#wsAdd:hover{color:var(--bg);background:var(--cyan);border-color:var(--cyan)}
+#wsModal{position:absolute;z-index:22;display:none;width:292px;background:var(--bg2);border:1px solid var(--cyan);border-top:2px solid var(--pink);
+  box-shadow:0 12px 28px rgba(0,0,0,.65);padding:12px 14px;font-size:12px;color:#e8d8ff}
+#wsModal.on{display:block}
+#wsModal .wm-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;color:var(--yellow);font-weight:bold;letter-spacing:1px}
+#wsModal .wm-hd button{color:var(--muted);font-size:13px;padding:0 4px}
+#wsModal .wm-hd button:hover{color:var(--pink)}
+#wsModal label{display:block;color:var(--muted);font-size:10px;letter-spacing:1.2px;margin:8px 0 4px}
+#wsModal input[type=text]{width:100%;height:28px;background:var(--bg);border:1px solid var(--cyan);color:var(--cyan);padding:0 8px;outline:0;font:12px "Cascadia Mono",Consolas,monospace;user-select:text}
+#wsModal .picks{display:flex;gap:6px;flex-wrap:wrap}
+#wsModal .pick{height:26px;min-width:28px;padding:0 6px;border:1px solid rgba(138,111,192,.45);color:#e8d8ff;display:inline-flex;align-items:center;justify-content:center;font-size:12px}
+#wsModal .pick:hover{border-color:var(--cyan)}
+#wsModal .pick.on{border-color:var(--cyan);background:rgba(0,229,255,.18);color:var(--cyan)}
+#wsModal .cpick{width:24px;height:24px;border:2px solid transparent;padding:0}
+#wsModal .cpick.on{border-color:#fff;transform:scale(1.1)}
+#wsModal .wm-ft{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
+#wsModal .wm-ft button{height:26px;padding:0 11px;border:1px solid var(--cyan);color:var(--cyan);font-weight:bold;font-size:11px}
+#wsModal .wm-ft button:hover{background:var(--cyan);color:var(--bg)}
+#wsModal .wm-ft button.del{border-color:var(--pink);color:var(--pink);margin-right:auto}
+#wsModal .wm-ft button.del:hover{background:var(--pink);color:var(--bg)}
 </style>
 </head>
 <body>
 <div id="top">
   <div id="brand">&#9632; NEON<b>//</b>NET<span id="incog">INCOGNITO</span></div>
+  <div id="wsbar"></div>
+  <button id="wsAdd" title="New workspace">+</button>
   <div id="tabs"></div>
   <button id="plus" title="New tab (Ctrl+T)">+</button>
   <div id="spacer"></div>
@@ -225,6 +258,7 @@ body.find #find{display:flex}
 <div id="sug"></div>
 <div id="site"></div>
 <div id="bmdrop"></div>
+<div id="wsModal"></div>
 <script>
 const $ = s => document.querySelector(s);
 // Commands go to the host as requests to /cmd on this host (served by the app itself).
@@ -266,9 +300,30 @@ function shownUrl(u){
 
 const PIN = '<svg viewBox="0 0 16 16" width="12" height="12"><path fill="currentColor" d="M10 1.5l4.5 4.5-1.6.8-2.3 2.3.3 3.2-1.2 1.2-2.9-2.9L3.4 14.4 2.6 13.6l4.3-3.4-2.9-2.9 1.2-1.2 3.2.3 2.3-2.3z"/></svg>';
 
+function renderWorkspaces(){
+  const bar = $('#wsbar');
+  bar.innerHTML = '';
+  const list = state.workspaces || [];
+  list.forEach((w, idx) => {
+    const b = document.createElement('button');
+    b.className = 'ws' + (w.id === state.activeWs ? ' active' : '');
+    b.style.setProperty('--wsc', w.color || '#00e5ff');
+    b.title = w.name + ' (' + w.count + ' tab' + (w.count === 1 ? '' : 's') + (idx < 9 ? ', Alt+' + (idx + 1) : '') + ') — right-click to edit';
+    const wi = document.createElement('span'); wi.className = 'wi'; wi.textContent = w.icon || '\u25C6';
+    const wn = document.createElement('span'); wn.className = 'wn'; wn.textContent = w.name;
+    const wc = document.createElement('span'); wc.className = 'wc'; wc.textContent = String(w.count || 0);
+    b.append(wi, wn, wc);
+    b.onclick = () => { closeWsModal(); if(w.id !== state.activeWs) send('wsswitch', w.id); };
+    b.oncontextmenu = e => { e.preventDefault(); closeWsModal(); send('wsmenu', w.id, Math.round(e.clientX), Math.round(e.clientY), window.devicePixelRatio || 1); };
+    bar.appendChild(b);
+  });
+  $('#wsAdd').style.display = list.length >= 12 ? 'none' : '';
+}
+
 function render(){
   if(drag && drag.on){ pendingRender = true; return; }   // never rebuild the strip under a tab being dragged
   pendingRender = false;
+  renderWorkspaces();
   const box = $('#tabs');
   const prevById = new Map();
   for(const el of box.children) prevById.set(Number(el.dataset.id), el);
@@ -446,6 +501,7 @@ window.__nn = m => {
   else if(m.type === 'focusUrl'){ const u = $('#url'); u.focus(); u.select(); }
   else if(m.type === 'focusFind'){ fq.focus(); fq.select(); }
   else if(m.type === 'findResult'){ showCount(m.count, m.active); }
+  else if(m.type === 'wsEdit'){ openWsModal(m.id || 0); }
 };
 
 // ---- drag to reorder tabs ---------------------------------------------------------------
@@ -748,9 +804,96 @@ document.addEventListener('mousedown', e => { if(bmOpen && !bmDrop.contains(e.ta
 document.addEventListener('keydown', e => { if(e.key === 'Escape' && bmOpen){ e.preventDefault(); closeBmDrop(); } });
 window.addEventListener('blur', closeBmDrop);
 
+// ---- Workspace create / edit popover ----------------------------------------------------
+const WS_ICONS = ['\u25C6', '\u26A1', '\u2605', '\u25A3', '\u25C8', '\u25B2', '\u25CF'];
+const WS_COLORS = ['#00e5ff', '#ff2e97', '#ffd600', '#35ffa0', '#b388ff'];
+const wsModal = $('#wsModal');
+let wsModalOpen = false;
+
+function closeWsModal(){
+  if(!wsModalOpen) return;
+  wsModalOpen = false;
+  wsModal.classList.remove('on');
+  wsModal.innerHTML = '';
+  send('dropdown', 0);
+}
+
+function openWsModal(id){
+  closeSug(); closeSite(); closeBmDrop();
+  const list = state.workspaces || [];
+  const existing = id ? list.find(w => w.id === id) : null;
+  let selIcon = existing ? existing.icon : WS_ICONS[list.length % WS_ICONS.length];
+  let selColor = existing ? existing.color : WS_COLORS[list.length % WS_COLORS.length];
+
+  wsModal.innerHTML = '';
+  const hd = document.createElement('div'); hd.className = 'wm-hd';
+  hd.innerHTML = '<span>' + (existing ? 'EDIT WORKSPACE' : 'NEW WORKSPACE') + '</span>';
+  const x = document.createElement('button'); x.textContent = '\u2715'; x.onclick = closeWsModal;
+  hd.appendChild(x);
+  wsModal.appendChild(hd);
+
+  const l1 = document.createElement('label'); l1.textContent = 'NAME'; wsModal.appendChild(l1);
+  const inp = document.createElement('input'); inp.type = 'text'; inp.maxLength = 24;
+  inp.value = existing ? existing.name : ''; inp.placeholder = 'e.g. GAMING, WORK, DEV';
+  wsModal.appendChild(inp);
+
+  const l2 = document.createElement('label'); l2.textContent = 'ICON'; wsModal.appendChild(l2);
+  const ipicks = document.createElement('div'); ipicks.className = 'picks';
+  WS_ICONS.forEach(ic => {
+    const b = document.createElement('button'); b.className = 'pick' + (ic === selIcon ? ' on' : '');
+    b.textContent = ic;
+    b.onclick = () => { selIcon = ic; ipicks.querySelectorAll('.pick').forEach(p => p.classList.toggle('on', p === b)); };
+    ipicks.appendChild(b);
+  });
+  wsModal.appendChild(ipicks);
+
+  const l3 = document.createElement('label'); l3.textContent = 'COLOR'; wsModal.appendChild(l3);
+  const cpicks = document.createElement('div'); cpicks.className = 'picks';
+  WS_COLORS.forEach(col => {
+    const b = document.createElement('button'); b.className = 'cpick' + (col === selColor ? ' on' : '');
+    b.style.background = col;
+    b.onclick = () => { selColor = col; cpicks.querySelectorAll('.cpick').forEach(p => p.classList.toggle('on', p === b)); };
+    cpicks.appendChild(b);
+  });
+  wsModal.appendChild(cpicks);
+
+  const ft = document.createElement('div'); ft.className = 'wm-ft';
+  if(existing && list.length > 1){
+    const del = document.createElement('button'); del.className = 'del'; del.textContent = 'DELETE';
+    del.onclick = () => { closeWsModal(); send('wsdelete', existing.id); };
+    ft.appendChild(del);
+  }
+  const save = document.createElement('button'); save.textContent = existing ? 'SAVE' : 'CREATE';
+  const submit = () => {
+    const nm = inp.value.trim() || (existing ? existing.name : 'WS ' + (list.length + 1));
+    closeWsModal();
+    if(existing) send('wsupdate', existing.id, nm, selIcon, selColor);
+    else send('wscreate', nm, selIcon, selColor);
+  };
+  save.onclick = submit;
+  inp.onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); submit(); } else if(e.key === 'Escape'){ e.preventDefault(); closeWsModal(); } };
+  ft.appendChild(save);
+  wsModal.appendChild(ft);
+
+  const anchor = $('#wsbar').getBoundingClientRect();
+  const left = Math.max(8, Math.min(anchor.left, window.innerWidth - 300));
+  wsModal.style.left = left + 'px';
+  wsModal.style.top = ($('#top').getBoundingClientRect().bottom + 2) + 'px';
+  wsModalOpen = true;
+  wsModal.classList.add('on');
+  const need = Math.ceil(wsModal.getBoundingClientRect().bottom) + 8;
+  send('dropdown', need, Math.floor(left), Math.ceil(left + 292));
+  setTimeout(() => { inp.focus(); inp.select(); }, 0);
+}
+
+$('#wsAdd').onclick = () => { if(wsModalOpen) closeWsModal(); else openWsModal(0); };
+document.addEventListener('mousedown', e => { if(wsModalOpen && !wsModal.contains(e.target) && !$('#wsAdd').contains(e.target) && !$('#wsbar').contains(e.target)) closeWsModal(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && wsModalOpen){ e.preventDefault(); closeWsModal(); } });
+window.addEventListener('blur', closeWsModal);
+
 // The host resizes this window itself to show the list, so only a change of width closes it.
 let lastW = window.innerWidth;
-window.addEventListener('resize', () => { if(window.innerWidth !== lastW){ lastW = window.innerWidth; closeSug(); closeSite(); closeBmDrop(); layoutBmBar(); } });
+window.addEventListener('resize', () => { if(window.innerWidth !== lastW){ lastW = window.innerWidth; closeSug(); closeSite(); closeBmDrop(); closeWsModal(); layoutBmBar(); } });
 
 url.addEventListener('focus', () => { closeSite(); editing = true; setTimeout(() => url.select(), 0); });
 url.addEventListener('blur', () => { editing = false; closeSug(); url.value = shownUrl(state.url); });
