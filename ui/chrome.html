@@ -91,6 +91,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   transform:translateX(-100%)}
 /* run the sweep only while loading: an infinite animation keeps the GPU busy even at opacity 0 */
 #bar.on i{animation:sweep 1s linear infinite}
+html.idle .tab.snd:not(.muted) .spk svg,html.idle .tab.loading .n,html.idle #bar.on i{animation-play-state:paused}
 @keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(334%)}}
 #line{position:absolute;left:0;right:0;bottom:0;height:1px;background:var(--pink);opacity:.6}
 #star{color:var(--muted);font-size:15px;width:30px;height:100%}
@@ -268,36 +269,63 @@ const PIN = '<svg viewBox="0 0 16 16" width="12" height="12"><path fill="current
 function render(){
   if(drag && drag.on){ pendingRender = true; return; }   // never rebuild the strip under a tab being dragged
   pendingRender = false;
-  const box = $('#tabs'); box.innerHTML = '';
+  const box = $('#tabs');
+  const prevById = new Map();
+  for(const el of box.children) prevById.set(Number(el.dataset.id), el);
+
+  const desired = [];
   state.tabs.forEach((t, i) => {
-    const d = document.createElement('div');
-    d.className = 'tab' + (t.id === state.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.discarded ? ' discarded' : '') +
-      (t.audible ? ' snd' : '') + (t.muted ? ' muted' : '') + (t.pinned ? ' pinned' : '') + (t.icon && state.favicons ? ' hasico' : '');
-    d.dataset.id = t.id;
-    d.title = t.title;
-    d.innerHTML = '<span class="pin"></span><span class="n"></span><img class="ico" alt="" draggable="false"><span class="spk"></span><span class="t"></span><button class="x" title="Close tab (Ctrl+W)">&#10005;</button>';
-    d.querySelector('.pin').innerHTML = PIN;
+    let d = prevById.get(t.id);
+    if(!d){
+      d = document.createElement('div');
+      d.dataset.id = t.id;
+      d.innerHTML = '<span class="pin"></span><span class="n"></span><img class="ico" alt="" draggable="false"><span class="spk"></span><span class="t"></span><button class="x" title="Close tab (Ctrl+W)">&#10005;</button>';
+      d.querySelector('.pin').innerHTML = PIN;
+      const ico = d.querySelector('.ico');
+      ico.onerror = () => d.classList.remove('hasico');
+      const spk = d.querySelector('.spk');
+      spk.onmousedown = e => { e.stopPropagation(); };
+      spk.onclick = e => { e.stopPropagation(); send('mute', Number(d.dataset.id)); };
+      d.onmousedown = e => {
+        if(e.button !== 0 || e.target.classList.contains('x')) return;
+        send('select', Number(d.dataset.id), 'nofocus');
+        drag = {id: Number(d.dataset.id), x0: e.clientX, on: false};
+      };
+      d.onauxclick = e => { if(e.button === 1 && !d.classList.contains('pinned')) send('close', Number(d.dataset.id)); };
+      d.oncontextmenu = e => { e.preventDefault(); send('tabmenu', Number(d.dataset.id), Math.round(e.clientX), Math.round(e.clientY), window.devicePixelRatio || 1); };
+      d.querySelector('.x').onclick = e => { e.stopPropagation(); send('close', Number(d.dataset.id)); };
+    }
+    const wantIcon = t.icon && state.favicons ? t.icon : '';
     const ico = d.querySelector('.ico');
-    if(t.icon && state.favicons){ ico.src = t.icon; ico.onerror = () => d.classList.remove('hasico'); }
+    if((ico.dataset.src || '') !== wantIcon){
+      ico.dataset.src = wantIcon;
+      if(wantIcon) ico.src = wantIcon;
+      else ico.removeAttribute('src');
+    }
+    d.className = 'tab' + (t.id === state.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.discarded ? ' discarded' : '') +
+      (t.audible ? ' snd' : '') + (t.muted ? ' muted' : '') + (t.pinned ? ' pinned' : '') + (wantIcon ? ' hasico' : '');
+    if(d.title !== (t.title || '')) d.title = t.title || '';
     const spk = d.querySelector('.spk');
-    spk.innerHTML = t.muted ? SPK_OFF : SPK_ON;
-    spk.title = t.muted ? 'Sound is muted. Click to unmute this tab' : 'This tab is playing sound. Click to mute it';
-    spk.onmousedown = e => { e.stopPropagation(); };
-    spk.onclick = e => { e.stopPropagation(); send('mute', t.id); };
-    d.querySelector('.n').textContent = String(i + 1).padStart(2, '0');
-    d.querySelector('.t').textContent = (t.title || 'NEW TAB').toUpperCase();
-    d.onmousedown = e => {
-      if(e.button !== 0 || e.target.classList.contains('x')) return;
-      // Select without moving the keyboard focus into the page: focus moving away from this
-      // toolbar page in the middle of a press would stop the mouse events a drag needs.
-      // The focus goes to the page when the button is released (see the mouseup handler).
-      send('select', t.id, 'nofocus');
-      drag = {id: t.id, x0: e.clientX, on: false};   // becomes a real drag after a few pixels, see below
-    };
-    d.onauxclick = e => { if(e.button === 1 && !t.pinned) send('close', t.id); };
-    d.oncontextmenu = e => { e.preventDefault(); send('tabmenu', t.id, Math.round(e.clientX), Math.round(e.clientY), window.devicePixelRatio || 1); };
-    d.querySelector('.x').onclick = e => { e.stopPropagation(); send('close', t.id); };
-    box.appendChild(d);
+    const wantMuted = t.muted ? '1' : '0';
+    if(spk.dataset.m !== wantMuted){
+      spk.dataset.m = wantMuted;
+      spk.innerHTML = t.muted ? SPK_OFF : SPK_ON;
+    }
+    const wantSpkTitle = t.muted ? 'Sound is muted. Click to unmute this tab' : 'This tab is playing sound. Click to mute it';
+    if(spk.title !== wantSpkTitle) spk.title = wantSpkTitle;
+    const numTxt = String(i + 1).padStart(2, '0');
+    const nEl = d.querySelector('.n');
+    if(nEl.textContent !== numTxt) nEl.textContent = numTxt;
+    const titleTxt = (t.title || 'NEW TAB').toUpperCase();
+    const tEl = d.querySelector('.t');
+    if(tEl.textContent !== titleTxt) tEl.textContent = titleTxt;
+    desired.push(d);
+  });
+
+  const keep = new Set(desired);
+  for(const el of [...box.children]) if(!keep.has(el)) el.remove();
+  desired.forEach((d, i) => {
+    if(box.children[i] !== d) box.insertBefore(d, box.children[i] || null);
   });
   $('#back').disabled = !state.canBack;
   $('#fwd').disabled = !state.canFwd;
@@ -754,6 +782,7 @@ $('#perfb').onclick = () => send('perf');
 $('#menu').onclick = () => { const r = $('#menu').getBoundingClientRect(); send('menu', Math.round(document.documentElement.clientWidth - r.right), Math.round(r.bottom), window.devicePixelRatio); };
 document.addEventListener('contextmenu', e => { if(e.target !== url && e.target !== fq) e.preventDefault(); });
 document.addEventListener('dragstart', e => e.preventDefault());
+document.addEventListener('visibilitychange', () => document.documentElement.classList.toggle('idle', document.hidden));
 
 send('ready');
 </script>

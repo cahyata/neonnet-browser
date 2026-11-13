@@ -235,6 +235,9 @@ struct App {
     bool dlgBusy = false;
     bool sessionPending = false;      // a write of the open tabs to session.txt is scheduled
     std::string lastSession;          // what session.txt holds now, so an unchanged strip is not written again
+    std::wstring lastStateJson, cachedBmBarJson;
+    bool bmBarDirty = true, lastZoomed = false;
+    int rgnW = -1, rgnH = -1; bool rgnSimple = false;
     bool closing = false;
     // Incognito window (own process, started with --neonnet-incognito): in-memory browser
     // profile, no history, no saved window placement, no updates. Set once before CEF starts.
@@ -472,9 +475,15 @@ static RECT PanelRect() {
 }
 
 static void UpdateRegion() {
-    if (IsZoomed(g.hwnd) || g.fullscreen || IsIconic(g.hwnd)) { SetWindowRgn(g.hwnd, nullptr, TRUE); return; }
+    bool simple = IsZoomed(g.hwnd) || g.fullscreen || IsIconic(g.hwnd);
+    if (simple) {
+        if (!g.rgnSimple) { SetWindowRgn(g.hwnd, nullptr, TRUE); g.rgnSimple = true; g.rgnW = g.rgnH = -1; }
+        return;
+    }
     RECT wr; GetWindowRect(g.hwnd, &wr);
     int w = wr.right - wr.left, h = wr.bottom - wr.top, c = S(CUT_DIP);
+    if (!g.rgnSimple && w == g.rgnW && h == g.rgnH) return;
+    g.rgnSimple = false; g.rgnW = w; g.rgnH = h;
     POINT pts[6] = { {0, 0}, {w - c, 0}, {w, c}, {w, h}, {c, h}, {0, h - c} };
     SetWindowRgn(g.hwnd, CreatePolygonRgn(pts, 6, WINDING), TRUE);
 }
@@ -484,11 +493,12 @@ static void Place(CefRefPtr<CefBrowser> b, const RECT& r, bool visible, bool rai
     HWND w = b->GetHost()->GetWindowHandle();
     if (!w) return;
     bool wasVisible = IsWindowVisible(w) != FALSE;
+    if (!visible && !wasVisible) return;   // hidden background tab already hidden: skip SetWindowPos
     if (visible) {
         SetWindowPos(w, bottom ? HWND_BOTTOM : raise ? HWND_TOP : nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top,
                      ((raise || bottom) ? 0 : SWP_NOZORDER) | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         if (!wasVisible) b->GetHost()->WasHidden(false);
-    } else if (wasVisible) {
+    } else {
         ShowWindow(w, SW_HIDE);
         b->GetHost()->WasHidden(true);
     }
@@ -575,13 +585,19 @@ static void SendState() {
     j += std::wstring(L",\"canStar\":") + (!g.incognito && store::Recordable(cur) ? L"true" : L"false");
     j += std::wstring(L",\"starred\":") + (store::FindBookmark(cur) ? L"true" : L"false");
     j += std::wstring(L",\"bookmarksBar\":") + (g.bookmarksBar ? L"true" : L"false");
-    j += L",\"bar\":" + (g.bookmarksBar ? Wide(store::BookmarksBarJson(L"")) : L"[]");
+    if (g.bookmarksBar && (g.bmBarDirty || g.cachedBmBarJson.empty())) {
+        g.cachedBmBarJson = Wide(store::BookmarksBarJson(L""));
+        g.bmBarDirty = false;
+    }
+    j += L",\"bar\":" + (g.bookmarksBar ? g.cachedBmBarJson : L"[]");
     j += std::wstring(L",\"find\":") + (g.findOpen ? L"true" : L"false");
     j += std::wstring(L",\"findCase\":") + (g.findCase ? L"true" : L"false");
     j += L",\"findText\":" + JsonStr(g.findText);
     j += L",\"search\":" + JsonStr(CurrentEngine().url);
     j += L",\"site\":" + SiteJson(cur);
     j += L"}";
+    if (j == g.lastStateJson) return;
+    g.lastStateJson = j;
     RunInChrome(L"window.__nn&&window.__nn(" + j + L")");
 }
 
@@ -1527,16 +1543,18 @@ static void LoadBlocklist() {
     if (g_blocklistReady.load()) return;
     std::string text;
     if (!LoadUi(IDR_BLOCKLIST, text)) return;
+    g_blocklist.reserve(90000);
     size_t pos = 0;
     while (pos < text.size()) {
         size_t e = text.find('\n', pos);
         if (e == std::string::npos) e = text.size();
-        std::string line = text.substr(pos, e - pos);
+        size_t s = pos;
         pos = e + 1;
-        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) line.pop_back();
-        if (line.empty() || line[0] == '#') continue;
+        while (e > s && (text[e - 1] == '\r' || text[e - 1] == ' ' || text[e - 1] == '\t')) e--;
+        if (e <= s || text[s] == '#') continue;
+        std::string line = text.substr(s, e - s);
         for (auto& c : line) c = (char)tolower((unsigned char)c);
-        g_blocklist.insert(line);
+        g_blocklist.insert(std::move(line));
     }
     g_blocklistReady = true;
 }
@@ -1846,16 +1864,31 @@ public:
         if (!g.blockAds.load() || is_navigation || !browser || !g_blocklistReady.load()) return nullptr;
         int bid = browser->GetIdentifier();
         if (bid == g.chromeId.load() || bid == g.panelId.load()) return nullptr;
-        std::wstring ru = request->GetURL().ToWString();
-        if (ru.rfind(L"http", 0) != 0) return nullptr;
-        std::wstring sc, rh; int rp;
-        SplitUrl(ru, sc, rh, rp);
-        std::string reqHost = Utf8(rh);
-        if (!IsBlockedHost(reqHost)) return nullptr;
+        std::string ru = request->GetURL().ToString();
+        size_t hs = 0;
+        if (ru.compare(0, 8, "https://") == 0) hs = 8;
+        else if (ru.compare(0, 7, "http://") == 0) hs = 7;
+        else return nullptr;
+        size_t he = ru.find_first_of("/?#", hs);
+        std::string reqHost = ru.substr(hs, he == std::string::npos ? std::string::npos : he - hs);
+        size_t at = reqHost.rfind('@'); if (at != std::string::npos) reqHost.erase(0, at + 1);
+        size_t col = reqHost.find(':'); if (col != std::string::npos) reqHost.resize(col);
+        for (auto& c : reqHost) c = (char)tolower((unsigned char)c);
+        if (reqHost.empty() || !IsBlockedHost(reqHost)) return nullptr;
         // the site that is open, from its main frame
-        std::wstring page = browser->GetMainFrame() ? browser->GetMainFrame()->GetURL().ToWString() : L"";
-        std::wstring pHost = HostOnly(page);
-        if (page.rfind(L"https://neonnet.ui", 0) == 0 || (!pHost.empty() && SiteOf(Utf8(pHost)) == SiteOf(reqHost))) return nullptr;   // first party
+        std::string page = browser->GetMainFrame() ? browser->GetMainFrame()->GetURL().ToString() : "";
+        if (page.compare(0, 18, "https://neonnet.ui") == 0) return nullptr;
+        size_t ps = 0;
+        if (page.compare(0, 8, "https://") == 0) ps = 8;
+        else if (page.compare(0, 7, "http://") == 0) ps = 7;
+        if (ps) {
+            size_t pe = page.find_first_of("/?#", ps);
+            std::string pHost = page.substr(ps, pe == std::string::npos ? std::string::npos : pe - ps);
+            size_t pat = pHost.rfind('@'); if (pat != std::string::npos) pHost.erase(0, pat + 1);
+            size_t pcol = pHost.find(':'); if (pcol != std::string::npos) pHost.resize(pcol);
+            for (auto& c : pHost) c = (char)tolower((unsigned char)c);
+            if (!pHost.empty() && SiteOf(pHost) == SiteOf(reqHost)) return nullptr;   // first party
+        }
         static CefRefPtr<BlockHandler> handler = new BlockHandler();
         return handler;
     }
@@ -2925,6 +2958,7 @@ static void ToggleBookmark() {
     if (!store::Recordable(u)) { ShowNotice(L"THIS PAGE CANNOT BE BOOKMARKED"); return; }
     if (long long id = store::FindBookmark(u)) { store::DeleteBookmark(id); ShowNotice(L"BOOKMARK REMOVED"); }
     else { store::AddBookmark(u, a->title); ShowNotice(L"BOOKMARKED: " + Upper(a->title.empty() ? u : a->title)); }
+    g.bmBarDirty = true;
     ScheduleSave();
     SendState();
 }
@@ -3325,6 +3359,7 @@ static void ExecCmd(int cmd) {
     case CMD_BOOKMARKS: OpenPage(BOOKMARKS_PAGE); break;
     case CMD_BOOKMARKS_BAR: {
         g.bookmarksBar = !g.bookmarksBar;
+        g.bmBarDirty = true;
         DWORD v = g.bookmarksBar ? 1 : 0;
         RegSetBin(L"BookmarksBar", REG_DWORD, &v, sizeof(v));
         Layout();
@@ -4062,7 +4097,7 @@ static void ShowBookmarkMenu(long long id, bool isFolder, const std::wstring& ur
     switch (cmd) {
     case B_OPEN: if (Tab* a = Active()) if (a->browser && store::Recordable(url)) { a->browser->GetMainFrame()->LoadURL(url); FocusPage(); } break;
     case B_NEWTAB: if (store::Recordable(url)) CreateTab(url, true); break;
-    case B_DEL: if (!g.incognito && id > 0 && store::DeleteBookmark(id)) { ScheduleSave(); SendState(); } break;
+    case B_DEL: if (!g.incognito && id > 0 && store::DeleteBookmark(id)) { g.bmBarDirty = true; ScheduleSave(); SendState(); } break;
     case B_MGR: OpenPage(BOOKMARKS_PAGE); break;
     case B_HIDE: ExecCmd(CMD_BOOKMARKS_BAR); break;
     }
@@ -4174,7 +4209,7 @@ static void OnChromeCommand(const std::wstring& msg) {
     std::wstring cmd = msg.substr(0, nl);
     std::wstring arg = nl == std::wstring::npos ? L"" : msg.substr(nl + 1);
     Tab* a = Active();
-    if (cmd == L"ready") SendState();
+    if (cmd == L"ready") { g.lastStateJson.clear(); SendState(); }
     else if (cmd == L"navigate") {
         std::wstring low = arg; for (auto& ch : low) ch = towlower(ch);
         if (a && a->browser && !arg.empty() && low.rfind(L"javascript:", 0) != 0) {
@@ -4549,6 +4584,11 @@ public:
         cl->AppendSwitch("disable-extensions");
         cl->AppendSwitch("no-default-browser-check");
         cl->AppendSwitch("no-first-run");
+        // Trim unused Chromium background services (NeonNet has its own updater and ad blocker).
+        cl->AppendSwitch("disable-background-networking");
+        cl->AppendSwitch("disable-component-update");
+        cl->AppendSwitch("disable-domain-reliability");
+        cl->AppendSwitch("disable-sync");
     }
 
     void OnContextInitialized() override {
@@ -4620,11 +4660,17 @@ public:
 // speed of the whole computer, not of NeonNet alone.
 
 static void NetSample() {
-    ULONG size = 0;
-    if (GetIfTable(nullptr, &size, FALSE) != ERROR_INSUFFICIENT_BUFFER || size == 0) return;
-    std::vector<BYTE> buf(size);
+    static std::vector<BYTE> buf;
+    ULONG size = (ULONG)buf.size();
+    DWORD err = size ? GetIfTable((MIB_IFTABLE*)buf.data(), &size, FALSE) : ERROR_INSUFFICIENT_BUFFER;
+    if (err == ERROR_INSUFFICIENT_BUFFER) {
+        if (!size && GetIfTable(nullptr, &size, FALSE) != ERROR_INSUFFICIENT_BUFFER) return;
+        if (!size) return;
+        buf.resize(size);
+        err = GetIfTable((MIB_IFTABLE*)buf.data(), &size, FALSE);
+    }
+    if (err != NO_ERROR) return;
     auto* t = (MIB_IFTABLE*)buf.data();
-    if (GetIfTable(t, &size, FALSE) != NO_ERROR) return;
     ULONGLONG now = GetTickCount64();
     double dIn = 0, dOut = 0;
     std::map<DWORD, std::pair<DWORD, DWORD>> cur;
@@ -4651,7 +4697,7 @@ static void NetSample() {
 }
 
 static void OnNetTimer() {
-    if (!g.netSpeed || IsIconic(g.hwnd)) return;
+    if (!g.netSpeed || IsIconic(g.hwnd) || g.fullscreen) return;
     NetSample();
     InvalidateStatus();
 }
@@ -5047,7 +5093,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return HTCLIENT;
     }
     case WM_GETMINMAXINFO: ((MINMAXINFO*)lp)->ptMinTrackSize = { S(640), S(420) }; return 0;
-    case WM_SIZE: Layout(); SendState(); return 0;
+    case WM_SIZE: {
+        Layout();
+        bool z = IsZoomed(hwnd) != FALSE;
+        if (z != g.lastZoomed) { g.lastZoomed = z; SendState(); }
+        return 0;
+    }
     case WM_MOVE: case WM_MOVING:
         if (g.chrome) g.chrome->GetHost()->NotifyMoveOrResizeStarted();
         if (Tab* a = Active()) if (a->browser) a->browser->GetHost()->NotifyMoveOrResizeStarted();
@@ -5062,21 +5113,21 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: { PAINTSTRUCT ps; HDC hdc = BeginPaint(hwnd, &ps); Paint(hdc); EndPaint(hwnd, &ps); return 0; }
     case WM_TIMER:
-        if (wp == TIMER_ZOOM) KillTimer(hwnd, TIMER_ZOOM);
-        else if (wp == TIMER_NOTICE) { KillTimer(hwnd, TIMER_NOTICE); g.notice.clear(); }
+        if (wp == TIMER_ZOOM) { KillTimer(hwnd, TIMER_ZOOM); InvalidateStatus(); }
+        else if (wp == TIMER_NOTICE) { KillTimer(hwnd, TIMER_NOTICE); g.notice.clear(); InvalidateStatus(); }
         else if (wp == TIMER_ALERT) { KillTimer(hwnd, TIMER_ALERT); g.alert.clear(); InvalidateStatus(); }
+        else if (wp == TIMER_CLOCK) InvalidateStatus();
         else if (wp == TIMER_TEMP) SweepTemp();
         else if (wp == TIMER_PERF) OnPerfTimer();
         else if (wp == TIMER_AUDIO) OnAudioTimer();
-        else if (wp == TIMER_TRIM) { KillTimer(hwnd, TIMER_TRIM); g.lastTrimCount = perf::TrimWorkingSets(); SamplePerf(); PushPerf(); }
+        else if (wp == TIMER_TRIM) { KillTimer(hwnd, TIMER_TRIM); g.lastTrimCount = perf::TrimWorkingSets(); SamplePerf(); PushPerf(); InvalidateStatus(); }
         else if (wp == TIMER_NET) OnNetTimer();
         else if (wp == TIMER_UPDATE) MaybeAutoCheck();
-        else if (wp == TIMER_SAVE) { KillTimer(hwnd, TIMER_SAVE); store::SaveIfDirty(); return 0; }
-        else if (wp == TIMER_SESSION) { if (!g.closing) SaveSession(); else KillTimer(hwnd, TIMER_SESSION); return 0; }
-        InvalidateStatus();
+        else if (wp == TIMER_SAVE) { KillTimer(hwnd, TIMER_SAVE); store::SaveIfDirty(); }
+        else if (wp == TIMER_SESSION) { if (!g.closing) SaveSession(); else KillTimer(hwnd, TIMER_SESSION); }
         return 0;
     case WM_APP_UPDATE: { std::unique_ptr<UpdateMsg> m((UpdateMsg*)lp); if (!g.closing) OnUpdateMsg(*m); return 0; }
-    case WM_APP_STORE: ScheduleSave(); SendState(); return 0;
+    case WM_APP_STORE: g.bmBarDirty = true; ScheduleSave(); SendState(); return 0;
     case WM_APP_DOWNLOAD: DoDownloadAction((int)wp, (long long)lp); return 0;
     case WM_APP_MEDIA: AskMedia(std::unique_ptr<MediaAsk>((MediaAsk*)lp)); return 0;
     case WM_APP_DIALOG: OnDialogMsg(std::unique_ptr<DlgReq>((DlgReq*)lp)); return 0;

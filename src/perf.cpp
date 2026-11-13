@@ -2,7 +2,8 @@
 
 #include <tlhelp32.h>
 #include <psapi.h>
-#include <set>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #pragma comment(lib, "psapi.lib")
@@ -24,7 +25,8 @@ std::vector<DWORD> Family() {
     std::vector<DWORD> out;
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE) return out;
-    std::map<DWORD, std::vector<DWORD>> children;
+    std::unordered_map<DWORD, std::vector<DWORD>> children;
+    children.reserve(256);
     PROCESSENTRY32W e{ sizeof(e) };
     if (Process32FirstW(snap, &e)) {
         do { if (e.th32ProcessID != e.th32ParentProcessID) children[e.th32ParentProcessID].push_back(e.th32ProcessID); }
@@ -32,20 +34,26 @@ std::vector<DWORD> Family() {
     }
     CloseHandle(snap);
     std::vector<DWORD> todo{ GetCurrentProcessId() };
-    std::set<DWORD> seen;
+    std::unordered_set<DWORD> seen;
+    seen.reserve(64);
     while (!todo.empty()) {
         DWORD p = todo.back(); todo.pop_back();
         if (!seen.insert(p).second) continue;
         out.push_back(p);
-        for (DWORD c : children[p]) todo.push_back(c);
+        auto it = children.find(p);
+        if (it != children.end()) for (DWORD c : it->second) todo.push_back(c);
     }
     return out;
 }
 
 unsigned long long ToU64(const FILETIME& f) { return ((unsigned long long)f.dwHighDateTime << 32) | f.dwLowDateTime; }
 
-std::map<DWORD, unsigned long long> g_lastCpu;   // pid -> kernel+user time (100 ns) at the last sample
+std::unordered_map<DWORD, unsigned long long> g_lastCpu;   // pid -> kernel+user time (100 ns) at the last sample
 unsigned long long g_lastWall = 0;               // wall clock (100 ns) at the last sample
+DWORD CpuCount() {
+    static DWORD n = []() { SYSTEM_INFO si; GetSystemInfo(&si); return si.dwNumberOfProcessors ? si.dwNumberOfProcessors : 1; }();
+    return n;
+}
 
 }  // namespace
 
@@ -53,9 +61,9 @@ Snapshot Sample() {
     Snapshot s;
     FILETIME now; GetSystemTimeAsFileTime(&now);
     unsigned long long wall = ToU64(now);
-    SYSTEM_INFO si; GetSystemInfo(&si);
-    double span = g_lastWall && wall > g_lastWall ? (double)(wall - g_lastWall) * (si.dwNumberOfProcessors ? si.dwNumberOfProcessors : 1) : 0;
-    std::map<DWORD, unsigned long long> cpuNow;
+    double span = g_lastWall && wall > g_lastWall ? (double)(wall - g_lastWall) * CpuCount() : 0;
+    std::unordered_map<DWORD, unsigned long long> cpuNow;
+    cpuNow.reserve(g_lastCpu.size() + 16);
 
     for (DWORD pid : Family()) {
         HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pid);
