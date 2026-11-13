@@ -1236,6 +1236,8 @@ static void MaybeFinishClose() {
 static const char DEVTOOLS_DOCK_JS[] =
     "(function(){var d=window.DevToolsHost;if(!d||d.__nnDock)return;d.__nnDock=1;var o=d.sendMessageToEmbedder;"
     "d.sendMessageToEmbedder=function(m){try{var j=JSON.parse(m);"
+    // the tools' own X button asks the embedder to close "the window"; here that would close the whole browser
+    "if(j.method==='closeWindow'){console.log('__NN_CLOSE__');return;}"
     "if(j.method==='setPreference'&&j.params&&j.params[0]==='currentDockState')console.log('__NN_DOCK__'+JSON.parse(j.params[1]));"
     // where the tools leave room for the page (CSS pixels from their own top left corner)
     "else if(j.method==='setInspectedPageBounds'&&j.params&&j.params[0]){var b=j.params[0];console.log('__NN_BOUNDS__'+b.x+','+b.y+','+b.width+','+b.height);}}catch(e){}"
@@ -1285,6 +1287,11 @@ public:
             return true;
         }
         if (m == L"__NN_READY__") { ready_ = true; return true; }
+        if (m == L"__NN_CLOSE__") {   // the X button of the tools: close only them
+            Tab* t = FindTab(tabId_);
+            if (t && t->browser && t->dev && !g.closing) { t->browser->GetHost()->CloseDevTools(); FocusPage(); }
+            return true;
+        }
         if (m.rfind(L"__NN_DOCK__", 0) != 0) return false;
         if (!ready_) return true;   // what the tools report while they start up is their own old choice, not a new one
         std::wstring side = m.substr(11);
