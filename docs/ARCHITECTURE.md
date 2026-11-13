@@ -99,6 +99,7 @@ The tab strip and address bar are an ordinary HTML page (`ui/chrome.html`) in a 
 | `https://neonnet.ui/history.html` | `IDR_HISTORY` | History page (Ctrl+H) |
 | `https://neonnet.ui/bookmarks.html` | `IDR_BOOKMARKS` | Bookmarks page (Ctrl+Shift+O) |
 | `https://neonnet.ui/downloads.html` | `IDR_DOWNLOADS` | Downloads page (Ctrl+J) |
+| `https://neonnet.ui/extensions.html` | `IDR_EXTENSIONS` | Extensions / Userscripts page (Ctrl+Shift+E) |
 | `https://neonnet.ui/settings.html` | `IDR_SETTINGS` | Settings page (Ctrl+,) |
 | `https://neonnet.ui/cmd?...` | | Command channel (answers 204) |
 | `https://neonnet.ui/api/...` | | History and bookmarks data (JSON) |
@@ -301,6 +302,7 @@ The HTML files are embedded as `RCDATA` in `NeonNet.dll`, so there are no loose 
 - **Shortcuts:** `OnPreKeyEvent` catches keys before the page does, for every browser (chrome and tabs).
 - **Fullscreen:** combines two sources: `fsUser` from F11, and `fsElement` from the page (for example a video) through `OnFullscreenModeChange`. In fullscreen the window covers the whole monitor and the chrome and status bar are hidden.
 - **Downloads:** `OnBeforeDownload` opens a save dialog. `OnDownloadUpdated` shows progress in the status bar.
+- **Extensions (Userscripts):** `src/userscripts.cpp` stores `.user.js` scripts and `index.txt` in `%LOCALAPPDATA%\NeonNet\userscripts\` (read-only in incognito windows). `OnLoadStart` injects `@run-at document-start` scripts and `OnLoadEnd` injects `document-end` / `document-idle` scripts into matching `http://` / `https://` main frames with `GM_addStyle`, `localStorage`-scoped `GM_getValue`/`GM_setValue`/`GM_deleteValue`/`GM_listValues`, `GM_openInTab`, `GM_info`, and `GM.*` wrappers, while keeping `neonnet.ui` pages excluded.
 - **Single instance:** CEF locks the profile folder. A second instance fails in `CefInitialize`, and Chromium forwards its command line to the first instance through `OnAlreadyRunningAppRelaunch`, which opens the URL in a new tab.
 
 ## Chromium settings and why

@@ -112,6 +112,12 @@ select option{background:var(--bg2);color:var(--cyan)}
     <a class="btn" href="https://neonnet.ui/permissions.html">MANAGE</a>
   </div>
 
+  <h2 id="extensions">EXTENSIONS (USERSCRIPTS)</h2>
+  <div class="row">
+    <div class="lab"><b>Userscripts (.user.js)</b><span id="extHint"></span></div>
+    <a class="btn" href="https://neonnet.ui/extensions.html">MANAGE</a>
+  </div>
+
   <h2>SECURITY</h2>
   <div class="row">
     <div class="lab"><b>HTTPS-only mode</b><span>Opens every http:// address over https:// instead. If the site has no secure version, NeonNet asks before using plain http. Addresses on this computer or the local network are left alone.</span></div>
@@ -198,6 +204,7 @@ async function load(){
   setTog('#netSpeed', cfg.netSpeed);
   setTog('#savePasswords', cfg.savePasswords);
   $('#pwHint').textContent = cfg.incognito ? 'Incognito windows never save or fill passwords.' : cfg.passwordCount + ' saved. After you log in, NeonNet asks whether to keep the password; saved ones are offered when you click into a login field.';
+  $('#extHint').textContent = (cfg.scriptEnabled || 0) + ' enabled (' + (cfg.scriptTotal || 0) + ' installed). NeonNet runs .user.js userscripts (like Tampermonkey / Greasy Fork) instead of Chrome Web Store (.crx) extensions, which depend on Chrome\'s own toolbar and window UI.' + (cfg.incognito ? ' Incognito windows run existing scripts read-only.' : '');
   setTog('#blockAds', cfg.blockAds);
   $('#adHint').textContent = 'Cancels requests to well-known advertising and tracking sites, only when another site asks for them. Uses the EasyList, EasyPrivacy and Peter Lowe lists (about 82 000 sites). Reload a page after changing it. ' + (cfg.blocked ? cfg.blocked + ' requests blocked since NeonNet started.' : '');
   setTog('#restoreSession', cfg.restoreSession);

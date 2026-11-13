@@ -12,6 +12,7 @@
 #define IDR_BLOCKLIST  209
 #define IDR_PASSWORDS  210
 #define IDR_PERMISSIONS 211
+#define IDR_EXTENSIONS 212
 
 #define APP_VERSION    L"1.6.1"
 #define APP_PUBLISHER  L"NeonNet"

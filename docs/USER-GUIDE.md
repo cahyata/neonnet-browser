@@ -99,6 +99,7 @@ Sound is detected from audio and video elements on the page that are playing, no
 | Ctrl+Shift+O | Bookmarks |
 | Ctrl+H | History |
 | Ctrl+J | Downloads |
+| Ctrl+Shift+E | Extensions (Userscripts) |
 | Ctrl+, | Settings |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+1 … Ctrl+8 | Go to tab 1–8 |
@@ -115,7 +116,7 @@ Sound is detected from audio and video elements on the page that are playing, no
 
 ## The `≡` menu
 
-New tab, close tab, reopen closed tab, bookmark this page, bookmarks, history, find in page, zoom, print, scanlines on/off, fullscreen, developer tools, the update options (see [Updates](#updates)), and **About NeonNet** (Chromium version and the shortcut list).
+New tab, close tab, reopen closed tab, bookmark this page, bookmarks, history, downloads, **Extensions (Userscripts)**, find in page, zoom, print, scanlines on/off, fullscreen, developer tools, settings, the update options (see [Updates](#updates)), and **About NeonNet** (Chromium version and the shortcut list).
 
 Use the mouse, or the arrow keys and Enter. Esc, a click outside the menu, or another click on `≡` closes it.
 
@@ -185,6 +186,15 @@ When a site shows a certificate NeonNet cannot trust (expired, made for another 
 ## Blocking trackers and ads
 
 Turn it on in **Settings > SECURITY** or with **Block trackers and ads** in the `≡` menu. It is off by default, because a blocker can break a site now and then. When it is on, a request that a page makes to a known advertising or tracking site is cancelled, so the ad or tracker never loads. The list has about 82 000 domains, from EasyList, EasyPrivacy and Peter Lowe's list. What is never blocked: the page you open, and requests a site makes to itself or to its own parts (`example.com` and `cdn.example.com`). Reload a page after changing the switch. The settings page counts the requests blocked since NeonNet started. There is no per-site exception yet: if a site breaks, switch the blocker off for a moment.
+
+## Extensions (Userscripts)
+
+Open `≡` > **Extensions (Userscripts)**, press `Ctrl+Shift+E`, or go to `neonnet://extensions` (also linked from **Settings > EXTENSIONS**).
+
+- **Why Chrome Web Store extensions are not used:** Chrome Web Store `.crx` extensions rely on Chrome's own toolbar buttons, popup windows, and `chrome.*` extension APIs. Because NeonNet uses its own custom Win32/synthwave window and toolbar (`disable-extensions` is kept on intentionally), Chrome extensions cannot run directly inside NeonNet without opening stray Chrome-style windows.
+- **What NeonNet supports instead — Userscripts (`.user.js`):** NeonNet includes a built-in `.user.js` engine (the same script format used by Tampermonkey and Violentmonkey). You can import or drag-and-drop `.user.js` files (for example from Greasy Fork), write scripts directly in the built-in editor, toggle them on/off, or export them.
+- **Supported headers and APIs:** `@name`, `@namespace`, `@version`, `@author`, `@description`, `@match`, `@include`, `@exclude`, `@run-at` (`document-start`, `document-end`, `document-idle`), `GM_addStyle`, `GM_getValue`, `GM_setValue`, `GM_deleteValue`, `GM_listValues`, `GM_openInTab`, `GM_info`, `unsafeWindow`, and the Promise-based `GM.*` equivalents. Scripts only run on normal `http://` and `https://` web pages (never on NeonNet's internal pages).
+- **Incognito windows:** Existing enabled userscripts continue to run on sites, while adding, editing, toggling, or deleting scripts is disabled in incognito mode.
 
 ## Saved passwords
 
@@ -301,6 +311,7 @@ Automatic updates only work for the copy installed for this user (in the folder 
 | Saved passwords (encrypted) | `%LOCALAPPDATA%\NeonNet\passwords.dat` |
 | Tabs of the last session | `%LOCALAPPDATA%\NeonNet\session.txt` |
 | History, bookmarks and downloads list | `%LOCALAPPDATA%\NeonNet\history.txt`, `bookmarks.txt` and `downloads.txt` (plain UTF-8 text) |
+| Userscripts (Extensions) | `%LOCALAPPDATA%\NeonNet\userscripts\` (`index.txt` and `<id>.user.js`) |
 | Downloaded updates (deleted after installing) | `%LOCALAPPDATA%\NeonNet\Updates` |
 | Settings (scanlines, search engine, home page, download behaviour, window position, automatic updates) | Registry `HKEY_CURRENT_USER\Software\NeonNet` |
 | Shortcuts | Start menu `NeonNet`, and the desktop if chosen (an install for all users: the shared Start menu and desktop) |
@@ -326,6 +337,9 @@ Yes, unless you turn off **Automatic updates** in the `≡` menu. See [Updates](
 
 **Is it safe?**
 NeonNet uses the same Chromium sandbox as Chrome. Its security depends on how recent the bundled Chromium is, so leave automatic updates on.
+
+**Can I install Chrome Web Store extensions?**
+Not `.crx` extensions from the Chrome Web Store, because they depend on Chrome's built-in toolbar and browser APIs. Instead, NeonNet has a built-in **Userscripts (`.user.js`)** manager (`Ctrl+Shift+E` or `neonnet://extensions`) that runs Tampermonkey/Greasy Fork-style `.user.js` scripts, plus built-in ad & tracker blocking and smooth scrolling in Settings.
 
 **I have an older NeonNet installed. What happens when I install this one?**
 The installer uses the same folder and replaces the older version. Close the old NeonNet before installing.

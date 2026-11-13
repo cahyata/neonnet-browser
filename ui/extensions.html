@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>EXTENSIONS</title>
+<style>
+:root{--bg:#12062c;--bg2:#0a0420;--card:#190a38;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0;--green:#35ffa0;--line:#3a1a5e}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.16) 2px 3px)}
+main{max-width:880px;margin:0 auto;padding:32px 22px 72px}
+h1{margin:0 0 6px;font:italic 900 42px Impact,"Arial Black",sans-serif;letter-spacing:3px;color:var(--cyan);text-shadow:3px 3px 0 var(--pink)}
+.sub{color:var(--yellow);letter-spacing:1.5px;margin:0 0 22px;font-size:12px}
+a{color:var(--yellow);text-decoration:none}a:hover{text-decoration:underline}
+
+.info{background:var(--bg2);border:1px solid rgba(0,229,255,.35);border-left:3px solid var(--pink);padding:14px 16px;margin-bottom:22px;line-height:1.65}
+.info-title{color:var(--cyan);font-weight:bold;letter-spacing:1.5px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.info ul{margin:8px 0 6px 18px;padding:0;color:#d2c0f5}
+.info li{margin:4px 0}
+.info b{color:var(--yellow);font-weight:bold}
+.info code{color:var(--green);background:rgba(53,255,160,.08);padding:1px 5px}
+.info-links{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--muted)}
+
+.banner{background:rgba(255,214,0,.1);border:1px solid var(--yellow);color:var(--yellow);padding:10px 14px;margin-bottom:16px;display:none}
+.banner.show{display:block}
+
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.search{flex:1;min-width:200px;height:34px;background:var(--bg2);color:var(--cyan);border:1px solid var(--cyan);padding:0 10px;font:inherit;outline:0;
+  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px))}
+.search::placeholder{color:#5e4a8f}
+
+button,.btn{font:bold 12px "Cascadia Mono",Consolas,monospace;cursor:pointer;background:none;border:1px solid var(--pink);color:var(--pink);padding:7px 13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+button:hover:not(:disabled),.btn:hover{background:var(--pink);color:var(--bg);text-decoration:none}
+button.cyan,.btn.cyan{border-color:var(--cyan);color:var(--cyan)}
+button.cyan:hover:not(:disabled),.btn.cyan:hover{background:var(--cyan);color:var(--bg)}
+button.muted{border-color:var(--muted);color:var(--muted)}
+button.muted:hover:not(:disabled){border-color:var(--pink);color:var(--pink);background:none}
+button:disabled{opacity:.4;cursor:default}
+
+.drop-hint{font-size:12px;color:var(--muted);margin-bottom:14px}
+body.drag .drop-hint{color:var(--green)}
+body.drag main{outline:2px dashed var(--green);outline-offset:-10px}
+
+.empty{border:1px dashed var(--line);padding:28px 18px;text-align:center;color:var(--muted);line-height:1.7}
+.empty b{color:var(--cyan)}
+
+.card{background:var(--card);border:1px solid var(--line);padding:14px 16px;margin-bottom:12px;transition:border-color .15s}
+.card:hover{border-color:rgba(0,229,255,.5)}
+.card.off{opacity:.68}
+.card-top{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.card-main{flex:1;min-width:220px}
+.name-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.name{font-size:15px;font-weight:bold;color:var(--cyan)}
+.tag{font-size:11px;padding:1px 6px;border:1px solid var(--muted);color:var(--muted)}
+.tag.ver{border-color:rgba(255,214,0,.45);color:var(--yellow)}
+.tag.warn{border-color:var(--pink);color:var(--pink2)}
+.desc{color:#d5c6f7;margin:6px 0;line-height:1.5}
+.meta{font-size:12px;color:var(--muted);word-break:break-all}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{font-size:11px;background:var(--bg2);border:1px solid rgba(138,111,192,.35);color:#bfa8eb;padding:2px 7px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tog{min-width:60px;justify-content:center;border-color:var(--muted);color:var(--muted)}
+.tog.on{border-color:var(--green);color:var(--green)}
+.tog:hover:not(:disabled){background:var(--cyan);color:var(--bg);border-color:var(--cyan)}
+
+.editor-wrap{display:none;background:var(--bg2);border:1px solid var(--cyan);padding:16px;margin-bottom:20px}
+.editor-wrap.open{display:block}
+.editor-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap}
+.editor-head b{color:var(--cyan);letter-spacing:1.5px}
+.ed-meta{font-size:12px;color:var(--yellow)}
+textarea#code{width:100%;min-height:320px;background:#070217;color:#e8d8ff;border:1px solid var(--line);padding:12px;font:13px/1.5 "Cascadia Mono",Consolas,monospace;resize:vertical;outline:0;tab-size:2}
+textarea#code:focus{border-color:var(--cyan)}
+.ed-foot{display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:10px;flex-wrap:wrap}
+.err{color:var(--pink2);font-size:12px;min-height:16px}
+#toast{position:fixed;right:18px;bottom:16px;background:var(--green);color:var(--bg);padding:5px 12px;font-weight:bold;letter-spacing:1px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<main>
+  <h1>EXTENSIONS</h1>
+  <div class="sub">&gt; USERSCRIPT ENGINE (.USER.JS) // SITE CUSTOMIZATION</div>
+
+  <section class="info">
+    <div class="info-title">
+      <span>ABOUT EXTENSIONS IN NEONNET</span>
+      <a class="btn cyan" href="https://greasyfork.org/en/scripts" target="_blank" rel="noopener">BROWSE GREASY FORK ↗</a>
+    </div>
+    <ul>
+      <li><b>Chrome Web Store (.crx) extensions are not used:</b> Chrome extensions depend on Chrome's own toolbar buttons, popup windows, and <code>chrome.*</code> browser APIs. NeonNet uses its own custom Win32/synthwave UI (with Chromium extensions switched off) so third-party Chrome windows never pop up outside NeonNet.</li>
+      <li><b>Userscripts (.user.js) run natively:</b> You can install standard <code>.user.js</code> scripts (the same format used by Tampermonkey &amp; Violentmonkey) from sites like Greasy Fork or write your own to customize websites, hide clutter, add page buttons, or inject custom CSS/JS.</li>
+      <li><b>Supported headers &amp; APIs:</b> <code>@name</code>, <code>@version</code>, <code>@description</code>, <code>@match</code>, <code>@include</code>, <code>@exclude</code>, <code>@run-at</code> (<code>document-start</code>, <code>document-end</code>, <code>document-idle</code>), plus <code>GM_addStyle</code>, <code>GM_getValue</code>, <code>GM_setValue</code>, <code>GM_deleteValue</code>, <code>GM_listValues</code>, <code>GM_openInTab</code>, <code>GM_info</code>, and <code>GM.*</code> equivalents.</li>
+      <li><b>Already built into NeonNet:</b> Ad &amp; tracker blocking (~82,000 domains) and smooth scrolling are built directly into <a href="https://neonnet.ui/settings.html">Settings</a> without needing an extension.</li>
+    </ul>
+    <div class="info-links">
+      <span>Saved locally in <code>%LOCALAPPDATA%\NeonNet\userscripts\</code></span>
+      <span>Shortcut: <code>Ctrl+Shift+E</code> or <code>neonnet://extensions</code></span>
+    </div>
+  </section>
+
+  <div class="banner" id="incogBanner">INCOGNITO MODE — Existing enabled userscripts run on websites, but adding, editing, toggling, or deleting scripts is disabled in incognito windows.</div>
+
+  <div class="bar">
+    <input class="search" id="q" placeholder="Filter installed userscripts...">
+    <button id="newBtn">+ NEW SCRIPT</button>
+    <button class="cyan" id="importBtn">IMPORT .USER.JS</button>
+    <input type="file" id="fileIn" accept=".user.js,.js,text/javascript" hidden>
+  </div>
+  <div class="drop-hint">Tip: You can also drag and drop a <code>.user.js</code> file onto this page, or paste code into <b>+ NEW SCRIPT</b>. Reload open tabs after enabling or editing a script.</div>
+
+  <section class="editor-wrap" id="editor">
+    <div class="editor-head">
+      <b id="edTitle">NEW USERSCRIPT</b>
+      <span class="ed-meta" id="edPreview"></span>
+    </div>
+    <textarea id="code" spellcheck="false"></textarea>
+    <div class="ed-foot">
+      <div class="err" id="edErr"></div>
+      <div style="display:flex;gap:8px">
+        <button class="muted" id="cancelBtn">CANCEL</button>
+        <button class="cyan" id="saveBtn">SAVE SCRIPT</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="list"></div>
+</main>
+<div id="toast">SAVED</div>
+<script>
+const $ = s => document.querySelector(s);
+const TEMPLATE = `// ==UserScript==
+// @name         My Custom Script
+// @namespace    neonnet
+// @version      1.0
+// @description  Describe what this script does
+// @match        https://example.com/*
+// @run-at       document-end
+// @grant        GM_addStyle
+// ==/UserScript==
+
+(function() {
+  'use strict';
+  // Your JavaScript here. Example:
+  // GM_addStyle('body { border-top: 3px solid #00e5ff !important; }');
+})();
+`;
+
+let state = { incognito: false, scripts: [] };
+let editingId = 0;
+let toastTimer = 0;
+
+function toast(msg){
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 1400);
+}
+
+function previewMeta(code){
+  const mName = code.match(/^\s*\/\/\s*@name\s+(.+)$/m);
+  const matches = code.match(/^\s*\/\/\s*@(match|include)\s+.+$/mg);
+  const name = mName ? mName[1].trim() : 'Untitled script';
+  const rules = matches ? matches.length : 0;
+  $('#edPreview').textContent = name + '  •  ' + rules + ' match rule' + (rules === 1 ? '' : 's');
+}
+
+function openEditor(id, code, title){
+  if(state.incognito) return;
+  editingId = id || 0;
+  $('#edTitle').textContent = title || (editingId ? 'EDIT USERSCRIPT #' + editingId : 'NEW USERSCRIPT');
+  $('#code').value = code;
+  $('#edErr').textContent = '';
+  previewMeta(code);
+  $('#editor').classList.add('open');
+  $('#code').focus();
+}
+
+function closeEditor(){
+  editingId = 0;
+  $('#editor').classList.remove('open');
+  $('#edErr').textContent = '';
+}
+
+function chip(text){
+  const s = document.createElement('span');
+  s.className = 'chip';
+  s.textContent = text;
+  s.title = text;
+  return s;
+}
+
+function tag(text, cls){
+  const s = document.createElement('span');
+  s.className = 'tag' + (cls ? ' ' + cls : '');
+  s.textContent = text;
+  return s;
+}
+
+function render(){
+  const query = $('#q').value.trim().toLowerCase();
+  const list = $('#list');
+  list.textContent = '';
+  const items = state.scripts.filter(s => {
+    if(!query) return true;
+    const hay = (s.name + ' ' + s.description + ' ' + s.author + ' ' + s.matches.join(' ') + ' ' + s.includes.join(' ')).toLowerCase();
+    return hay.includes(query);
+  });
+
+  if(!state.scripts.length){
+    const d = document.createElement('div');
+    d.className = 'empty';
+    d.innerHTML = 'No userscripts installed yet.<br>Click <b>+ NEW SCRIPT</b> to write one or <b>IMPORT .USER.JS</b> to load a downloaded script.';
+    list.appendChild(d);
+    return;
+  }
+  if(!items.length){
+    const d = document.createElement('div');
+    d.className = 'empty';
+    d.textContent = 'No userscripts match "' + $('#q').value.trim() + '".';
+    list.appendChild(d);
+    return;
+  }
+
+  for(const s of items){
+    const card = document.createElement('div');
+    card.className = 'card' + (s.enabled ? '' : ' off');
+
+    const top = document.createElement('div');
+    top.className = 'card-top';
+
+    const main = document.createElement('div');
+    main.className = 'card-main';
+
+    const nl = document.createElement('div');
+    nl.className = 'name-line';
+    const nm = document.createElement('span');
+    nm.className = 'name';
+    nm.textContent = s.name;
+    nl.appendChild(nm);
+    if(s.version) nl.appendChild(tag('v' + s.version, 'ver'));
+    nl.appendChild(tag(s.runAt));
+    const rulesCount = s.matches.length + s.includes.length;
+    if(rulesCount === 0) nl.appendChild(tag('NO @MATCH RULES', 'warn'));
+    main.appendChild(nl);
+
+    if(s.description){
+      const desc = document.createElement('div');
+      desc.className = 'desc';
+      desc.textContent = s.description;
+      main.appendChild(desc);
+    }
+
+    if(s.author){
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = 'Author: ' + s.author;
+      main.appendChild(meta);
+    }
+
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    s.matches.slice(0, 6).forEach(m => chips.appendChild(chip('@match ' + m)));
+    s.includes.slice(0, 4).forEach(i => chips.appendChild(chip('@include ' + i)));
+    if(s.matches.length + s.includes.length > 10) chips.appendChild(chip('+' + (s.matches.length + s.includes.length - 10) + ' more'));
+    if(chips.childNodes.length) main.appendChild(chips);
+
+    const act = document.createElement('div');
+    act.className = 'actions';
+
+    const tog = document.createElement('button');
+    tog.className = 'tog' + (s.enabled ? ' on' : '');
+    tog.textContent = s.enabled ? 'ON' : 'OFF';
+    tog.disabled = state.incognito;
+    tog.onclick = async () => {
+      await fetch('/api/userscripts/toggle?id=' + s.id + '&enabled=' + (s.enabled ? '0' : '1'), { cache: 'no-store' });
+      toast(s.enabled ? 'DISABLED' : 'ENABLED');
+      load();
+    };
+
+    const ed = document.createElement('button');
+    ed.className = 'cyan';
+    ed.textContent = 'EDIT';
+    ed.disabled = state.incognito;
+    ed.onclick = () => openEditor(s.id, s.code, 'EDIT: ' + s.name);
+
+    const exp = document.createElement('button');
+    exp.className = 'muted';
+    exp.textContent = 'EXPORT';
+    exp.onclick = () => {
+      const safe = (s.name || 'script').replace(/[^a-z0-9._-]+/gi, '_') + '.user.js';
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([s.code], { type: 'text/javascript;charset=utf-8' }));
+      a.download = safe;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    };
+
+    const del = document.createElement('button');
+    del.className = 'muted';
+    del.textContent = 'DELETE';
+    del.disabled = state.incognito;
+    del.onclick = async () => {
+      if(!confirm('Delete userscript "' + s.name + '"?')) return;
+      await fetch('/api/userscripts/delete?id=' + s.id, { cache: 'no-store' });
+      if(editingId === s.id) closeEditor();
+      toast('DELETED');
+      load();
+    };
+
+    act.append(tog, ed, exp, del);
+    top.append(main, act);
+    card.appendChild(top);
+    list.appendChild(card);
+  }
+}
+
+async function load(){
+  try {
+    state = await (await fetch('/api/userscripts', { cache: 'no-store' })).json();
+    $('#incogBanner').classList.toggle('show', !!state.incognito);
+    $('#newBtn').disabled = !!state.incognito;
+    $('#importBtn').disabled = !!state.incognito;
+    render();
+  } catch(e){}
+}
+
+async function saveScript(id, enabled, code){
+  const r = await fetch('/api/userscripts/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: id || 0, enabled: enabled !== false, code })
+  });
+  const j = await r.json();
+  if(!r.ok) throw new Error(j.error || 'Could not save script');
+  return j;
+}
+
+$('#newBtn').onclick = () => openEditor(0, TEMPLATE, 'NEW USERSCRIPT');
+$('#cancelBtn').onclick = closeEditor;
+$('#code').addEventListener('input', () => previewMeta($('#code').value));
+$('#code').addEventListener('keydown', e => {
+  if(e.key === 'Tab'){
+    e.preventDefault();
+    const el = e.target, s = el.selectionStart, end = el.selectionEnd;
+    el.value = el.value.slice(0, s) + '  ' + el.value.slice(end);
+    el.selectionStart = el.selectionEnd = s + 2;
+  }
+});
+
+$('#saveBtn').onclick = async () => {
+  const code = $('#code').value;
+  if(!code.trim()){ $('#edErr').textContent = 'Script code cannot be empty.'; return; }
+  $('#edErr').textContent = '';
+  $('#saveBtn').disabled = true;
+  try {
+    const cur = state.scripts.find(x => x.id === editingId);
+    await saveScript(editingId, cur ? cur.enabled : true, code);
+    closeEditor();
+    toast('SAVED');
+    await load();
+  } catch(err){
+    $('#edErr').textContent = err.message;
+  }
+  $('#saveBtn').disabled = false;
+};
+
+$('#importBtn').onclick = () => $('#fileIn').click();
+$('#fileIn').onchange = async e => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if(!f) return;
+  const code = await f.text();
+  openEditor(0, code, 'IMPORT: ' + f.name);
+};
+
+document.addEventListener('dragover', e => {
+  if(state.incognito) return;
+  e.preventDefault();
+  document.body.classList.add('drag');
+});
+document.addEventListener('dragleave', () => document.body.classList.remove('drag'));
+document.addEventListener('drop', async e => {
+  document.body.classList.remove('drag');
+  if(state.incognito) return;
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if(!f) return;
+  e.preventDefault();
+  const code = await f.text();
+  openEditor(0, code, 'IMPORT: ' + f.name);
+});
+
+$('#q').addEventListener('input', render);
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') load(); });
+load();
+</script>
+</body>
+</html>

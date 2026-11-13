@@ -68,7 +68,7 @@ Done without being planned here first (the planned ones are ticked in the lists 
 - [x] **Installer: choose install folder and per-machine install** (M, unreleased). Not done: updating an install for all users by itself (it needs administrator rights each time).
 - [ ] **Signed installer and executables** (M). Removes the SmartScreen warning. Needs a code-signing certificate.
 - [ ] **Widevine DRM** (L). Needed for Netflix, Disney+ and similar; depends on a licence from the CDM vendor, and on H.264 and AAC, which are not built in because of patent licences. Not planned. NeonNet only warns in the status bar when a site asks for DRM, and opens videos it cannot play in the system player.
-- [ ] **Extensions** (L). Currently turned off on purpose (`disable-extensions`); a full Chrome Web Store system is out of scope, but a small set of NeonNet-specific features could be.
+- [x] **Extensions (Userscripts)** (L, unreleased). Chrome Web Store `.crx` extensions remain disabled (`disable-extensions`) because NeonNet uses its own custom Alloy UI instead of Chrome's toolbar and windows; instead, `neonnet://extensions` adds a built-in `.user.js` userscript manager (`@match`, `@include`, `@exclude`, `@run-at`, `GM_*` APIs).
 
 ## Quality and maintenance
 
