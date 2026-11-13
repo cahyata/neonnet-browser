@@ -520,6 +520,10 @@ select option{background:var(--bg2);color:var(--cyan)}
         <button class="tog" id="netSpeed">ON</button>
       </div>
       <div class="row">
+        <div class="lab"><b>Force dark mode</b><span>Automatically turns light websites dark using Chromium's built-in Auto Dark Mode while keeping images and NeonNet pages unchanged.</span></div>
+        <button class="tog" id="forceDark">OFF</button>
+      </div>
+      <div class="row">
         <div class="lab"><b>Scanlines</b><span>A thin CRT line effect over every page. Purely visual.</span></div>
         <button class="tog" id="scan">ON</button>
       </div>
@@ -585,6 +589,7 @@ async function load(){
   $('#restoreHint').textContent = cfg.restoreSession
     ? 'All tabs of the last session come back at start-up. They load when you click them. Pinned tabs always come back.'
     : 'Off: NeonNet starts with the home page. Pinned tabs come back either way.';
+  setTog('#forceDark', cfg.forceDark);
   setTog('#scan', cfg.scan);
   setTog('#autoUpdate', cfg.autoUpdate);
   $('#autoUpdate').disabled = !cfg.installed;
@@ -655,7 +660,7 @@ $('#checkUpdate').onclick = async () => {
   if(await set('checkUpdate', act)) load();
 };
 for(const k of ['smoothStep', 'smoothTime', 'devDock']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
-for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#bookmarksBar','bookmarksBar'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds']]){
+for(const [id, key] of [['#askDownload','askDownload'], ['#forceDark','forceDark'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#bookmarksBar','bookmarksBar'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds']]){
   $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };
 }
 async function saveHome(){

@@ -233,6 +233,7 @@ struct App {
     bool httpsOnly = false;           // HTTPS-only mode (registry HttpsOnly)
     bool savePasswords = true;        // offer to save passwords (registry SavePasswords)
     bool smooth = true;               // smooth scrolling (registry SmoothScroll), with the distance of a wheel step in px (100 = the normal step)
+    bool forceDark = false;           // force dark mode on web pages via Blink Auto Dark (registry ForceDark)
     int devDock = 0;                  // where developer tools open: 0 bottom, 1 right, 2 left, 3 separate window (registry DevToolsDock)
     int smoothStep = 120, smoothTime = 400;  // and the length of the animation in ms
     bool netSpeed = true;             // network speed in the status bar (registry NetSpeed)
@@ -810,6 +811,15 @@ static std::wstring ScanScript(bool on) {
 
 static void ApplyScan(CefRefPtr<CefBrowser> b) {
     if (b) b->GetMainFrame()->ExecuteJavaScript(ScanScript(g.scan), b->GetMainFrame()->GetURL(), 0);
+}
+
+static void ApplyForceDark(CefRefPtr<CefBrowser> b, const std::wstring& knownUrl = L"") {
+    if (!b) return;
+    std::wstring url = !knownUrl.empty() ? knownUrl : (b->GetMainFrame() ? b->GetMainFrame()->GetURL().ToWString() : L"");
+    bool isUi = url.rfind(UI_HOST, 0) == 0 || url.rfind(L"https://chrome.neonnet.ui/", 0) == 0;
+    CefRefPtr<CefDictionaryValue> p = CefDictionaryValue::Create();
+    if (g.forceDark && !isUi) p->SetBool("enabled", true);
+    b->GetHost()->ExecuteDevToolsMethod(0, "Emulation.setAutoDarkModeOverride", p);
 }
 
 static void RunUserscripts(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame> frame, userscripts::RunAt phase) {
@@ -1962,7 +1972,7 @@ public:
         Tab* t = nullptr;
         if (g.creatingTab) t = FindTab(g.creatingTab);
         else if (!g.pendingPopups.empty()) { t = FindTab(g.pendingPopups.front()); g.pendingPopups.pop_front(); }
-        if (t) { t->browser = browser; t->netEnabled = false; t->netLimitKB = -1; if (t->muted) browser->GetHost()->SetAudioMuted(true); ApplyNetworkLimit(); }
+        if (t) { t->browser = browser; t->netEnabled = false; t->netLimitKB = -1; if (t->muted) browser->GetHost()->SetAudioMuted(true); ApplyNetworkLimit(); if (g.forceDark) ApplyForceDark(browser); }
         else browser->GetHost()->CloseBrowser(true);   // unknown window: refuse it
         Layout();
         SendState();
@@ -2063,6 +2073,7 @@ public:
             if (Tab* t = TabOf(browser)) {
                 t->dirty = false;
                 ApplyScan(browser);
+                ApplyForceDark(browser, frame->GetURL().ToWString());
                 RunUserscripts(browser, frame, userscripts::RUN_START);
             }
         }   // a new page: nothing typed yet
@@ -2632,7 +2643,7 @@ static std::string SettingsJson() {
          ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
          ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) + ",\"smoothScroll\":" + b(RegGetDword(L"SmoothScroll", 1) != 0) + ",\"smoothStep\":" + std::to_string(RegGetDword(L"SmoothStep", 120)) + ",\"smoothTime\":" + std::to_string(RegGetDword(L"SmoothTime", 400)) + ",\"netSpeed\":" + b(RegGetDword(L"NetSpeed", 1) != 0) + ",\"devDock\":" + std::to_string(RegGetDword(L"DevToolsDock", 0)) + ",\"defaultBrowser\":" + b(browserreg::IsDefault()) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
          ",\"scriptTotal\":" + std::to_string(scriptTotal) + ",\"scriptEnabled\":" + std::to_string(scriptEnabled) +
-         ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"bookmarksBar\":" + b(RegGetDword(L"BookmarksBar", 1) != 0) + ",\"version\":" + JsonUtf8(APP_VERSION) +
+         ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"bookmarksBar\":" + b(RegGetDword(L"BookmarksBar", 1) != 0) + ",\"forceDark\":" + b(RegGetDword(L"ForceDark", 0) != 0) + ",\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
     return o;
 }
@@ -2752,7 +2763,7 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
         bool ok = false;
         if (key == L"search") { for (const auto& e : SEARCH_ENGINES) if (val == e.id) ok = true; }
-        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons" || key == L"bookmarksBar" || key == L"httpsOnly" || key == L"blockAds" || key == L"savePasswords" || key == L"smoothScroll" || key == L"netSpeed") ok = (val == L"0" || val == L"1");
+        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons" || key == L"bookmarksBar" || key == L"httpsOnly" || key == L"blockAds" || key == L"savePasswords" || key == L"smoothScroll" || key == L"netSpeed" || key == L"forceDark") ok = (val == L"0" || val == L"1");
         else if (key == L"smoothStep") ok = (val == L"70" || val == L"120" || val == L"200");
         else if (key == L"devDock") ok = (val == L"0" || val == L"1" || val == L"2" || val == L"3");
         else if (key == L"defaultBrowser") ok = (val == L"1");
@@ -5195,6 +5206,11 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"NetSpeed", REG_DWORD, &v, sizeof(v));
         SetNetSpeed(v != 0);
+    } else if (key == L"forceDark") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"ForceDark", REG_DWORD, &v, sizeof(v));
+        g.forceDark = v != 0;
+        for (auto& t : g.tabs) if (t->browser && !t->discarded) ApplyForceDark(t->browser);
     } else if (key == L"savePasswords") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"SavePasswords", REG_DWORD, &v, sizeof(v));
@@ -5668,6 +5684,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     g.httpsOnly = RegGetDword(L"HttpsOnly", 0) != 0;
     g.savePasswords = RegGetDword(L"SavePasswords", 1) != 0;
     g.smooth = RegGetDword(L"SmoothScroll", 1) != 0;
+    g.forceDark = RegGetDword(L"ForceDark", 0) != 0;
     { DWORD d = RegGetDword(L"DevToolsDock", 0); g.devDock = d <= 3 ? (int)d : 0; }
     { DWORD s = RegGetDword(L"SmoothStep", 120), t = RegGetDword(L"SmoothTime", 400); g.smoothStep = (s >= 40 && s <= 400) ? (int)s : 120; g.smoothTime = (t >= 100 && t <= 1500) ? (int)t : 400; }
     g.netSpeed = RegGetDword(L"NetSpeed", 1) != 0;
