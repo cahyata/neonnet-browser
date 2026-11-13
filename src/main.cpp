@@ -150,6 +150,8 @@ struct Tab {
     ULONGLONG audioUntil = 0;      // the page said it is playing sound: audible until this tick (see MEDIA_HOOK_JS)
     bool audible = false;          // as last shown to the UI
     bool dirty = false;            // a text field on the page holds text the user typed: do not unload it
+    bool netEnabled = false;       // DevTools Network.enable sent to this browser
+    int netLimitKB = -1;           // download cap currently applied in KB/s (-1 = unlimited)
     PwPending pw;
     std::wstring upgradedFrom, upgradedTo;   // HTTPS-only mode: the http address asked for, and the https address tried instead
     std::wstring icon;             // address of the page's favicon (http/https), shown in the tab strip
@@ -189,6 +191,8 @@ struct App {
     double perfCpu = 0;
     DWORD ramLimitMB = 0;          // 0 = off: unload idle background tabs while all processes together use more
     bool bgLimit = false;          // run background tabs at low priority
+    DWORD netLimitKB = 0;          // 0 = off: cap download speed in KB/s via DevTools network conditions
+    bool netLimitAll = false;      // false = background tabs only, true = all tabs
     std::set<std::wstring> keepHosts;   // sites whose tabs never go to sleep on their own (registry KeepAwakeHosts)
     int sleepBlocked = 0;          // background tabs the RAM limiter would have slept but must not (audio, typing, kept awake)
     int autoUnloaded = 0;          // tabs unloaded by the RAM limiter since NeonNet started
@@ -370,6 +374,7 @@ static std::wstring DownloadTarget(std::wstring name);   // below, next to Apply
 static void ShowAlert(const std::wstring& text);
 static void LaunchIncognito(const std::wstring& url);
 static void ApplyBackgroundLimit();   // performance panel, below
+static void ApplyNetworkLimit();
 static void PushPerf();
 static std::wstring HostOf(Tab* t);
 static const wchar_t* SleepProtection(Tab* t);
@@ -1112,6 +1117,7 @@ static void SelectTab(int id, bool focus) {
     SendState();
     InvalidateStatus();
     ApplyBackgroundLimit();
+    ApplyNetworkLimit();
     if (focus) FocusPage();
 }
 
@@ -1158,7 +1164,7 @@ static void CreateTab(const std::wstring& url, bool activate, int at) {
 // A tab unloaded by the performance panel gets a browser again, showing the address it had.
 static void RestoreTab(Tab* t) {
     if (!t || !t->discarded || t->browser) return;
-    t->discarded = false; t->loading = true; t->pid = 0;
+    t->discarded = false; t->loading = true; t->pid = 0; t->netEnabled = false; t->netLimitKB = -1;
     std::wstring url = DisplayUrl(t);
     g.creatingTab = t->id;
     CefRefPtr<CefBrowser> b = CefBrowserHost::CreateBrowserSync(ChildInfo(ContentRect()), MainClient(),
@@ -1671,7 +1677,7 @@ public:
         Tab* t = nullptr;
         if (g.creatingTab) t = FindTab(g.creatingTab);
         else if (!g.pendingPopups.empty()) { t = FindTab(g.pendingPopups.front()); g.pendingPopups.pop_front(); }
-        if (t) { t->browser = browser; if (t->muted) browser->GetHost()->SetAudioMuted(true); }
+        if (t) { t->browser = browser; t->netEnabled = false; t->netLimitKB = -1; if (t->muted) browser->GetHost()->SetAudioMuted(true); ApplyNetworkLimit(); }
         else browser->GetHost()->CloseBrowser(true);   // unknown window: refuse it
         Layout();
         SendState();
@@ -1690,7 +1696,7 @@ public:
             t->browser = nullptr;
             if (t->discarding) {
                 // unloaded on purpose (UnloadTab): the tab stays, without a browser, until it is selected
-                t->discarding = false; t->discarded = true; t->pid = 0; t->loading = false; t->memBytes = 0; t->cpu = 0;
+                t->discarding = false; t->discarded = true; t->pid = 0; t->loading = false; t->memBytes = 0; t->cpu = 0; t->netEnabled = false; t->netLimitKB = -1;
                 if (!g.closing) SendState();
             } else if (!g.closing) {
                 CloseTab(t->id);   // closed from inside the page (window.close())
@@ -2875,7 +2881,9 @@ static void PushPerf() {
     wchar_t cpu[32]; swprintf_s(cpu, L"%.1f", g.perfCpu);
     std::wstring j = L"{\"total\":" + mb(g.perfTotal) + L",\"browser\":" + mb(g.perfBrowser) + L",\"engine\":" + mb(engine) +
                      L",\"cpu\":" + cpu + L",\"limit\":" + std::to_wstring(g.ramLimitMB) +
-                     L",\"bg\":" + (g.bgLimit ? L"true" : L"false") + L",\"auto\":" + std::to_wstring(g.autoUnloaded) +
+                     L",\"bg\":" + (g.bgLimit ? L"true" : L"false") +
+                     L",\"net\":" + std::to_wstring(g.netLimitKB) + L",\"netAll\":" + (g.netLimitAll ? L"true" : L"false") +
+                     L",\"auto\":" + std::to_wstring(g.autoUnloaded) +
                      L",\"trimmed\":" + std::to_wstring(g.lastTrimCount) + L",\"tabs\":[";
     for (size_t i = 0; i < g.tabs.size(); i++) {
         Tab* t = g.tabs[i].get();
@@ -2912,6 +2920,29 @@ static void ApplyBackgroundLimit() {
         if (perf::SetBackground(t->pid, low)) applied[t->pid] = low;
     }
     for (auto it = applied.begin(); it != applied.end();) it = live.count(it->first) ? std::next(it) : applied.erase(it);
+}
+
+// Download speed cap per tab through DevTools network conditions (all tabs or background tabs only).
+static void ApplyNetworkLimit() {
+    if (g.closing) return;
+    for (auto& t : g.tabs) {
+        if (!t->browser || t->discarded) continue;
+        bool cap = g.netLimitKB > 0 && (g.netLimitAll || t->id != g.active);
+        int want = cap ? (int)g.netLimitKB : -1;
+        if (t->netLimitKB == want) continue;
+        if (!t->netEnabled) {
+            if (want < 0) continue;
+            t->browser->GetHost()->ExecuteDevToolsMethod(0, "Network.enable", CefDictionaryValue::Create());
+            t->netEnabled = true;
+        }
+        CefRefPtr<CefDictionaryValue> p = CefDictionaryValue::Create();
+        p->SetBool("offline", false);
+        p->SetDouble("latency", 0.0);
+        p->SetDouble("downloadThroughput", want > 0 ? (double)want * 1024.0 : -1.0);
+        p->SetDouble("uploadThroughput", -1.0);
+        t->browser->GetHost()->ExecuteDevToolsMethod(0, "Network.emulateNetworkConditions", p);
+        t->netLimitKB = want;
+    }
 }
 
 static bool UnloadTab(int id) {
@@ -3066,6 +3097,19 @@ static void SetBgLimit(bool on) {
     UpdatePerfTimer();
 }
 
+static void SetNetLimit(DWORD kb) {
+    g.netLimitKB = (kb >= 64 && kb <= 102400) ? kb : 0;
+    RegSetBin(L"NetLimitKB", REG_DWORD, &g.netLimitKB, sizeof(DWORD));
+    ApplyNetworkLimit();
+}
+
+static void SetNetAll(bool all) {
+    g.netLimitAll = all;
+    DWORD v = all ? 1 : 0;
+    RegSetBin(L"NetLimitAll", REG_DWORD, &v, sizeof(v));
+    ApplyNetworkLimit();
+}
+
 // Commands from the panel page (see OnChromeCommand).
 static void OnPerfCommand(const std::wstring& cmd, const std::wstring& arg) {
     int id = _wtoi(arg.c_str());
@@ -3087,6 +3131,8 @@ static void OnPerfCommand(const std::wstring& cmd, const std::wstring& arg) {
     else if (cmd == L"perf.unkeep") { g.keepHosts.erase(arg); SaveKeepHosts(); }
     else if (cmd == L"perf.ram") SetRamLimit((DWORD)_wtoi(arg.c_str()));
     else if (cmd == L"perf.bg") SetBgLimit(arg == L"1");
+    else if (cmd == L"perf.net") SetNetLimit((DWORD)_wtoi(arg.c_str()));
+    else if (cmd == L"perf.netall") SetNetAll(arg == L"1");
     else if (cmd == L"perf.hide") SetPanelOpen(false);
     SamplePerf();
     PushPerf();
@@ -5049,6 +5095,8 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     if (g.blockAds) LoadBlocklist();
     { DWORD r = RegGetDword(L"RamLimitMB", 0); g.ramLimitMB = (r >= 512 && r <= 65536) ? r : 0; }
     g.bgLimit = RegGetDword(L"BgLimit", 0) != 0;
+    { DWORD n = RegGetDword(L"NetLimitKB", 0); g.netLimitKB = (n >= 64 && n <= 102400) ? n : 0; }
+    g.netLimitAll = RegGetDword(L"NetLimitAll", 0) != 0;
     {
         std::wstring eid = RegGetString(L"SearchEngine");
         for (int i = 0; i < SEARCH_ENGINE_COUNT; i++) if (eid == SEARCH_ENGINES[i].id) g.engine = i;
