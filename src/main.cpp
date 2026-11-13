@@ -50,6 +50,7 @@
 
 static const int BORDER_DIP = 5;
 static const int CHROME_DIP = 84;
+static const int BM_BAR_DIP = 28; // bookmarks bar row under the address bar
 static const int STATUS_DIP = 24;
 static const int CUT_DIP = 16;
 static const int FIND_DIP = 34;   // find bar row, added under the chrome UI while open
@@ -105,7 +106,7 @@ enum Cmd {
     CMD_FULLSCREEN, CMD_DEVTOOLS, CMD_ABOUT, CMD_RELOAD, CMD_STOP, CMD_BACK, CMD_FWD,
     CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
     CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE,
-    CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_HISTORY,
+    CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_BOOKMARKS_BAR, CMD_HISTORY,
     CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS
 };
 enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW };
@@ -212,6 +213,7 @@ struct App {
     std::wstring alert;   // urgent status bar message (unsupported video / DRM), shown above everything else
     std::wstring startUrl;
     bool favicons = true;             // show site icons on tabs (registry ShowFavicons)
+    bool bookmarksBar = true;         // show the bookmarks bar under the address bar (registry BookmarksBar)
     bool httpsOnly = false;           // HTTPS-only mode (registry HttpsOnly)
     bool savePasswords = true;        // offer to save passwords (registry SavePasswords)
     bool smooth = true;               // smooth scrolling (registry SmoothScroll), with the distance of a wheel step in px (100 = the normal step)
@@ -438,7 +440,7 @@ static bool LoadUi(int id, std::string& out) {
 static int Frame() { return (IsZoomed(g.hwnd) || g.fullscreen) ? 0 : S(BORDER_DIP); }
 static RECT ChromeRect() {
     RECT rc; GetClientRect(g.hwnd, &rc); int b = Frame();
-    return { b, b, rc.right - b, b + S(CHROME_DIP + (g.findOpen ? FIND_DIP : 0)) };
+    return { b, b, rc.right - b, b + S(CHROME_DIP + (g.bookmarksBar ? BM_BAR_DIP : 0) + (g.findOpen ? FIND_DIP : 0)) };
 }
 // The toolbar browser grows downwards over the page while the address bar suggestions are
 // open, and is raised above the page for it. ContentRect() does not change, so the page
@@ -569,6 +571,8 @@ static void SendState() {
     std::wstring cur = a ? DisplayUrl(a) : L"";
     j += std::wstring(L",\"canStar\":") + (!g.incognito && store::Recordable(cur) ? L"true" : L"false");
     j += std::wstring(L",\"starred\":") + (store::FindBookmark(cur) ? L"true" : L"false");
+    j += std::wstring(L",\"bookmarksBar\":") + (g.bookmarksBar ? L"true" : L"false");
+    j += L",\"bar\":" + (g.bookmarksBar ? Wide(store::BookmarksBarJson(L"")) : L"[]");
     j += std::wstring(L",\"find\":") + (g.findOpen ? L"true" : L"false");
     j += std::wstring(L",\"findCase\":") + (g.findCase ? L"true" : L"false");
     j += L",\"findText\":" + JsonStr(g.findText);
@@ -1866,6 +1870,7 @@ public:
             case 'F': cmd = CMD_FIND; break;
             case 'G': cmd = shift ? CMD_FINDPREV : CMD_FINDNEXT; break;
             case 'D': if (!repeat) cmd = CMD_BOOKMARK; break;
+            case 'B': if (shift && !repeat) cmd = CMD_BOOKMARKS_BAR; break;
             case 'N': if (shift && !repeat) cmd = CMD_INCOGNITO; break;
             case 'M': if (shift && !repeat) cmd = CMD_PERFORMANCE; break;
             case 'H': if (!repeat) cmd = CMD_HISTORY; break;
@@ -2220,6 +2225,17 @@ static std::wstring QueryParam(const std::wstring& query, const wchar_t* name) {
     return {};
 }
 
+static bool HasQueryParam(const std::wstring& query, const wchar_t* name) {
+    std::wstring key = std::wstring(name) + L"=";
+    for (size_t p = 0; p < query.size();) {
+        size_t amp = query.find(L'&', p);
+        if (amp == std::wstring::npos) amp = query.size();
+        if (query.compare(p, key.size(), key) == 0) return true;
+        p = amp + 1;
+    }
+    return false;
+}
+
 static std::wstring RegGetString(const wchar_t* name);
 static bool AutoUpdateEnabled();
 static bool IsInstalledCopy();
@@ -2285,7 +2301,7 @@ static std::string SettingsJson() {
     o += std::string("],\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
          ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
          ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) + ",\"smoothScroll\":" + b(RegGetDword(L"SmoothScroll", 1) != 0) + ",\"smoothStep\":" + std::to_string(RegGetDword(L"SmoothStep", 120)) + ",\"smoothTime\":" + std::to_string(RegGetDword(L"SmoothTime", 400)) + ",\"netSpeed\":" + b(RegGetDword(L"NetSpeed", 1) != 0) + ",\"devDock\":" + std::to_string(RegGetDword(L"DevToolsDock", 0)) + ",\"defaultBrowser\":" + b(browserreg::IsDefault()) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
-         ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"version\":" + JsonUtf8(APP_VERSION) +
+         ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"bookmarksBar\":" + b(RegGetDword(L"BookmarksBar", 1) != 0) + ",\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
     return o;
 }
@@ -2293,18 +2309,44 @@ static std::string SettingsJson() {
 // https://neonnet.ui/api/* : history, bookmarks, downloads and settings for NeonNet's own
 // pages. Only a main frame that shows a neonnet.ui page may call it, so websites can neither
 // read nor change anything.
-static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const std::wstring& query) {
+static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const std::wstring& query, const std::string& body) {
     std::string out = "{}";
     bool changed = false;
     long long id = _wtoi64(QueryParam(query, L"id").c_str());
     if (path == L"api/history") out = store::HistoryJson(QueryParam(query, L"q"), 1500);
     else if (path == L"api/history/delete") changed = store::DeleteHistory(id);
     else if (path == L"api/bookmarks") out = store::BookmarksJson();
+    else if (path == L"api/bookmarks/add") {
+        if (g.incognito) return new StringResource("{\"error\":\"incognito\"}", "application/json", 403);
+        long long nid = store::AddBookmark(QueryParam(query, L"url"), QueryParam(query, L"title"), QueryParam(query, L"parent"));
+        if (!nid) return new StringResource("{\"error\":\"invalid address\"}", "application/json", 400);
+        changed = true;
+        out = "{\"id\":" + std::to_string(nid) + "}";
+    }
+    else if (path == L"api/bookmarks/folder") {
+        if (g.incognito) return new StringResource("{\"error\":\"incognito\"}", "application/json", 403);
+        long long nid = store::AddFolder(QueryParam(query, L"title"), QueryParam(query, L"parent"));
+        if (!nid) return new StringResource("{\"error\":\"invalid or duplicate folder\"}", "application/json", 400);
+        changed = true;
+        out = "{\"id\":" + std::to_string(nid) + "}";
+    }
     else if (path == L"api/bookmarks/delete") changed = store::DeleteBookmark(id);
     else if (path == L"api/bookmarks/edit") {
-        if (!store::EditBookmark(id, QueryParam(query, L"title"), QueryParam(query, L"url")))
-            return new StringResource("{\"error\":\"invalid address\"}", "application/json", 400);
+        if (!store::EditBookmark(id, QueryParam(query, L"title"), QueryParam(query, L"url"),
+                                 QueryParam(query, L"parent"), HasQueryParam(query, L"parent")))
+            return new StringResource("{\"error\":\"could not save\"}", "application/json", 400);
         changed = true;
+    }
+    else if (path == L"api/bookmarks/export") {
+        return new StringResource(store::ExportBookmarksHtml(), "text/html; charset=utf-8", 200);
+    }
+    else if (path == L"api/bookmarks/import") {
+        if (g.incognito) return new StringResource("{\"error\":\"incognito\"}", "application/json", 403);
+        int added = 0, folders = 0;
+        if (!store::ImportBookmarksHtml(body, added, folders))
+            return new StringResource("{\"error\":\"could not import\"}", "application/json", 400);
+        if (added > 0 || folders > 0) changed = true;
+        out = "{\"added\":" + std::to_string(added) + ",\"folders\":" + std::to_string(folders) + "}";
     }
     else if (path == L"api/cleardata/run") {
         // The time range is a name, turned into a cut-off here; the page never sends a time.
@@ -2360,7 +2402,7 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
         bool ok = false;
         if (key == L"search") { for (const auto& e : SEARCH_ENGINES) if (val == e.id) ok = true; }
-        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons" || key == L"httpsOnly" || key == L"blockAds" || key == L"savePasswords" || key == L"smoothScroll" || key == L"netSpeed") ok = (val == L"0" || val == L"1");
+        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons" || key == L"bookmarksBar" || key == L"httpsOnly" || key == L"blockAds" || key == L"savePasswords" || key == L"smoothScroll" || key == L"netSpeed") ok = (val == L"0" || val == L"1");
         else if (key == L"smoothStep") ok = (val == L"70" || val == L"120" || val == L"200");
         else if (key == L"devDock") ok = (val == L"0" || val == L"1" || val == L"2" || val == L"3");
         else if (key == L"defaultBrowser") ok = (val == L"1");
@@ -2409,11 +2451,28 @@ public:
             if (!(browser && browser->GetIdentifier() == g.chromeId.load())) return new StringResource("", "text/plain", 403);
             return new StringResource(store::SuggestJson(QueryParam(query, L"q"), 8), "application/json", 200);
         }
+        if (path == L"bookmarks") {
+            // Bookmarks bar folder contents: only for the toolbar.
+            if (!(browser && browser->GetIdentifier() == g.chromeId.load())) return new StringResource("", "text/plain", 403);
+            return new StringResource(store::BookmarksBarJson(QueryParam(query, L"parent")), "application/json", 200);
+        }
         if (path.rfind(L"api/", 0) == 0) {
             bool trusted = browser && browser->GetIdentifier() != g.chromeId.load() && frame && frame->IsMain() &&
                            frame->GetURL().ToWString().rfind(UI_HOST, 0) == 0;
             if (!trusted) return new StringResource("", "text/plain", 403);
-            return ServeApi(path, query);
+            std::string body;
+            if (CefRefPtr<CefPostData> pd = request->GetPostData()) {
+                CefPostData::ElementVector els;
+                pd->GetElements(els);
+                for (auto& el : els) {
+                    if (el->GetType() == PDE_TYPE_BYTES && el->GetBytesCount() > 0 && body.size() + el->GetBytesCount() <= 16 * 1024 * 1024) {
+                        size_t off = body.size();
+                        body.resize(off + el->GetBytesCount());
+                        el->GetBytes(el->GetBytesCount(), body.data() + off);
+                    }
+                }
+            }
+            return ServeApi(path, query, body);
         }
         int id = 0;
         if (path == L"chrome.html") id = IDR_CHROME;
@@ -3213,6 +3272,14 @@ static void ExecCmd(int cmd) {
         break;
     case CMD_BOOKMARK: ToggleBookmark(); break;
     case CMD_BOOKMARKS: OpenPage(BOOKMARKS_PAGE); break;
+    case CMD_BOOKMARKS_BAR: {
+        g.bookmarksBar = !g.bookmarksBar;
+        DWORD v = g.bookmarksBar ? 1 : 0;
+        RegSetBin(L"BookmarksBar", REG_DWORD, &v, sizeof(v));
+        Layout();
+        SendState();
+        break;
+    }
     case CMD_HISTORY: OpenPage(HISTORY_PAGE); break;
     case CMD_DOWNLOADS: OpenPage(DOWNLOADS_PAGE); break;
     case CMD_SETTINGS: OpenPage(SETTINGS_PAGE); break;
@@ -3835,6 +3902,7 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
     sep();
     add(CMD_BOOKMARK, starred ? L"Remove bookmark" : L"Bookmark this page", L"Ctrl+D", !canStar);
     add(CMD_BOOKMARKS, L"Bookmarks", L"Ctrl+Shift+O");
+    add(CMD_BOOKMARKS_BAR, L"Bookmarks bar", L"Ctrl+Shift+B", false, g.bookmarksBar);
     add(CMD_HISTORY, L"History", L"Ctrl+H", g.incognito);   // nothing is recorded in an incognito window
     add(CMD_DOWNLOADS, L"Downloads", L"Ctrl+J");
     add(CMD_PERFORMANCE, L"Performance panel", L"Ctrl+Shift+M", false, g.panelOpen);
@@ -3908,6 +3976,42 @@ static void ShowTabMenu(int id, int cssX, int cssY, double ratio) {
         break;
     }
     case T_CLOSE: CloseTab(id); break;
+    }
+}
+
+// Right-click on a bookmarks bar item (or the bar itself).
+static void ShowBookmarkMenu(long long id, bool isFolder, const std::wstring& url, int cssX, int cssY, double ratio) {
+    if (GetTickCount64() - g_menuClosedAt < 250) return;
+    enum { B_OPEN = 1, B_NEWTAB, B_DEL, B_MGR, B_HIDE };
+    std::vector<MenuItem> m;
+    auto add = [&](int cmd, std::wstring text, bool disabled = false) {
+        MenuItem it; it.cmd = cmd; it.text = std::move(text); it.disabled = disabled;
+        m.push_back(std::move(it));
+    };
+    if (!isFolder && store::Recordable(url)) {
+        add(B_OPEN, L"Open");
+        add(B_NEWTAB, L"Open in new tab");
+        m.push_back(MenuItem());
+    }
+    if (id > 0) {
+        add(B_DEL, isFolder ? L"Delete folder" : L"Delete bookmark", g.incognito);
+        m.push_back(MenuItem());
+    }
+    add(B_MGR, L"Bookmarks manager");
+    add(B_HIDE, L"Hide bookmarks bar");
+
+    RECT c = ChromeRect();
+    if (!(ratio >= 0.5 && ratio <= 8)) ratio = g.dpi / 96.0;
+    POINT p{ c.left + (int)lround(cssX * ratio), c.top + (int)lround(cssY * ratio) };
+    ClientToScreen(g.hwnd, &p);
+    int cmd = RunMenu(std::move(m), p, L"BOOKMARK", true);
+    if (g.closing) return;
+    switch (cmd) {
+    case B_OPEN: if (Tab* a = Active()) if (a->browser && store::Recordable(url)) { a->browser->GetMainFrame()->LoadURL(url); FocusPage(); } break;
+    case B_NEWTAB: if (store::Recordable(url)) CreateTab(url, true); break;
+    case B_DEL: if (!g.incognito && id > 0 && store::DeleteBookmark(id)) { ScheduleSave(); SendState(); } break;
+    case B_MGR: OpenPage(BOOKMARKS_PAGE); break;
+    case B_HIDE: ExecCmd(CMD_BOOKMARKS_BAR); break;
     }
 }
 
@@ -4029,7 +4133,10 @@ static void OnChromeCommand(const std::wstring& msg) {
     else if (cmd == L"fwd") ExecCmd(CMD_FWD);
     else if (cmd == L"reload") ExecCmd(CMD_RELOAD);
     else if (cmd == L"stop") ExecCmd(CMD_STOP);
-    else if (cmd == L"newtab") ExecCmd(CMD_NEWTAB);
+    else if (cmd == L"newtab") {
+        if (!arg.empty() && store::Recordable(arg)) CreateTab(arg, true);
+        else ExecCmd(CMD_NEWTAB);
+    }
     else if (cmd == L"mute") ToggleMute(_wtoi(arg.c_str()));
     else if (cmd == L"perf") ExecCmd(CMD_PERFORMANCE);
     else if (cmd.rfind(L"perf.", 0) == 0) OnPerfCommand(cmd, arg);
@@ -4065,9 +4172,9 @@ static void OnChromeCommand(const std::wstring& msg) {
     }
     else if (cmd == L"close") CloseTab(_wtoi(arg.c_str()));
     else if (cmd == L"pin") { if (Tab* t = FindTab(_wtoi(arg.c_str()))) SetPinned(t->id, !t->pinned); }
-    else if (cmd == L"move" || cmd == L"tabmenu") {
+    else if (cmd == L"move" || cmd == L"tabmenu" || cmd == L"bmmenu") {
         // arguments: the tab, then the new place (move) or the click position in CSS pixels and
-        // the page's devicePixelRatio (tabmenu)
+        // the page's devicePixelRatio (tabmenu / bmmenu)
         std::vector<std::wstring> v;
         for (size_t s = 0;;) {
             size_t e = arg.find(L'\n', s);
@@ -4077,6 +4184,7 @@ static void OnChromeCommand(const std::wstring& msg) {
         }
         if (cmd == L"move" && v.size() > 1) MoveTab(_wtoi(v[0].c_str()), _wtoi(v[1].c_str()));
         else if (cmd == L"tabmenu" && v.size() > 3) ShowTabMenu(_wtoi(v[0].c_str()), _wtoi(v[1].c_str()), _wtoi(v[2].c_str()), wcstod(v[3].c_str(), nullptr));
+        else if (cmd == L"bmmenu" && v.size() > 5) ShowBookmarkMenu(_wtoi64(v[0].c_str()), v[1] == L"1", v[2], _wtoi(v[3].c_str()), _wtoi(v[4].c_str()), wcstod(v[5].c_str(), nullptr));
     }
     else if (cmd == L"select") SelectTab(_wtoi(arg.c_str()), arg.find(L'\n') == std::wstring::npos);   // "<id>\nnofocus": a press that may become a drag
     else if (cmd == L"scan") ExecCmd(CMD_SCAN);
@@ -4652,6 +4760,8 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         RegSetBin(L"ShowFavicons", REG_DWORD, &v, sizeof(v));
         g.favicons = v != 0;
         SendState();
+    } else if (key == L"bookmarksBar") {
+        if ((val == L"1") != g.bookmarksBar) ExecCmd(CMD_BOOKMARKS_BAR);
     } else if (key == L"restoreSession") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"RestoreSession", REG_DWORD, &v, sizeof(v));
@@ -5083,6 +5193,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     EnableDarkMenus();
     g.scan = RegGetDword(L"Scanlines", 1) != 0;
     g.favicons = RegGetDword(L"ShowFavicons", 1) != 0;
+    g.bookmarksBar = RegGetDword(L"BookmarksBar", 1) != 0;
     g.httpsOnly = RegGetDword(L"HttpsOnly", 0) != 0;
     g.savePasswords = RegGetDword(L"SavePasswords", 1) != 0;
     g.smooth = RegGetDword(L"SmoothScroll", 1) != 0;

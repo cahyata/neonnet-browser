@@ -151,6 +151,10 @@ select option{background:var(--bg2);color:var(--cyan)}
 
   <h2>LOOK</h2>
   <div class="row">
+    <div class="lab"><b>Bookmarks bar</b><span>Shows your bookmarks and folders in a bar under the address bar (Ctrl+Shift+B).</span></div>
+    <button class="tog" id="bookmarksBar">ON</button>
+  </div>
+  <div class="row">
     <div class="lab"><b>Network speed in the status bar</b><span>Shows download (cyan) and upload (pink) speed at the bottom left. It is the speed of the whole computer over Ethernet, Wi-Fi and mobile data together, not of NeonNet alone.</span></div>
     <button class="tog" id="netSpeed">ON</button>
   </div>
@@ -196,6 +200,7 @@ async function load(){
   $('#smoothTime').value = String(cfg.smoothTime);
   $('#smoothStep').disabled = $('#smoothTime').disabled = !cfg.smoothScroll;
   setTog('#netSpeed', cfg.netSpeed);
+  setTog('#bookmarksBar', cfg.bookmarksBar);
   setTog('#savePasswords', cfg.savePasswords);
   $('#pwHint').textContent = cfg.incognito ? 'Incognito windows never save or fill passwords.' : cfg.passwordCount + ' saved. After you log in, NeonNet asks whether to keep the password; saved ones are offered when you click into a login field.';
   setTog('#blockAds', cfg.blockAds);
@@ -227,7 +232,7 @@ async function set(key, value){
 $('#engine').onchange = async () => { await set('search', $('#engine').value); load(); };
 $('#defaultBrowser').onclick = async () => { await set('defaultBrowser', '1'); };
 for(const k of ['smoothStep', 'smoothTime', 'devDock']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
-for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds']]){
+for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#bookmarksBar','bookmarksBar'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds']]){
   $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };
 }
 async function saveHome(){

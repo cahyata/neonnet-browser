@@ -25,12 +25,18 @@ std::string HistoryJson(const std::wstring& query, size_t limit);
 bool DeleteHistory(long long id);
 void ClearHistory();
 
-// Bookmarks
+// Bookmarks (including folders: url is empty and folder is true; parent is a slash-separated path, "" = root)
 long long FindBookmark(const std::wstring& url);         // 0 when not bookmarked
-long long AddBookmark(const std::wstring& url, const std::wstring& title);
+long long AddBookmark(const std::wstring& url, const std::wstring& title, const std::wstring& parent = L"");
+long long AddFolder(const std::wstring& name, const std::wstring& parent = L"");
 bool DeleteBookmark(long long id);
 bool EditBookmark(long long id, const std::wstring& title, const std::wstring& url);
+bool EditBookmark(long long id, const std::wstring& title, const std::wstring& url,
+                  const std::wstring& parent, bool updateParent);
 std::string BookmarksJson();
+std::string BookmarksBarJson(const std::wstring& parent = L"");
+std::string ExportBookmarksHtml();
+bool ImportBookmarksHtml(const std::string& html, int& addedBookmarks, int& addedFolders);
 
 // Delete the history entries from sinceMs (unix ms) on; 0 deletes all. Returns how many were removed.
 int ClearHistorySince(long long sinceMs);

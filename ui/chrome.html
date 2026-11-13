@@ -98,7 +98,36 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 #star.on{color:var(--yellow)}
 #star:disabled{color:#3a2a5e;cursor:default}
 
-/* row 3: find bar (only while open; the host makes the chrome area taller) */
+/* row 3: bookmarks bar (only while enabled; the host makes the chrome area taller) */
+#bmbar{height:28px;display:none;align-items:center;gap:4px;padding:0 12px;background:var(--bg2);
+  border-bottom:1px solid rgba(255,46,151,.45);overflow:hidden;position:relative}
+body.bmbar #bmbar{display:flex}
+#bmItems{flex:1;min-width:0;display:flex;align-items:center;gap:2px;overflow:hidden}
+.bm{height:22px;max-width:160px;flex:none;display:inline-flex;align-items:center;gap:5px;padding:0 7px;
+  color:#e8d8ff;font-size:11px;border:1px solid transparent;white-space:nowrap}
+.bm:hover,.bm.open{color:var(--cyan);background:rgba(0,229,255,.12);border-color:rgba(0,229,255,.4)}
+.bm.dir{color:var(--yellow)}
+.bm.dir:hover,.bm.dir.open{color:var(--yellow);background:rgba(255,214,0,.1);border-color:rgba(255,214,0,.45)}
+.bm .bl{overflow:hidden;text-overflow:ellipsis}
+.bm svg,.bmd svg{flex:none}
+#bmMore{display:none;height:22px;padding:0 7px;color:var(--cyan);font-weight:bold;flex:none}
+#bmMore.on{display:inline-flex;align-items:center}
+#bmMore:hover,#bmMore.open{background:rgba(0,229,255,.14)}
+#bmMgr{height:22px;padding:0 6px;color:var(--muted);font-size:10px;letter-spacing:1px;flex:none}
+#bmMgr:hover{color:var(--pink)}
+#bmEmpty{color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#bmdrop{position:absolute;z-index:20;display:none;min-width:200px;max-width:320px;max-height:360px;overflow-y:auto;
+  background:var(--bg2);border:1px solid var(--cyan);border-top:1px solid var(--pink);box-shadow:0 10px 24px rgba(0,0,0,.55);padding:3px 0}
+#bmdrop.on{display:block}
+.bmd{display:flex;align-items:center;gap:7px;width:100%;height:28px;padding:0 10px;text-align:left;color:#e8d8ff;font-size:12px;white-space:nowrap}
+.bmd:hover{background:rgba(0,229,255,.14);color:var(--cyan)}
+.bmd.dir{color:var(--yellow)}
+.bmd.back{color:var(--pink2);border-bottom:1px solid rgba(138,111,192,.25);margin-bottom:2px}
+.bmd .bt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.bmd .ar{color:var(--muted);flex:none}
+.bmEmptyDrop{padding:8px 12px;color:var(--muted);font-size:11px}
+
+/* row 4: find bar (only while open; the host makes the chrome area taller) */
 #find{height:34px;display:none;align-items:center;gap:6px;padding:0 12px 2px;border-bottom:1px solid var(--cyan)}
 body.find #find{display:flex}
 #find .fl{color:var(--yellow);letter-spacing:1px}
@@ -179,6 +208,11 @@ body.find #find{display:flex}
   <div id="line"></div>
   <div id="bar"><i></i></div>
 </div>
+<div id="bmbar">
+  <div id="bmItems"></div>
+  <button id="bmMore" title="More bookmarks">&raquo;</button>
+  <button id="bmMgr" title="Bookmarks manager (Ctrl+Shift+O)">MANAGE</button>
+</div>
 <div id="find">
   <span class="fl">FIND&gt;</span>
   <div id="fbox"><input id="fq" spellcheck="false" autocomplete="off" placeholder="find in page"><span id="fcount"></span></div>
@@ -189,6 +223,7 @@ body.find #find{display:flex}
 </div>
 <div id="sug"></div>
 <div id="site"></div>
+<div id="bmdrop"></div>
 <script>
 const $ = s => document.querySelector(s);
 // Commands go to the host as requests to /cmd on this host (served by the app itself).
@@ -284,6 +319,8 @@ function render(){
   star.innerHTML = state.starred ? '&#9733;' : '&#9734;';
   star.title = state.starred ? 'Remove bookmark (Ctrl+D)' : 'Bookmark this page (Ctrl+D)';
   updateLock();
+  document.body.classList.toggle('bmbar', !!state.bookmarksBar);
+  renderBmBar();
   document.body.classList.toggle('find', !!state.find);
   if(state.find && !findWas){ fq.value = state.findText || ''; showCount(0, 0); }
   findWas = !!state.find;
@@ -317,7 +354,7 @@ function closeSite(){
 }
 function openSite(){
   const s = siteShown(); if(!s) return;
-  closeSug(); siteOpen = true; siteOrigin = s.origin; siteChanged = false; renderSite();
+  closeSug(); closeBmDrop(); siteOpen = true; siteOrigin = s.origin; siteChanged = false; renderSite();
 }
 function renderSite(){
   const s = siteShown(); if(!s){ closeSite(); return; }
@@ -475,7 +512,7 @@ function pick(i){
   if(u){ closeSug(); editing = false; url.blur(); send('navigate', u); }
 }
 function renderSug(){
-  closeSite();
+  closeSite(); closeBmDrop();
   sug.textContent = '';
   const row = (cls, icon, title, sub, i) => {
     const d = document.createElement('div'); d.className = 'sg ' + cls + (i === sugSel ? ' sel' : '');
@@ -528,9 +565,164 @@ url.addEventListener('input', e => {
   const q = url.value, deleting = !!(e.inputType && e.inputType.startsWith('delete'));
   sugTimer = setTimeout(() => fetchSug(q, !deleting), 40);
 });
+// ---- bookmarks bar & folder dropdowns ---------------------------------------------------
+const BM_DIR = '<svg viewBox="0 0 16 16" width="13" height="13"><path fill="currentColor" d="M1.5 3h4.6l1.3 1.5H14.5V13h-13z"/></svg>';
+const BM_STAR = '<svg viewBox="0 0 16 16" width="12" height="12"><path fill="currentColor" d="M8 1.6l1.9 4 4.4.6-3.2 3.1.8 4.4L8 11.6l-3.9 2.1.8-4.4L1.7 6.2l4.4-.6z"/></svg>';
+const bmItems = $('#bmItems'), bmMore = $('#bmMore'), bmDrop = $('#bmdrop');
+let bmOpen = false, bmNeed = 0, bmAnchor = null, bmOverflow = [], bmPathStack = [], bmLastKey = '';
+
+function closeBmDrop(){
+  if(!bmOpen) return;
+  bmOpen = false; bmDrop.classList.remove('on'); bmDrop.textContent = '';
+  if(bmAnchor){ bmAnchor.classList.remove('open'); bmAnchor = null; }
+  bmPathStack = [];
+  if(bmNeed){ bmNeed = 0; send('dropdown', 0); }
+}
+
+function makeBmBtn(item){
+  const b = document.createElement('button');
+  b.className = 'bm' + (item.folder ? ' dir' : '');
+  b.title = item.folder ? item.title : (item.title ? item.title + '\n' + item.url : item.url);
+  b.innerHTML = (item.folder ? BM_DIR : BM_STAR) + '<span class="bl"></span>';
+  b.querySelector('.bl').textContent = item.title || item.url;
+  b.onclick = () => {
+    if(item.folder){
+      if(bmOpen && bmAnchor === b) closeBmDrop();
+      else openBmFolder(b, [item.path]);
+    } else {
+      closeBmDrop();
+      send('navigate', item.url);
+    }
+  };
+  b.onauxclick = e => { if(e.button === 1 && !item.folder) send('newtab', item.url); };
+  b.oncontextmenu = e => {
+    e.preventDefault(); e.stopPropagation(); closeBmDrop();
+    send('bmmenu', item.id, item.folder ? 1 : 0, item.url || '', Math.round(e.clientX), Math.round(e.clientY), window.devicePixelRatio || 1);
+  };
+  return b;
+}
+
+function layoutBmBar(){
+  if(!state.bookmarksBar){ closeBmDrop(); return; }
+  const bar = state.bar || [];
+  bmOverflow = [];
+  bmMore.classList.remove('on');
+  for(const el of bmItems.children) el.style.display = '';
+  if(!bar.length) return;
+  const maxW = bmItems.clientWidth;
+  let overflowStart = -1;
+  const kids = [...bmItems.children];
+  for(let i = 0; i < kids.length; i++){
+    const el = kids[i];
+    if(el.offsetLeft + el.offsetWidth > maxW){ overflowStart = i; break; }
+  }
+  if(overflowStart >= 0){
+    bmMore.classList.add('on');
+    const maxW2 = bmItems.clientWidth;
+    for(let i = 0; i < kids.length; i++){
+      if(i >= overflowStart || kids[i].offsetLeft + kids[i].offsetWidth > maxW2){
+        kids[i].style.display = 'none';
+        bmOverflow.push(bar[i]);
+      }
+    }
+  }
+}
+
+function renderBmBar(){
+  if(!state.bookmarksBar){ closeBmDrop(); return; }
+  const bar = state.bar || [];
+  const key = JSON.stringify(bar);
+  if(key === bmLastKey) return;
+  bmLastKey = key;
+  closeBmDrop();
+  bmItems.textContent = '';
+  if(!bar.length){
+    const s = document.createElement('span'); s.id = 'bmEmpty';
+    s.textContent = 'PRESS CTRL+D TO BOOKMARK A PAGE';
+    bmItems.appendChild(s);
+    bmMore.classList.remove('on');
+    return;
+  }
+  bar.forEach(item => bmItems.appendChild(makeBmBtn(item)));
+  layoutBmBar();
+}
+
+function showBmDropList(anchor, items, canBack){
+  closeSug(); closeSite();
+  if(bmAnchor && bmAnchor !== anchor) bmAnchor.classList.remove('open');
+  bmAnchor = anchor; bmAnchor.classList.add('open');
+  bmDrop.textContent = '';
+  if(canBack){
+    const bk = document.createElement('button');
+    bk.className = 'bmd back';
+    bk.innerHTML = '<span class="ar">&#9664;</span><span class="bt">..</span>';
+    bk.onclick = () => {
+      bmPathStack.pop();
+      if(bmPathStack.length) openBmFolder(anchor, bmPathStack);
+      else openBmOverflow();
+    };
+    bmDrop.appendChild(bk);
+  }
+  if(!items.length){
+    const em = document.createElement('div'); em.className = 'bmEmptyDrop'; em.textContent = 'EMPTY FOLDER';
+    bmDrop.appendChild(em);
+  } else {
+    items.forEach(it => {
+      const r = document.createElement('button');
+      r.className = 'bmd' + (it.folder ? ' dir' : '');
+      r.title = it.folder ? it.title : (it.title ? it.title + '\n' + it.url : it.url);
+      r.innerHTML = (it.folder ? BM_DIR : BM_STAR) + '<span class="bt"></span>' + (it.folder ? '<span class="ar">&#9656;</span>' : '');
+      r.querySelector('.bt').textContent = it.title || it.url;
+      r.onclick = () => {
+        if(it.folder){ bmPathStack.push(it.path); openBmFolder(anchor, bmPathStack); }
+        else { closeBmDrop(); send('navigate', it.url); }
+      };
+      r.onauxclick = e => { if(e.button === 1 && !it.folder){ closeBmDrop(); send('newtab', it.url); } };
+      r.oncontextmenu = e => {
+        e.preventDefault(); e.stopPropagation(); closeBmDrop();
+        send('bmmenu', it.id, it.folder ? 1 : 0, it.url || '', Math.round(e.clientX), Math.round(e.clientY), window.devicePixelRatio || 1);
+      };
+      bmDrop.appendChild(r);
+    });
+  }
+  const ar = anchor.getBoundingClientRect();
+  const w = Math.min(320, Math.max(200, window.innerWidth - 16));
+  const left = Math.max(8, Math.min(ar.left, window.innerWidth - w - 8));
+  bmDrop.style.left = left + 'px'; bmDrop.style.top = ar.bottom + 'px'; bmDrop.style.width = w + 'px';
+  bmDrop.classList.add('on'); bmOpen = true;
+  const need = Math.ceil(bmDrop.getBoundingClientRect().bottom) + 8;
+  bmNeed = need;
+  send('dropdown', need, Math.floor(left), Math.ceil(left + w));
+}
+
+function openBmFolder(anchor, stack){
+  bmPathStack = stack.slice();
+  const path = bmPathStack[bmPathStack.length - 1];
+  fetch('/bookmarks?parent=' + encodeURIComponent(path), {cache: 'no-store'}).then(r => r.json()).then(list => {
+    showBmDropList(anchor, list, bmPathStack.length > 1 || (anchor === bmMore && bmPathStack.length >= 1));
+  }).catch(() => {});
+}
+
+function openBmOverflow(){
+  if(bmOpen && bmAnchor === bmMore){ closeBmDrop(); return; }
+  bmPathStack = [];
+  showBmDropList(bmMore, bmOverflow, false);
+}
+
+bmMore.onclick = openBmOverflow;
+$('#bmMgr').onclick = () => { closeBmDrop(); send('opentab', NN_BASE + 'bookmarks.html'); };
+$('#bmbar').oncontextmenu = e => {
+  if(e.target.closest('.bm')) return;
+  e.preventDefault(); closeBmDrop();
+  send('bmmenu', 0, 0, '', Math.round(e.clientX), Math.round(e.clientY), window.devicePixelRatio || 1);
+};
+document.addEventListener('mousedown', e => { if(bmOpen && !bmDrop.contains(e.target) && !$('#bmbar').contains(e.target)) closeBmDrop(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && bmOpen){ e.preventDefault(); closeBmDrop(); } });
+window.addEventListener('blur', closeBmDrop);
+
 // The host resizes this window itself to show the list, so only a change of width closes it.
 let lastW = window.innerWidth;
-window.addEventListener('resize', () => { if(window.innerWidth !== lastW){ lastW = window.innerWidth; closeSug(); closeSite(); } });
+window.addEventListener('resize', () => { if(window.innerWidth !== lastW){ lastW = window.innerWidth; closeSug(); closeSite(); closeBmDrop(); layoutBmBar(); } });
 
 url.addEventListener('focus', () => { closeSite(); editing = true; setTimeout(() => url.select(), 0); });
 url.addEventListener('blur', () => { editing = false; closeSug(); url.value = shownUrl(state.url); });

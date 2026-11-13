@@ -50,10 +50,10 @@ Done without being planned here first (the planned ones are ticked in the lists 
 
 ## Bookmarks and history
 
-- [ ] **Bookmark folders** (M).
-- [ ] **Import bookmarks** from an HTML file exported by another browser (S).
-- [ ] **Export bookmarks** to HTML (S).
-- [ ] **Bookmarks bar** under the address bar (M).
+- [x] **Bookmark folders** (M, unreleased).
+- [x] **Import bookmarks** from an HTML file exported by another browser (S, unreleased).
+- [x] **Export bookmarks** to HTML (S, unreleased).
+- [x] **Bookmarks bar** under the address bar (M, unreleased).
 
 ## Security and privacy
 
