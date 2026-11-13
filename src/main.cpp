@@ -125,7 +125,8 @@ struct PwPending { std::wstring origin, user, pass; ULONGLONG at = 0; };
 struct Tab {
     int id = 0;
     CefRefPtr<CefBrowser> browser;
-    CefRefPtr<CefBrowser> dev;   // its developer tools, docked below the page (null = closed)
+    CefRefPtr<CefBrowser> dev;   // its developer tools (null = closed)
+    int devDock = 0;             // where they were opened (g.devDock at that time): 0 bottom, 1 right, 2 left, 3 own window
     std::wstring title = L"NEW TAB";
     std::wstring url;
     std::wstring errorUrl;
@@ -205,7 +206,8 @@ struct App {
     bool httpsOnly = false;           // HTTPS-only mode (registry HttpsOnly)
     bool savePasswords = true;        // offer to save passwords (registry SavePasswords)
     bool smooth = true;               // smooth scrolling (registry SmoothScroll), with the distance of a wheel step in px (100 = the normal step)
-    int smoothStep = 120, smoothTime = 400;   // and the length of the animation in ms
+    int devDock = 0;                  // where developer tools open: 0 bottom, 1 right, 2 left, 3 separate window (registry DevToolsDock)
+    int smoothStep = 120, smoothTime = 400;  // and the length of the animation in ms
     bool netSpeed = true;             // network speed in the status bar (registry NetSpeed)
     double netDown = 0, netUp = 0;    // bytes per second, last second
     ULONGLONG netTick = 0;
@@ -449,8 +451,12 @@ static RECT ContentRect() {
     return { c.left, c.bottom, right, s.top };
 }
 // Developer tools are docked in the window: the lower 40% of the page area while a tab has them open.
-static RECT DevRect() {
+static RECT DevRect(int dock) {
     RECT c = ContentRect();
+    if (dock == 1 || dock == 2) {   // beside the page
+        int w = std::max((int)((c.right - c.left) * 2 / 5), std::min((int)(c.right - c.left) / 2, S(320)));
+        return dock == 1 ? RECT{ c.right - w, c.top, c.right, c.bottom } : RECT{ c.left, c.top, c.left + w, c.bottom };
+    }
     int h = std::max((int)((c.bottom - c.top) * 2 / 5), std::min((int)(c.bottom - c.top) / 2, S(160)));
     return { c.left, c.bottom - h, c.right, c.bottom };
 }
@@ -504,7 +510,11 @@ static void Layout() {
     RECT content = ContentRect();
     for (auto& t : g.tabs) {
         RECT pr = content;
-        if (t->dev) { RECT dr = DevRect(); pr.bottom = dr.top; Place(t->dev, dr, t->id == g.active && !g.fullscreen); }
+        if (t->dev && t->devDock != 3) {   // docked in the window: the page gives up its share of the area
+            RECT dr = DevRect(t->devDock);
+            if (t->devDock == 1) pr.right = dr.left; else if (t->devDock == 2) pr.left = dr.right; else pr.bottom = dr.top;
+            Place(t->dev, dr, t->id == g.active && !g.fullscreen);
+        }
         Place(t->browser, pr, t->id == g.active);
     }
     UpdateRegion();
@@ -1242,9 +1252,13 @@ private:
 // docked in the NeonNet window below the page.
 static void OpenDevTools(Tab* t, CefPoint at) {
     if (!t || !t->browser) return;
-    RECT r = DevRect();
+    if (!t->dev) t->devDock = g.devDock;
     CefWindowInfo wi;
-    wi.SetAsChild(g.hwnd, CefRect(r.left, r.top, r.right - r.left, r.bottom - r.top));
+    if (t->devDock == 3) wi.SetAsPopup(nullptr, "NeonNet DevTools");
+    else {
+        RECT r = DevRect(t->devDock);
+        wi.SetAsChild(g.hwnd, CefRect(r.left, r.top, r.right - r.left, r.bottom - r.top));
+    }
     t->browser->GetHost()->ShowDevTools(wi, new DevToolsClient(t->id), CefBrowserSettings(), at);
 }
 
@@ -2148,7 +2162,7 @@ static std::string SettingsJson() {
                             std::to_wstring(cef_version_info(6)) + L"." + std::to_wstring(cef_version_info(7));
     o += std::string("],\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
          ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
-         ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) + ",\"smoothScroll\":" + b(RegGetDword(L"SmoothScroll", 1) != 0) + ",\"smoothStep\":" + std::to_string(RegGetDword(L"SmoothStep", 120)) + ",\"smoothTime\":" + std::to_string(RegGetDword(L"SmoothTime", 400)) + ",\"netSpeed\":" + b(RegGetDword(L"NetSpeed", 1) != 0) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
+         ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) + ",\"smoothScroll\":" + b(RegGetDword(L"SmoothScroll", 1) != 0) + ",\"smoothStep\":" + std::to_string(RegGetDword(L"SmoothStep", 120)) + ",\"smoothTime\":" + std::to_string(RegGetDword(L"SmoothTime", 400)) + ",\"netSpeed\":" + b(RegGetDword(L"NetSpeed", 1) != 0) + ",\"devDock\":" + std::to_string(RegGetDword(L"DevToolsDock", 0)) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
          ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
     return o;
@@ -2226,6 +2240,7 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         if (key == L"search") { for (const auto& e : SEARCH_ENGINES) if (val == e.id) ok = true; }
         else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons" || key == L"httpsOnly" || key == L"blockAds" || key == L"savePasswords" || key == L"smoothScroll" || key == L"netSpeed") ok = (val == L"0" || val == L"1");
         else if (key == L"smoothStep") ok = (val == L"70" || val == L"120" || val == L"200");
+        else if (key == L"devDock") ok = (val == L"0" || val == L"1" || val == L"2" || val == L"3");
         else if (key == L"smoothTime") ok = (val == L"250" || val == L"400" || val == L"700");
         else if (key == L"proceed") ok = val.size() < 2100 && (val.rfind(L"cert|https://", 0) == 0 || val.rfind(L"http|http://", 0) == 0);
         else if (key == L"home") {
@@ -4417,6 +4432,10 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         else if (key == L"smoothStep") { RegSetBin(L"SmoothStep", REG_DWORD, &v, sizeof(v)); g.smoothStep = (int)v; }
         else { RegSetBin(L"SmoothTime", REG_DWORD, &v, sizeof(v)); g.smoothTime = (int)v; }
         BroadcastSmooth();
+    } else if (key == L"devDock") {
+        DWORD v = (DWORD)_wtoi(val.c_str());
+        RegSetBin(L"DevToolsDock", REG_DWORD, &v, sizeof(v));
+        g.devDock = (int)v;   // used the next time developer tools open
     } else if (key == L"netSpeed") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"NetSpeed", REG_DWORD, &v, sizeof(v));
@@ -4852,6 +4871,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     g.httpsOnly = RegGetDword(L"HttpsOnly", 0) != 0;
     g.savePasswords = RegGetDword(L"SavePasswords", 1) != 0;
     g.smooth = RegGetDword(L"SmoothScroll", 1) != 0;
+    { DWORD d = RegGetDword(L"DevToolsDock", 0); g.devDock = d <= 3 ? (int)d : 0; }
     { DWORD s = RegGetDword(L"SmoothStep", 120), t = RegGetDword(L"SmoothTime", 400); g.smoothStep = (s >= 40 && s <= 400) ? (int)s : 120; g.smoothTime = (t >= 100 && t <= 1500) ? (int)t : 400; }
     g.netSpeed = RegGetDword(L"NetSpeed", 1) != 0;
     if (!g.incognito) PwLoad();

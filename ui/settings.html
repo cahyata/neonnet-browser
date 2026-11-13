@@ -131,6 +131,12 @@ select option{background:var(--bg2);color:var(--cyan)}
     <select id="smoothTime"><option value="250">SNAPPY</option><option value="400">SMOOTH</option><option value="700">VERY SMOOTH</option></select>
   </div>
 
+  <h2>DEVELOPER TOOLS</h2>
+  <div class="row">
+    <div class="lab"><b>Position of the developer tools (F12)</b><span>Docked in the NeonNet window below, right or left of the page, or in a window of their own. Applies the next time they open.</span></div>
+    <select id="devDock"><option value="0">BOTTOM</option><option value="1">RIGHT</option><option value="2">LEFT</option><option value="3">SEPARATE WINDOW</option></select>
+  </div>
+
   <h2>DOWNLOADS</h2>
   <div class="row">
     <div class="lab"><b>Ask where to save each file</b><span id="dlHint"></span></div>
@@ -177,6 +183,7 @@ async function load(){
   setTog('#httpsOnly', cfg.httpsOnly);
   setTog('#smoothScroll', cfg.smoothScroll);
   $('#smoothStep').value = String(cfg.smoothStep);
+  $('#devDock').value = String(cfg.devDock);
   $('#smoothTime').value = String(cfg.smoothTime);
   $('#smoothStep').disabled = $('#smoothTime').disabled = !cfg.smoothScroll;
   setTog('#netSpeed', cfg.netSpeed);
@@ -209,7 +216,7 @@ async function set(key, value){
 }
 
 $('#engine').onchange = async () => { await set('search', $('#engine').value); load(); };
-for(const k of ['smoothStep', 'smoothTime']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
+for(const k of ['smoothStep', 'smoothTime', 'devDock']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
 for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds']]){
   $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };
 }

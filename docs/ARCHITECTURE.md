@@ -158,7 +158,7 @@ The script learns its settings from the browser process: the renderer's `nn.pid`
 
 ## Docked developer tools
 
-`OpenDevTools()` calls `ShowDevTools()` with `SetAsChild(g.hwnd, DevRect())`, so the tools are a child window of the NeonNet window instead of a popup. `DevRect()` is the lower 40% of the page area. `Tab::dev` holds the tools' browser (set in `DevToolsClient::OnAfterCreated`, cleared in `OnBeforeClose`); `Layout()` shrinks the page of a tab that has it and shows the tools only for the active tab. F12 closes them when open (`CloseDevTools()`).
+`OpenDevTools()` calls `ShowDevTools()` with `SetAsChild(g.hwnd, DevRect())`, so the tools are a child window of the NeonNet window instead of a popup. `DevRect(dock)` is 40% of the page area at the bottom, right or left (registry `DevToolsDock`: 0 bottom, 1 right, 2 left, 3 separate popup window; the value is copied to `Tab::devDock` when the tools open, so a later setting change does not move tools that are already open). The tools' own dock-side menu does nothing in an embedded window, which is why the position is a NeonNet setting. `Tab::dev` holds the tools' browser (set in `DevToolsClient::OnAfterCreated`, cleared in `OnBeforeClose`); `Layout()` shrinks the page of a tab that has it and shows the tools only for the active tab. F12 closes them when open (`CloseDevTools()`).
 
 ## Site permissions and the lock panel
 
