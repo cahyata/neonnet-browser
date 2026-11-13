@@ -284,6 +284,20 @@ struct App {
     std::vector<ClosedTab> closed;
 };
 static App g;
+static std::mutex g_updMu;
+struct UpdSnap {
+    UpdState state = U_IDLE;
+    int percent = 0;
+    std::wstring version, result, error;
+};
+static UpdSnap g_updSnap;
+static void SyncUpdSnap(const wchar_t* result = nullptr, const std::wstring& err = L"") {
+    std::lock_guard<std::mutex> lk(g_updMu);
+    g_updSnap.state = g.upd;
+    g_updSnap.percent = g.updPercent;
+    g_updSnap.version = g.updVersion;
+    if (result) { g_updSnap.result = result; g_updSnap.error = err; }
+}
 static COLORREF Accent() { return g.incognito ? C_GREEN : C_PINK; }   // window frame, status bar line, menu marks
 
 // Search engines for text typed in the address bar. `id` is what is saved in the registry.
@@ -2606,7 +2620,15 @@ static std::string SettingsJson() {
                             std::to_wstring(cef_version_info(6)) + L"." + std::to_wstring(cef_version_info(7));
     size_t scriptTotal = 0, scriptEnabled = 0;
     userscripts::Counts(scriptTotal, scriptEnabled);
+    UpdSnap us;
+    { std::lock_guard<std::mutex> lk(g_updMu); us = g_updSnap; }
+    const char* updState = "idle";
+    if (us.state == U_CHECKING) updState = "checking";
+    else if (us.state == U_DOWNLOADING) updState = "downloading";
+    else if (us.state == U_AVAILABLE) updState = "available";
+    else if (us.state == U_READY) updState = "ready";
     o += std::string("],\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
+         ",\"updState\":\"" + updState + "\",\"updPercent\":" + std::to_string(us.percent) + ",\"updVersion\":" + JsonUtf8(us.version) + ",\"updResult\":" + JsonUtf8(us.result) + ",\"updError\":" + JsonUtf8(us.error) +
          ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
          ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) + ",\"smoothScroll\":" + b(RegGetDword(L"SmoothScroll", 1) != 0) + ",\"smoothStep\":" + std::to_string(RegGetDword(L"SmoothStep", 120)) + ",\"smoothTime\":" + std::to_string(RegGetDword(L"SmoothTime", 400)) + ",\"netSpeed\":" + b(RegGetDword(L"NetSpeed", 1) != 0) + ",\"devDock\":" + std::to_string(RegGetDword(L"DevToolsDock", 0)) + ",\"defaultBrowser\":" + b(browserreg::IsDefault()) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
          ",\"scriptTotal\":" + std::to_string(scriptTotal) + ",\"scriptEnabled\":" + std::to_string(scriptEnabled) +
@@ -2734,6 +2756,7 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         else if (key == L"smoothStep") ok = (val == L"70" || val == L"120" || val == L"200");
         else if (key == L"devDock") ok = (val == L"0" || val == L"1" || val == L"2" || val == L"3");
         else if (key == L"defaultBrowser") ok = (val == L"1");
+        else if (key == L"checkUpdate") ok = (val == L"1" || val == L"restart" || val == L"download");
         else if (key == L"smoothTime") ok = (val == L"250" || val == L"400" || val == L"700");
         else if (key == L"proceed") ok = val.size() < 2100 && (val.rfind(L"cert|https://", 0) == 0 || val.rfind(L"http|http://", 0) == 0);
         else if (key == L"home") {
@@ -3119,25 +3142,28 @@ static void StartUpdateCheck(bool manual) {
     if (g.upd == U_READY) { if (manual) ShowNotice(L"UPDATE v" + g.updVersion + L" IS READY - USE THE MENU TO RESTART"); return; }
     if (g.updThread) { WaitForSingleObject(g.updThread, 0); CloseHandle(g.updThread); g.updThread = nullptr; }
     g.upd = U_CHECKING;
+    SyncUpdSnap(L"");
     if (manual) { g.notice = L"CHECKING FOR UPDATES..."; KillTimer(g.hwnd, TIMER_NOTICE); InvalidateStatus(); }
     int flags = (manual ? 1 : 0) | (IsInstalledCopy() ? 2 : 0);
     g.updThread = CreateThread(nullptr, 0, UpdateThread, (LPVOID)(INT_PTR)flags, 0, nullptr);
-    if (!g.updThread) g.upd = U_IDLE;
+    if (!g.updThread) { g.upd = U_IDLE; SyncUpdSnap(L"failed", L"Could not start update check."); }
 }
 
 static std::wstring Upper(std::wstring s) { for (auto& c : s) c = towupper(c); return s; }
 
 static void OnUpdateMsg(const UpdateMsg& m) {
     switch (m.state) {
-    case U_DOWNLOADING: g.upd = U_DOWNLOADING; g.updPercent = m.percent; g.updVersion = m.version; break;
-    case U_READY: g.upd = U_READY; g.updVersion = m.version; g.updPath = m.path; g.notice.clear(); break;
-    case U_AVAILABLE: g.upd = U_AVAILABLE; g.updVersion = m.version; g.updPage = m.page; g.notice.clear(); break;
+    case U_DOWNLOADING: g.upd = U_DOWNLOADING; g.updPercent = m.percent; g.updVersion = m.version; SyncUpdSnap(); break;
+    case U_READY: g.upd = U_READY; g.updVersion = m.version; g.updPath = m.path; g.notice.clear(); SyncUpdSnap(L""); break;
+    case U_AVAILABLE: g.upd = U_AVAILABLE; g.updVersion = m.version; g.updPage = m.page; g.notice.clear(); SyncUpdSnap(L""); break;
     case U_UPTODATE:
         g.upd = U_IDLE;
+        SyncUpdSnap(L"uptodate");
         if (m.manual) ShowNotice(L"NEONNET " APP_VERSION L" IS UP TO DATE");
         break;
     case U_FAILED:
         g.upd = U_IDLE;
+        SyncUpdSnap(L"failed", m.error);
         if (m.manual) ShowNotice(L"UPDATE CHECK FAILED: " + Upper(m.error));
         break;
     default: break;
@@ -4856,15 +4882,20 @@ public:
         }
         std::string url = frame->GetURL();
         if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) return;
-        if (url.rfind("https://neonnet.ui/", 0) == 0 || url.rfind("https://chrome.neonnet.ui/", 0) == 0) return;
-        context->GetGlobal()->SetValue("__nn", CefV8Value::CreateFunction("r", new MediaReporter()), V8_PROPERTY_ATTRIBUTE_NONE);
+        if (url.rfind("https://chrome.neonnet.ui/", 0) == 0) return;
+        bool isUi = url.rfind("https://neonnet.ui/", 0) == 0;
         CefRefPtr<CefV8Value> ret; CefRefPtr<CefV8Exception> ex;
-        context->Eval(MEDIA_HOOK_JS, "", 0, ret, ex);
+        if (!isUi) {
+            context->GetGlobal()->SetValue("__nn", CefV8Value::CreateFunction("r", new MediaReporter()), V8_PROPERTY_ATTRIBUTE_NONE);
+            context->Eval(MEDIA_HOOK_JS, "", 0, ret, ex);
+        }
         if (frame->IsMain()) {
             CefRefPtr<PwReporter> pw = new PwReporter();
-            context->GetGlobal()->SetValue("__nnp", CefV8Value::CreateFunction("send", pw), V8_PROPERTY_ATTRIBUTE_NONE);
-            context->GetGlobal()->SetValue("__nnpr", CefV8Value::CreateFunction("reg", pw), V8_PROPERTY_ATTRIBUTE_NONE);
-            context->Eval(PW_HOOK_JS, "", 0, ret, ex);
+            if (!isUi) {
+                context->GetGlobal()->SetValue("__nnp", CefV8Value::CreateFunction("send", pw), V8_PROPERTY_ATTRIBUTE_NONE);
+                context->GetGlobal()->SetValue("__nnpr", CefV8Value::CreateFunction("reg", pw), V8_PROPERTY_ATTRIBUTE_NONE);
+                context->Eval(PW_HOOK_JS, "", 0, ret, ex);
+            }
             context->GetGlobal()->SetValue("__nnpc", CefV8Value::CreateFunction("regcfg", pw), V8_PROPERTY_ATTRIBUTE_NONE);
             context->Eval(SMOOTH_JS, "", 0, ret, ex);
         }
@@ -5132,6 +5163,10 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
     } else if (key == L"autoUpdate") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"AutoUpdate", REG_DWORD, &v, sizeof(v));
+    } else if (key == L"checkUpdate") {
+        if (val == L"restart") ExecCmd(CMD_UPDATE_RESTART);
+        else if (val == L"download") ExecCmd(CMD_UPDATE_PAGE);
+        else ExecCmd(CMD_UPDATE_CHECK);
     } else if (key == L"askDownload") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"AskDownload", REG_DWORD, &v, sizeof(v));

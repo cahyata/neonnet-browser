@@ -528,6 +528,10 @@ select option{background:var(--bg2);color:var(--cyan)}
     <section class="sec" id="sec-updates">
       <h2>UPDATES <span class="tag">08 // SYSTEM</span></h2>
       <div class="row">
+        <div class="lab"><b>Check for updates</b><span id="updStatus">Check GitHub for a newer release.</span></div>
+        <button class="btn" id="checkUpdate">CHECK NOW</button>
+      </div>
+      <div class="row">
         <div class="lab"><b>Automatic updates</b><span id="updHint"></span></div>
         <button class="tog" id="autoUpdate">ON</button>
       </div>
@@ -586,6 +590,7 @@ async function load(){
   $('#autoUpdate').disabled = !cfg.installed;
   $('#updHint').textContent = cfg.installed ? 'Checks GitHub once a day and installs a new version when you restart.'
     : 'Only the installed copy updates itself. This copy was started from another folder.';
+  renderUpd(cfg);
   const a = $('#about'); a.textContent = '';
   const line = (k, v) => { const b = document.createElement('b'); b.textContent = k; a.append(b, document.createTextNode('  ' + v), document.createElement('br')); };
   line('NeonNet', 'v' + cfg.version);
@@ -604,6 +609,51 @@ async function set(key, value){
 
 $('#engine').onchange = async () => { await set('search', $('#engine').value); load(); };
 $('#defaultBrowser').onclick = async () => { await set('defaultBrowser', '1'); };
+let updPoll = 0, lastUpdState = 'idle';
+function renderUpd(cfg){
+  const btn = $('#checkUpdate'), st = $('#updStatus');
+  if(!btn || !st) return;
+  lastUpdState = cfg.updState || 'idle';
+  btn.classList.remove('primary');
+  st.style.color = '';
+  if(cfg.incognito){
+    btn.disabled = true; btn.textContent = 'CHECK NOW';
+    st.textContent = 'Updates are disabled in incognito windows.';
+    return;
+  }
+  if(lastUpdState === 'checking'){
+    btn.disabled = true; btn.textContent = 'CHECKING...';
+    st.textContent = 'Checking GitHub for a newer release...';
+  } else if(lastUpdState === 'downloading'){
+    btn.disabled = true; btn.textContent = 'DOWNLOADING...';
+    st.textContent = 'Downloading v' + (cfg.updVersion || '') + '... ' + (cfg.updPercent || 0) + '%';
+  } else if(lastUpdState === 'ready'){
+    btn.disabled = false; btn.textContent = 'RESTART TO UPDATE'; btn.classList.add('primary');
+    st.style.color = 'var(--green)';
+    st.textContent = 'v' + (cfg.updVersion || '') + ' is ready. Restart NeonNet to install.';
+  } else if(lastUpdState === 'available'){
+    btn.disabled = false; btn.textContent = 'DOWNLOAD v' + (cfg.updVersion || ''); btn.classList.add('primary');
+    st.style.color = 'var(--cyan)';
+    st.textContent = 'Version ' + (cfg.updVersion || '') + ' is available.';
+  } else {
+    btn.disabled = false; btn.textContent = 'CHECK NOW';
+    if(cfg.updResult === 'uptodate'){
+      st.style.color = 'var(--green)';
+      st.textContent = 'NeonNet ' + (cfg.version || '') + ' is up to date.';
+    } else if(cfg.updResult === 'failed'){
+      st.style.color = 'var(--pink2)';
+      st.textContent = 'Update check failed' + (cfg.updError ? ': ' + cfg.updError : '.');
+    } else {
+      st.textContent = 'Check GitHub for a newer release.';
+    }
+  }
+  clearTimeout(updPoll);
+  if(lastUpdState === 'checking' || lastUpdState === 'downloading') updPoll = setTimeout(load, 700);
+}
+$('#checkUpdate').onclick = async () => {
+  const act = lastUpdState === 'ready' ? 'restart' : lastUpdState === 'available' ? 'download' : '1';
+  if(await set('checkUpdate', act)) load();
+};
 for(const k of ['smoothStep', 'smoothTime', 'devDock']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
 for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#bookmarksBar','bookmarksBar'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds']]){
   $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };
