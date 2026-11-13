@@ -45,7 +45,7 @@ Done without being planned here first (the planned ones are ticked in the lists 
 - [x] **Private window** (M, 1.4.0). Ctrl+Shift+N opens an incognito window with an in-memory profile.
 - [x] **Mute tab / audio indicator** (S, 1.5.0). A speaker on the tab, click to mute. Sound made only through the Web Audio API is not detected.
 - [x] **Performance panel** (L, 1.5.0). Ctrl+Shift+M: memory and CPU per tab, memory cleaner, sleeping tabs, RAM and CPU limiters, tabs with sound, typed text or a kept-awake site are never slept on their own.
-- [ ] **Network limiter** (M). Cap the download speed of all tabs or of background tabs, through the DevTools network conditions.
+- [x] **Network limiter** (M, unreleased). Cap the download speed of all tabs or of background tabs, through the DevTools network conditions.
 - [x] **Theme the right-click context menu** (M, 1.4.0). The menu uses the same painted window as the `≡` menu.
 
 ## Bookmarks and history

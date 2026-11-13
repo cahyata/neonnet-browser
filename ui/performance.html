@@ -80,6 +80,19 @@ select option{background:var(--bg2);color:var(--cyan)}
   <div class="hint" id="ramHint">Above the limit, the tab unused the longest goes to sleep.</div>
   <div class="row"><label>CPU limiter</label><button class="tog" id="bg">OFF</button></div>
   <div class="hint">Tabs you are not looking at keep running, but with low priority and in power-saving mode.</div>
+  <div class="row"><label for="net">Network limiter</label>
+    <select id="net">
+      <option value="0">Off</option>
+      <option value="256">256 KB/s</option><option value="512">512 KB/s</option>
+      <option value="1024">1 MB/s</option><option value="2048">2 MB/s</option>
+      <option value="5120">5 MB/s</option><option value="10240">10 MB/s</option>
+    </select></div>
+  <div class="row" id="netScopeRow" style="display:none"><label for="netScope">Apply to</label>
+    <select id="netScope">
+      <option value="bg">Background tabs</option>
+      <option value="all">All tabs</option>
+    </select></div>
+  <div class="hint" id="netHint">Caps the download speed of all tabs or background tabs through DevTools network conditions.</div>
 
   <h2>TABS</h2>
   <div class="hint">These tabs are never put to sleep on their own: one with sound, one with text typed into it, and sites you keep awake with the lock.</div>
@@ -113,6 +126,8 @@ $('#clean').onclick = () => {
 $('#unloadbg').onclick = () => send('perf.unloadbg');
 $('#ram').onchange = () => send('perf.ram', $('#ram').value);
 $('#bg').onclick = () => send('perf.bg', $('#bg').classList.contains('on') ? '0' : '1');
+$('#net').onchange = () => send('perf.net', $('#net').value);
+$('#netScope').onchange = () => send('perf.netall', $('#netScope').value === 'all' ? '1' : '0');
 
 window.nnPerf = d => {
   const before = last ? last.total : d.total;
@@ -135,6 +150,12 @@ window.nnPerf = d => {
   if(document.activeElement !== $('#ram')) $('#ram').value = String(d.limit || 0);
   $('#bg').classList.toggle('on', !!d.bg);
   $('#bg').textContent = d.bg ? 'ON' : 'OFF';
+  if(document.activeElement !== $('#net')) $('#net').value = String(d.net || 0);
+  if(document.activeElement !== $('#netScope')) $('#netScope').value = d.netAll ? 'all' : 'bg';
+  $('#netScopeRow').style.display = d.net ? '' : 'none';
+  $('#netHint').textContent = d.net
+    ? (d.netAll ? 'All tabs are capped at ' : 'Background tabs are capped at ') + (d.net >= 1024 ? (d.net / 1024) + ' MB/s.' : d.net + ' KB/s.')
+    : 'Caps the download speed of all tabs or background tabs through DevTools network conditions.';
   $('#ramHint').textContent = d.limit && d.blocked && d.total > d.limit
       ? 'Over the limit, but ' + d.blocked + ' tab' + (d.blocked === 1 ? ' is' : 's are') + ' kept awake (sound, typing or kept sites).'
     : d.auto ? 'Put ' + d.auto + ' tab' + (d.auto === 1 ? '' : 's') + ' to sleep since NeonNet started.'
