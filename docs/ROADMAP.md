@@ -45,15 +45,15 @@ Done without being planned here first (the planned ones are ticked in the lists 
 - [x] **Private window** (M, 1.4.0). Ctrl+Shift+N opens an incognito window with an in-memory profile.
 - [x] **Mute tab / audio indicator** (S, 1.5.0). A speaker on the tab, click to mute. Sound made only through the Web Audio API is not detected.
 - [x] **Performance panel** (L, 1.5.0). Ctrl+Shift+M: memory and CPU per tab, memory cleaner, sleeping tabs, RAM and CPU limiters, tabs with sound, typed text or a kept-awake site are never slept on their own.
-- [x] **Network limiter** (M, unreleased). Cap the download speed of all tabs or of background tabs, through the DevTools network conditions.
+- [x] **Network limiter** (M, 1.7.0). Cap the download speed of all tabs or of background tabs, through the DevTools network conditions.
 - [x] **Theme the right-click context menu** (M, 1.4.0). The menu uses the same painted window as the `≡` menu.
 
 ## Bookmarks and history
 
-- [x] **Bookmark folders** (M, unreleased).
-- [x] **Import bookmarks** from an HTML file exported by another browser (S, unreleased).
-- [x] **Export bookmarks** to HTML (S, unreleased).
-- [x] **Bookmarks bar** under the address bar (M, unreleased).
+- [x] **Bookmark folders** (M, 1.7.0).
+- [x] **Import bookmarks** from an HTML file exported by another browser (S, 1.7.0).
+- [x] **Export bookmarks** to HTML (S, 1.7.0).
+- [x] **Bookmarks bar** under the address bar (M, 1.7.0).
 
 ## Security and privacy
 
@@ -64,19 +64,19 @@ Done without being planned here first (the planned ones are ticked in the lists 
 
 ## Platform
 
-- [x] **Set as default browser** (S, unreleased). NeonNet registers its URL and file handlers and opens Windows' Default apps page; the choice itself stays with the user (Windows does not allow a program to choose itself).
-- [x] **Installer: choose install folder and per-machine install** (M, unreleased). Not done: updating an install for all users by itself (it needs administrator rights each time).
+- [x] **Set as default browser** (S, 1.7.0). NeonNet registers its URL and file handlers and opens Windows' Default apps page; the choice itself stays with the user (Windows does not allow a program to choose itself).
+- [x] **Installer: choose install folder and per-machine install** (M, 1.7.0). Not done: updating an install for all users by itself (it needs administrator rights each time).
 - [ ] **Signed installer and executables** (M). Removes the SmartScreen warning. Needs a code-signing certificate.
 - [ ] **Widevine DRM** (L). Needed for Netflix, Disney+ and similar; depends on a licence from the CDM vendor, and on H.264 and AAC, which are not built in because of patent licences. Not planned. NeonNet only warns in the status bar when a site asks for DRM, and opens videos it cannot play in the system player.
-- [x] **Extensions (Userscripts)** (L, unreleased). Chrome Web Store `.crx` extensions remain disabled (`disable-extensions`) because NeonNet uses its own custom Alloy UI instead of Chrome's toolbar and windows; instead, `neonnet://extensions` adds a built-in `.user.js` userscript manager (`@match`, `@include`, `@exclude`, `@run-at`, `GM_*` APIs).
+- [x] **Extensions (Userscripts)** (L, 1.7.0). Chrome Web Store `.crx` extensions remain disabled (`disable-extensions`) because NeonNet uses its own custom Alloy UI instead of Chrome's toolbar and windows; instead, `neonnet://extensions` adds a built-in `.user.js` userscript manager (`@match`, `@include`, `@exclude`, `@run-at`, `GM_*` APIs).
 
 ## Quality and maintenance
 
 - [ ] **Look into the speed gap with Chrome** (M). Speedometer 3.1 scored about 18 in NeonNet 1.1.2 against about 24 in Chrome 157. Field trials, GPU and build type are ruled out; the engine is one major version older. Updating Chromium is the first thing to try (see "Updating Chromium" in [MAINTENANCE.md](MAINTENANCE.md)).
 - [ ] **Automated smoke test** (M). Start the app, load a page, close it and check the exit code is 0; this would have caught the crash on close earlier.
 - [ ] **Update Chromium regularly** (S each time). Follow "Updating Chromium" in [MAINTENANCE.md](MAINTENANCE.md).
-- [x] **Crash log** (S). Write a short report when the app dies, so problems can be found without a debugger.
-- [x] **New tab page: stop the background animation when the tab is hidden** (S). The grid animation runs all the time.
+- [x] **Crash log** (S, 1.7.0). Write a short report when the app dies, so problems can be found without a debugger.
+- [x] **New tab page: stop the background animation when the tab is hidden** (S, 1.7.0). The grid animation runs all the time.
 
 ## Suggested order
 

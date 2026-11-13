@@ -2,9 +2,14 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.7.0] - 2026-11-13
 
 ### Features
+- **Extensions (Userscripts):** added a built-in `.user.js` userscript manager (`Ctrl+Shift+E`, `≡` > **Extensions (Userscripts)**, `neonnet://extensions`, also linked from **Settings > EXTENSIONS**). Supports `@name`, `@namespace`, `@version`, `@author`, `@description`, `@match`, `@include`, `@exclude`, `@run-at` (`document-start`, `document-end`, `document-idle`), `GM_addStyle`, `GM_getValue`/`GM_setValue`/`GM_deleteValue`/`GM_listValues`, `GM_openInTab`, `GM_info`, `unsafeWindow`, and Promise `GM.*` APIs, with file import, drag-and-drop, an inline editor, and read-only execution in incognito windows. Chrome Web Store `.crx` extensions remain disabled (`disable-extensions`) so Chrome's own windows do not appear outside NeonNet.
+- **Bookmark folders, bar, and HTML import/export:** organize bookmarks into nested folders on `neonnet://bookmarks`, toggle the **Bookmarks bar** under the address bar (`Ctrl+Shift+B`, `≡` > **Show bookmarks bar**, or **Settings > START**), and import/export standard Netscape Bookmark HTML files.
+- **Network limiter:** cap download speed (in `KB/s` or `MB/s`) for all tabs or only background tabs from the Performance panel (`Ctrl+Shift+M`), applied via DevTools `Network.emulateNetworkConditions` and remembered across restarts.
+- **Crash log:** unhandled exceptions, `SIGABRT`, and unexpected renderer terminations are recorded to `%LOCALAPPDATA%\NeonNet\crash.log` (rotated to `crash.prev.log` above 256 KB) with timestamp, NeonNet/Chromium/Windows versions, exception details, and stack frames.
+- **New tab page idle optimization:** pauses the background grid CSS animation and clock timer whenever the tab is hidden (`visibilitychange`).
 - Set as default browser. **Settings > DEFAULT BROWSER** has a **SET AS DEFAULT** button: it adds NeonNet to Windows' list of browsers (the URL handlers for http and https and the file handlers for .htm, .html, .shtml, .xht and .xhtml) and opens Windows' Default apps page, where you choose it. Windows 10 and 11 do not let a program choose itself, so the last step is yours. The settings page says whether NeonNet is already the default. The installer registers NeonNet in the same way. Links and .html files from other programs open in NeonNet (in the running window as a new tab).
 - Installer: **CHANGE FOLDER** picks the folder to install into. A folder that already holds other things gets a `NeonNet` folder inside it, so that uninstalling never removes someone else's files. Running a newer installer by hand keeps the folder of the earlier install.
 - Installer: **Install for all users** (asks for administrator rights through Windows' UAC prompt). It installs into `Program Files`, puts the shortcuts in the shared Start menu and desktop, and registers NeonNet for the whole computer. Uninstalling such a copy also asks for administrator rights. A copy for all users does not update itself (it lives where the user cannot write): it only reports new versions.

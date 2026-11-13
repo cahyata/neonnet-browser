@@ -22,9 +22,10 @@ NeonNet ships its own Chromium engine. It does not need Edge, WebView2 or any ot
 - **Single window:** running `NeonNet.exe <url>` while NeonNet is open adds a tab to the existing window.
 - **Chromium sandbox enabled:** renderer and GPU processes run isolated.
 - **Installer:** per user by default (no admin rights needed), with a choice of folder and an option to install for all users. Uninstall from Settings > Apps. NeonNet can be set as the default browser.
-- **Find in page, bookmarks and history:** Ctrl+F, Ctrl+D, Ctrl+H, and Ctrl+Shift+T to reopen a closed tab.
+- **Find in page, bookmarks and history:** Ctrl+F, Ctrl+D, Ctrl+H, Ctrl+Shift+O for bookmarks (with folders, bookmarks bar via Ctrl+Shift+B, and HTML import/export), and Ctrl+Shift+T to reopen a closed tab.
 - **Incognito window:** Ctrl+Shift+N opens a window whose cookies, cache and sign-ins live in memory only and disappear when it closes. No history is recorded.
-- **Performance panel:** Ctrl+Shift+M opens a side panel with memory and CPU per tab, a memory cleaner, sleeping tabs, and optional RAM and CPU limiters.
+- **Performance panel:** Ctrl+Shift+M opens a side panel with memory and CPU per tab, a memory cleaner, sleeping tabs, and optional RAM, CPU and network download limiters.
+- **Extensions (Userscripts):** Ctrl+Shift+E (`neonnet://extensions`) manages `.user.js` userscripts with `@match`/`@include`/`@exclude`, `@run-at`, and `GM_*` APIs.
 - **Downloads page:** Ctrl+J lists every download with progress, cancel, open and show-in-folder.
 - **Address bar suggestions:** matches from your bookmarks and history appear as you type, with inline completion.
 - **Settings page:** Ctrl+, for the search engine, home page, download behaviour, scanlines and automatic updates.
@@ -64,18 +65,28 @@ neonnet-browser/
 ├─ src/
 │  ├─ main.cpp          all browser logic
 │  ├─ updater.cpp/.h    update check, download and checksum
-│  ├─ store.cpp/.h      history and bookmarks
+│  ├─ store.cpp/.h      history, bookmarks (with folders & HTML import/export) and downloads
+│  ├─ perf.cpp/.h       process memory/CPU sampling and limiters
+│  ├─ crash.cpp/.h      unhandled exception and subprocess crash log
+│  ├─ userscripts.cpp/.h  .user.js userscript parser, matcher and storage
+│  ├─ browserreg.h      default browser registry helpers
 │  ├─ resource.h        resource IDs and version
 │  ├─ app.rc            icon, embedded UI pages, version info
 │  ├─ app.manifest      Windows manifest (DPI awareness, common controls)
 │  └─ neonnet.ico       application icon
 ├─ ui/
-│  ├─ chrome.html       tab strip and address bar
+│  ├─ chrome.html       tab strip, address bar and bookmarks bar
 │  ├─ newtab.html       new tab page
 │  ├─ history.html      history page
 │  ├─ downloads.html    downloads page
 │  ├─ settings.html     settings page
-│  └─ bookmarks.html    bookmarks page
+│  ├─ bookmarks.html    bookmarks page
+│  ├─ performance.html  performance panel
+│  ├─ passwords.html    saved passwords page
+│  ├─ permissions.html  site permissions page
+│  ├─ extensions.html   extensions (userscripts) page
+│  ├─ warning.html      certificate and HTTPS-only warning page
+│  └─ blocklist.txt     tracker and ad domain list
 ├─ installer/
 │  ├─ setup.cpp         installer
 │  └─ setup.rc
@@ -92,8 +103,7 @@ neonnet-browser/
 
 - DRM content (Netflix, Disney+, Spotify web player) does not play. NeonNet warns in the status bar when a site asks for it.
 - H.264 and AAC are not built in (patent licences), so files such as most `.mp4` cannot play inside NeonNet. VP9, AV1, Opus and MP3 work, which covers YouTube. A video NeonNet cannot play can be opened in your own media player instead (see the user guide).
-- No account sync, password manager or Chrome Web Store extensions.
-- Bookmarks are a flat list (no folders), and the address bar does not suggest from history yet.
+- No account sync or Chrome Web Store (`.crx`) extensions (NeonNet uses built-in `.user.js` userscripts instead).
 
 ## License
 

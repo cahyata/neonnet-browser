@@ -75,6 +75,7 @@ Ctrl+Shift+M, the `PERF` button next to `SCAN`, or **Performance panel** in the 
 - **Tabs that stay awake:** "Sleep background tabs" and the RAM limiter skip a tab that **plays sound**, one with **typed text** in a text field, text area or editable area (the check runs half a second after you stop typing, and the tab is free again once the field is empty or the page changes), and any tab of a site on the **kept awake** list. Put a site on the list with the lock on one of its tabs; it is shown under **KEPT AWAKE** in the panel, where `✕` takes it off. A notice in the status bar tells how many tabs were kept awake. You can still put a protected tab to sleep yourself with its moon button.
 - **RAM limiter:** off, or 1, 2, 3, 4, 6 or 8 GB. While everything NeonNet uses is above the limit, the background tab unused the longest is put to sleep, one every few seconds, until the total is under the limit or only the current tab is left. A notice in the status bar says which tab it was. A tab that is loading is skipped.
 - **CPU limiter:** background tabs keep working (a download, a chat, a build log), but with low priority and in Windows' power-saving mode, so they take less CPU and give way to what you are using. The selected tab always runs normally.
+- **Network limiter:** cap the download speed (off, or in `KB/s` / `MB/s`) for **All tabs** or **Background tabs** only. Useful for keeping downloads or background streams from saturating your connection.
 
 The limiters are remembered between runs and work with the panel closed. Windows' own "efficiency mode" needs Windows 10 version 1709 or later; without it only the lower priority applies.
 
@@ -97,6 +98,7 @@ Sound is detected from audio and video elements on the page that are playing, no
 | F3, Ctrl+G / Shift+F3, Ctrl+Shift+G | Next / previous match |
 | Ctrl+D | Bookmark the page, or remove its bookmark |
 | Ctrl+Shift+O | Bookmarks |
+| Ctrl+Shift+B | Show or hide the bookmarks bar |
 | Ctrl+H | History |
 | Ctrl+J | Downloads |
 | Ctrl+Shift+E | Extensions (Userscripts) |
@@ -229,7 +231,8 @@ Ctrl+Shift+T reopens the most recently closed tab at its old position. Press it 
 ## Bookmarks
 
 - **Add or remove:** press Ctrl+D or click `☆` in the address bar. The star turns yellow (`★`) on bookmarked pages. NeonNet's own pages cannot be bookmarked.
-- **Bookmarks page:** Ctrl+Shift+O, the `≡` menu, or **BOOKMARKS** on the new tab page. Search, open, **EDIT** (title and address) or **DELETE** a bookmark there.
+- **Bookmarks bar:** toggle with Ctrl+Shift+B, `≡` > **Show bookmarks bar**, or **Settings > START > Show bookmarks bar** (on by default). Shows top-level bookmarks and folders under the address bar; click a folder to open its items in a dropdown.
+- **Bookmarks page:** Ctrl+Shift+O, the `≡` menu, or **BOOKMARKS** on the new tab page. Create folders, move items between folders, search, open, **EDIT**, **DELETE**, or **IMPORT HTML** / **EXPORT HTML** (standard Netscape Bookmark HTML format compatible with Chrome, Edge and Firefox).
 - **New tab page:** once you have bookmarks, your nine newest replace the default quick links.
 
 ## History
@@ -247,6 +250,7 @@ Ctrl+, , the `≡` menu (**Settings**), or **SETTINGS** on the new tab page open
 | **Search engine** | Google, DuckDuckGo, Bing, Brave or Ecosia. Used for text that is not an address, in the address bar and on the new tab page. |
 | **Home page** | Opened at start-up (when NeonNet is started without an address) and by the home button. Empty means the NeonNet new tab page. Only `http://`, `https://` and `file:///` addresses are accepted. New tabs always show the new tab page. |
 | **Site icons on tabs** | On (default): each tab shows the site's own icon between its number and its title (a pinned tab shows it in place of the pin). The icon is fetched from the site by the toolbar page, like an image on a web page. Off: no icons, nothing is fetched. |
+| **Show bookmarks bar** | On (default): shows the bookmarks bar under the address bar (`Ctrl+Shift+B`). |
 | **HTTPS-only mode**, **Block trackers and ads** | See [Certificate warnings and HTTPS-only mode](#certificate-warnings-and-https-only-mode) and [Blocking trackers and ads](#blocking-trackers-and-ads). Both are off by default. |
 | **Offer to save passwords** | On (default): NeonNet asks to save a password after a login. See [Saved passwords](#saved-passwords). |
 | **Smooth scrolling**, **Scroll distance**, **Smoothness** | See [Smooth scrolling](#smooth-scrolling). On by default. |

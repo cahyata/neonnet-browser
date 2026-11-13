@@ -14,7 +14,7 @@
 #define IDR_PERMISSIONS 211
 #define IDR_EXTENSIONS 212
 
-#define APP_VERSION    L"1.6.1"
+#define APP_VERSION    L"1.7.0"
 #define APP_PUBLISHER  L"NeonNet"
 
 // GitHub repository (owner/name) whose latest release the auto-updater checks.
