@@ -129,6 +129,8 @@ struct Tab {
     CefRefPtr<CefBrowser> dev;   // its developer tools (null = closed)
     int devDock = 0;             // where they are: 0 bottom, 1 right, 2 left, 3 own window
     bool devReopen = false;      // being closed only to open again at another kind of place (window <-> docked)
+    RECT devHole{};              // docked tools: where they leave room for the page, in pixels from the page area's corner
+    bool devHoleSet = false;     // ... once they have said so
     std::wstring title = L"NEW TAB";
     std::wstring url;
     std::wstring errorUrl;
@@ -452,16 +454,6 @@ static RECT ContentRect() {
     if (g.panelOpen) right = std::max((int)c.left + S(200), (int)c.right - S(PANEL_DIP));   // the panel takes the right edge
     return { c.left, c.bottom, right, s.top };
 }
-// Developer tools are docked in the window: the lower 40% of the page area while a tab has them open.
-static RECT DevRect(int dock) {
-    RECT c = ContentRect();
-    if (dock == 1 || dock == 2) {   // beside the page
-        int w = std::max((int)((c.right - c.left) * 2 / 5), std::min((int)(c.right - c.left) / 2, S(320)));
-        return dock == 1 ? RECT{ c.right - w, c.top, c.right, c.bottom } : RECT{ c.left, c.top, c.left + w, c.bottom };
-    }
-    int h = std::max((int)((c.bottom - c.top) * 2 / 5), std::min((int)(c.bottom - c.top) / 2, S(160)));
-    return { c.left, c.bottom - h, c.right, c.bottom };
-}
 // The performance panel: right of the page, same height.
 static RECT PanelRect() {
     RECT c = ChromeRect(), s = StatusRect(), p = ContentRect();
@@ -476,14 +468,14 @@ static void UpdateRegion() {
     SetWindowRgn(g.hwnd, CreatePolygonRgn(pts, 6, WINDING), TRUE);
 }
 
-static void Place(CefRefPtr<CefBrowser> b, const RECT& r, bool visible, bool raise = false) {
+static void Place(CefRefPtr<CefBrowser> b, const RECT& r, bool visible, bool raise = false, bool bottom = false) {
     if (!b) return;
     HWND w = b->GetHost()->GetWindowHandle();
     if (!w) return;
     bool wasVisible = IsWindowVisible(w) != FALSE;
     if (visible) {
-        SetWindowPos(w, raise ? HWND_TOP : nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top,
-                     (raise ? 0 : SWP_NOZORDER) | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        SetWindowPos(w, bottom ? HWND_BOTTOM : raise ? HWND_TOP : nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                     ((raise || bottom) ? 0 : SWP_NOZORDER) | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         if (!wasVisible) b->GetHost()->WasHidden(false);
     } else if (wasVisible) {
         ShowWindow(w, SW_HIDE);
@@ -512,10 +504,16 @@ static void Layout() {
     RECT content = ContentRect();
     for (auto& t : g.tabs) {
         RECT pr = content;
-        if (t->dev && t->devDock != 3) {   // docked in the window: the page gives up its share of the area
-            RECT dr = DevRect(t->devDock);
-            if (t->devDock == 1) pr.right = dr.left; else if (t->devDock == 2) pr.left = dr.right; else pr.bottom = dr.top;
-            Place(t->dev, dr, t->id == g.active && !g.fullscreen);
+        if (t->dev && t->devDock != 3 && !g.fullscreen) {
+            // Developer tools docked in the window: they fill the whole area, underneath the page, and draw a hole where
+            // the page belongs (a bottom, right or left dock, or the device toolbar's frame, only change that hole).
+            Place(t->dev, content, t->id == g.active, false, true);
+            if (t->devHoleSet) {
+                pr.left = std::min(std::max(content.left + t->devHole.left, content.left), content.right - 1);
+                pr.top = std::min(std::max(content.top + t->devHole.top, content.top), content.bottom - 1);
+                pr.right = std::max(std::min(content.left + t->devHole.right, content.right), pr.left + 1);
+                pr.bottom = std::max(std::min(content.top + t->devHole.bottom, content.bottom), pr.top + 1);
+            }
         }
         Place(t->browser, pr, t->id == g.active);
     }
@@ -1238,18 +1236,16 @@ static void MaybeFinishClose() {
 static const char DEVTOOLS_DOCK_JS[] =
     "(function(){var d=window.DevToolsHost;if(!d||d.__nnDock)return;d.__nnDock=1;var o=d.sendMessageToEmbedder;"
     "d.sendMessageToEmbedder=function(m){try{var j=JSON.parse(m);"
-    "if(j.method==='setPreference'&&j.params&&j.params[0]==='currentDockState')console.log('__NN_DOCK__'+JSON.parse(j.params[1]));}catch(e){}"
+    "if(j.method==='setPreference'&&j.params&&j.params[0]==='currentDockState')console.log('__NN_DOCK__'+JSON.parse(j.params[1]));"
+    // where the tools leave room for the page (CSS pixels from their own top left corner)
+    "else if(j.method==='setInspectedPageBounds'&&j.params&&j.params[0]){var b=j.params[0];console.log('__NN_BOUNDS__'+b.x+','+b.y+','+b.width+','+b.height);}}catch(e){}"
     "return o.apply(this,arguments);};"
-    // The tools start out believing they are in a window of their own ("undocked"), which would also make the menu
-    // mark the wrong place and ignore a choice of that place. Tell them where they really are once they are ready.
-    // They also show the Dock side row of their menu only when started with can_dock=true, but then they lay out as
-    // the whole window with a hole for the page. So the menu alone is told that docking is possible: canDock() says
-    // yes to everybody except the placeholder that reserves the page's place.
-    "var want=window.__nnWant,n=0;import('devtools://devtools/bundled/ui/legacy/legacy.js').then(function(m){"
-    "var P=m.DockController.DockController.prototype,oc=P.canDock;"
-    "P.canDock=function(){try{if(/InspectedPagePlaceholder/.test(new Error().stack))return oc.call(this);}catch(e){}return true;};"
-    "if(want&&want!=='undocked')(function t(){try{var c=m.DockController.DockController.instance();if(c.dockSide()!==want)c.setDockSide(want);}catch(e){if(++n<40)setTimeout(t,250);}})();"
-    "}).catch(function(){});"
+    // The tools remember their own last dock side, which is not necessarily the one NeonNet wants (or knows):
+    // tell them where they are meant to be once they are ready.
+    "var want=window.__nnWant,n=0;if(want)import('devtools://devtools/bundled/ui/legacy/legacy.js').then(function(m){"
+    "(function t(){try{var c=m.DockController.DockController.instance();if(c.dockSide()!==want)c.setDockSide(want);setTimeout(function(){console.log('__NN_READY__');},300);}"
+    "catch(e){if(++n<40)setTimeout(t,250);else console.log('__NN_READY__');}})();"
+    "}).catch(function(){console.log('__NN_READY__');});"
     "})();";
 
 class DevToolsClient : public CefClient, public CefLifeSpanHandler, public CefKeyboardHandler, public CefLoadHandler, public CefDisplayHandler {
@@ -1261,6 +1257,14 @@ public:
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
     void OnLoadEnd(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int) override {
         if (!frame->IsMain()) return;
+        // Some of the tools' features (the device toolbar) exist only when their address says "can_dock=true",
+        // which an embedded window does not get: load the same address once more with it. The script below runs
+        // after that load.
+        std::string url = frame->GetURL().ToString();
+        if (url.rfind("devtools://", 0) == 0 && url.find("can_dock=") == std::string::npos) {
+            frame->LoadURL(url + (url.find('?') == std::string::npos ? "?" : "&") + "can_dock=true");
+            return;
+        }
         Tab* t = FindTab(tabId_);
         static const char* SIDES[] = { "bottom", "right", "left", "undocked" };
         std::string js = std::string("window.__nnWant='") + SIDES[t ? t->devDock : 3] + "';" + DEVTOOLS_DOCK_JS;
@@ -1268,7 +1272,21 @@ public:
     }
     bool OnConsoleMessage(CefRefPtr<CefBrowser>, cef_log_severity_t, const CefString& message, const CefString&, int) override {
         std::wstring m = message.ToWString();
+        if (m.rfind(L"__NN_BOUNDS__", 0) == 0) {
+            wchar_t* p = &m[13];
+            double v[4];
+            for (int i = 0; i < 4; i++) { wchar_t* e; v[i] = wcstod(p, &e); if (e == p) return true; p = *e ? e + 1 : e; }
+            Tab* t = FindTab(tabId_);
+            if (!t || !t->dev || g.closing) return true;
+            double sc = g.dpi / 96.0;
+            RECT h = { (LONG)lround(v[0] * sc), (LONG)lround(v[1] * sc), (LONG)lround((v[0] + v[2]) * sc), (LONG)lround((v[1] + v[3]) * sc) };
+            if (h.right <= h.left || h.bottom <= h.top) return true;
+            if (!t->devHoleSet || memcmp(&h, &t->devHole, sizeof(RECT)) != 0) { t->devHole = h; t->devHoleSet = true; Layout(); }
+            return true;
+        }
+        if (m == L"__NN_READY__") { ready_ = true; return true; }
         if (m.rfind(L"__NN_DOCK__", 0) != 0) return false;
+        if (!ready_) return true;   // what the tools report while they start up is their own old choice, not a new one
         std::wstring side = m.substr(11);
         int nd = side == L"bottom" ? 0 : side == L"right" ? 1 : side == L"left" ? 2 : side == L"undocked" ? 3 : -1;
         Tab* t = FindTab(tabId_);
@@ -1313,7 +1331,7 @@ public:
     void OnBeforeClose(CefRefPtr<CefBrowser>) override {
         g.devtools--;
         if (Tab* t = FindTab(tabId_)) {
-            t->dev = nullptr;
+            t->dev = nullptr; t->devHoleSet = false;
             if (!g.closing) Layout();
             if (t->devReopen) { t->devReopen = false; if (!g.closing) PostMessageW(g.hwnd, WM_APP_DEVOPEN, (WPARAM)t->id, 0); }
         }
@@ -1321,6 +1339,7 @@ public:
     }
 private:
     int tabId_;
+    bool ready_ = false;   // the tools have been told where they are: from now on a dock message is the user's choice
     IMPLEMENT_REFCOUNTING(DevToolsClient);
 };
 
@@ -1345,7 +1364,7 @@ static void OpenDevTools(Tab* t, CefPoint at) {
     CefWindowInfo wi;
     if (t->devDock == 3) wi.SetAsPopup(nullptr, "NeonNet DevTools");
     else {
-        RECT r = DevRect(t->devDock);
+        RECT r = ContentRect();   // the tools fill the whole page area and leave a hole for the page (see Layout)
         wi.SetAsChild(g.hwnd, CefRect(r.left, r.top, r.right - r.left, r.bottom - r.top));
     }
     t->browser->GetHost()->ShowDevTools(wi, new DevToolsClient(t->id), CefBrowserSettings(), at);
