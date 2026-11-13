@@ -111,7 +111,7 @@ enum Cmd {
     CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
     CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE,
     CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_BOOKMARKS_BAR, CMD_HISTORY,
-    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS, CMD_EXTENSIONS, CMD_HELP
+    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS, CMD_EXTENSIONS, CMD_HELP, CMD_CARET
 };
 enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW };
 
@@ -1648,6 +1648,7 @@ public:
             else if (vk == VK_TAB) cmd = shift ? CMD_PREVTAB : CMD_NEXTTAB;
         } else if (!ctrl && !alt && !shift) {
             if (vk == VK_F1) cmd = CMD_HELP;
+            else if (vk == VK_F7) cmd = CMD_CARET;
             else if (vk == VK_F11) cmd = CMD_FULLSCREEN;
             else if (vk == VK_F12) cmd = CMD_DEVTOOLS;   // closes the tools
         }
@@ -2267,6 +2268,7 @@ public:
             if (vk == VK_F1 && !repeat) cmd = CMD_HELP;
             else if (vk == VK_F5) cmd = CMD_RELOAD;
             else if (vk == VK_F3) cmd = shift ? CMD_FINDPREV : CMD_FINDNEXT;
+            else if (vk == VK_F7 && !shift && !repeat) cmd = CMD_CARET;
             else if (vk == VK_F11 && !repeat) cmd = CMD_FULLSCREEN;
             else if (vk == VK_F12 && !repeat) cmd = CMD_DEVTOOLS;
             else if (vk == VK_F6) cmd = CMD_FOCUSURL;
@@ -3621,11 +3623,14 @@ static void OnPerfCommand(const std::wstring& cmd, const std::wstring& arg) {
     PushPerf();
 }
 
+static void ToggleCaretBrowsing();
+
 static void ExecCmd(int cmd) {
     Tab* a = Active();
     CefRefPtr<CefBrowser> b = a ? a->browser : nullptr;
     switch (cmd) {
     case CMD_NEWTAB: CreateTab(NEWTAB, true); break;
+    case CMD_CARET: ToggleCaretBrowsing(); break;
     case CMD_INCOGNITO: if (g.incognito) CreateTab(NEWTAB, true); else LaunchIncognito(L""); break;
     case CMD_PERFORMANCE: SetPanelOpen(!g.panelOpen); break;
     case CMD_CLOSETAB: if (a) CloseTab(a->id); break;
@@ -4145,9 +4150,42 @@ static int RunDialog(DlgState& st) {
     int px = std::max((int)mi.rcWork.left, std::min((int)((wr.left + wr.right - W) / 2), (int)mi.rcWork.right - W));
     int py = std::max((int)mi.rcWork.top, std::min((int)((wr.top + wr.bottom - H) / 3), (int)mi.rcWork.bottom - H));
 
+    static bool dimReg = false;
+    if (!dimReg) {
+        WNDCLASSEXW dwc{ sizeof(dwc) };
+        dwc.lpfnWndProc = [](HWND h, UINT m, WPARAM w, LPARAM l) -> LRESULT {
+            if (m == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
+            if (m == WM_ERASEBKGND) {
+                RECT r{}; GetClientRect(h, &r);
+                HBRUSH b = CreateSolidBrush(RGB(4, 6, 14));
+                FillRect((HDC)w, &r, b);
+                DeleteObject(b);
+                return 1;
+            }
+            return DefWindowProcW(h, m, w, l);
+        };
+        dwc.hInstance = g.hmod;
+        dwc.lpszClassName = L"NeonNetDimmer";
+        dimReg = RegisterClassExW(&dwc) != 0;
+    }
+    HWND dimHwnd = nullptr;
+    if (IsWindowVisible(g.hwnd) && !IsIconic(g.hwnd)) {
+        RECT cr = ContentRect();
+        MapWindowPoints(g.hwnd, nullptr, (POINT*)&cr, 2);
+        if (cr.right > cr.left && cr.bottom > cr.top) {
+            dimHwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"NeonNetDimmer", L"",
+                                      WS_POPUP, cr.left, cr.top, cr.right - cr.left, cr.bottom - cr.top,
+                                      g.hwnd, nullptr, g.hmod, nullptr);
+            if (dimHwnd) {
+                SetLayeredWindowAttributes(dimHwnd, 0, 180, LWA_ALPHA);
+                ShowWindow(dimHwnd, SW_SHOWNOACTIVATE);
+            }
+        }
+    }
+
     EnableWindow(g.hwnd, FALSE);   // modal: the window behind does nothing until the dialog is answered
-    HWND hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"NeonNetDialog", L"", WS_POPUP, px, py, W, H, g.hwnd, nullptr, g.hmod, &st);
-    if (!hwnd) { EnableWindow(g.hwnd, TRUE); DeleteObject(st.font); DeleteObject(st.editBrush); return st.cancelId; }
+    HWND hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"NeonNetDialog", L"", WS_POPUP, px, py, W, H, dimHwnd ? dimHwnd : g.hwnd, nullptr, g.hmod, &st);
+    if (!hwnd) { if (dimHwnd) DestroyWindow(dimHwnd); EnableWindow(g.hwnd, TRUE); DeleteObject(st.font); DeleteObject(st.editBrush); return st.cancelId; }
     int cut = S(MENU_CUT_DIP);
     POINT rp[6] = { {0, 0}, {W - cut, 0}, {W, cut}, {W, H}, {cut, H}, {0, H - cut} };
     SetWindowRgn(hwnd, CreatePolygonRgn(rp, 6, WINDING), FALSE);
@@ -4189,12 +4227,33 @@ static int RunDialog(DlgState& st) {
         GetWindowTextW(f.edit, &f.value[0], n + 1);
         f.value.resize((size_t)n);
     }
+    if (dimHwnd) DestroyWindow(dimHwnd);
     EnableWindow(g.hwnd, TRUE);
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
     DestroyWindow(hwnd);
     DeleteObject(st.font); DeleteObject(st.editBrush);
     if (!g.closing) SetForegroundWindow(g.hwnd);
     return st.result;
+}
+
+static void ToggleCaretBrowsing() {
+    CefRefPtr<CefRequestContext> ctx = g.reqCtx ? g.reqCtx : CefRequestContext::GetGlobalContext();
+    CefRefPtr<CefValue> curVal = ctx->GetPreference("settings.a11y.caretbrowsing.enabled");
+    bool cur = curVal && curVal->GetType() == VTYPE_BOOL && curVal->GetBool();
+    bool next = !cur;
+    if (!cur) {
+        DlgState st;
+        st.title = L"CARET BROWSING (F7)";
+        st.message = L"Turn on Caret Browsing?\nYou can navigate web pages and select text with the keyboard cursor.\nPress F7 again at any time to turn it off.";
+        st.buttons = { { L"TURN ON", 1 }, { L"CANCEL", 0 } };
+        st.defId = 1; st.cancelId = 0;
+        if (RunDialog(st) != 1) return;
+    }
+    CefRefPtr<CefValue> v = CefValue::Create();
+    v->SetBool(next);
+    CefString err;
+    ctx->SetPreference("settings.a11y.caretbrowsing.enabled", v, err);
+    ShowNotice(next ? L"CARET BROWSING ON (F7 TO TURN OFF)" : L"CARET BROWSING OFF");
 }
 
 static std::wstring OriginHost(const std::wstring& o) {
