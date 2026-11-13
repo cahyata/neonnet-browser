@@ -1242,8 +1242,14 @@ static const char DEVTOOLS_DOCK_JS[] =
     "return o.apply(this,arguments);};"
     // The tools start out believing they are in a window of their own ("undocked"), which would also make the menu
     // mark the wrong place and ignore a choice of that place. Tell them where they really are once they are ready.
-    "var want=window.__nnWant,n=0;if(want&&want!=='undocked')import('devtools://devtools/bundled/ui/legacy/legacy.js').then(function(m){"
-    "(function t(){try{var c=m.DockController.DockController.instance();if(c.dockSide()!==want)c.setDockSide(want);}catch(e){if(++n<40)setTimeout(t,250);}})();}).catch(function(){});"
+    // They also show the Dock side row of their menu only when started with can_dock=true, but then they lay out as
+    // the whole window with a hole for the page. So the menu alone is told that docking is possible: canDock() says
+    // yes to everybody except the placeholder that reserves the page's place.
+    "var want=window.__nnWant,n=0;import('devtools://devtools/bundled/ui/legacy/legacy.js').then(function(m){"
+    "var P=m.DockController.DockController.prototype,oc=P.canDock;"
+    "P.canDock=function(){try{if(/InspectedPagePlaceholder/.test(new Error().stack))return oc.call(this);}catch(e){}return true;};"
+    "if(want&&want!=='undocked')(function t(){try{var c=m.DockController.DockController.instance();if(c.dockSide()!==want)c.setDockSide(want);}catch(e){if(++n<40)setTimeout(t,250);}})();"
+    "}).catch(function(){});"
     "})();";
 
 class DevToolsClient : public CefClient, public CefLifeSpanHandler, public CefKeyboardHandler, public CefLoadHandler, public CefDisplayHandler {
