@@ -303,6 +303,12 @@ The HTML files are embedded as `RCDATA` in `NeonNet.dll`, so there are no loose 
 - **Fullscreen:** combines two sources: `fsUser` from F11, and `fsElement` from the page (for example a video) through `OnFullscreenModeChange`. In fullscreen the window covers the whole monitor and the chrome and status bar are hidden.
 - **Downloads:** `OnBeforeDownload` opens a save dialog. `OnDownloadUpdated` shows progress in the status bar.
 - **Single instance:** CEF locks the profile folder. A second instance fails in `CefInitialize`, and Chromium forwards its command line to the first instance through `OnAlreadyRunningAppRelaunch`, which opens the URL in a new tab.
+- **New tab page idle pause:** `ui/newtab.html` listens to `visibilitychange` (and checks `document.hidden`) to toggle `html.idle` (`animation-play-state: paused` on `#grid`) and stop the clock interval while the tab is hidden.
+
+## Crash log
+
+`src/crash.cpp` (`crash::Install` called in `RunMain` before and after `CefInitialize`) registers a Win32 unhandled-exception filter (`SetUnhandledExceptionFilter`) and `SIGABRT` handler in the browser process. On crash it writes a plain-text report (timestamp, NeonNet/Chromium/Windows versions, exception code, module+offset, and stack frames resolved via dynamically loaded `dbghelp.dll` with `RtlCaptureStackBackTrace` fallback) to `%LOCALAPPDATA%\NeonNet\crash.log` (rotated to `crash.prev.log` above 256 KB). `OnRenderProcessTerminated` also records unexpected renderer exits through `crash::LogSubprocess`.
+
 
 ## Chromium settings and why
 

@@ -301,6 +301,7 @@ Automatic updates only work for the copy installed for this user (in the folder 
 | Saved passwords (encrypted) | `%LOCALAPPDATA%\NeonNet\passwords.dat` |
 | Tabs of the last session | `%LOCALAPPDATA%\NeonNet\session.txt` |
 | History, bookmarks and downloads list | `%LOCALAPPDATA%\NeonNet\history.txt`, `bookmarks.txt` and `downloads.txt` (plain UTF-8 text) |
+| Crash log (written if NeonNet or a tab renderer crashes) | `%LOCALAPPDATA%\NeonNet\crash.log` (and `crash.prev.log` when rotated) |
 | Downloaded updates (deleted after installing) | `%LOCALAPPDATA%\NeonNet\Updates` |
 | Settings (scanlines, search engine, home page, download behaviour, window position, automatic updates) | Registry `HKEY_CURRENT_USER\Software\NeonNet` |
 | Shortcuts | Start menu `NeonNet`, and the desktop if chosen (an install for all users: the shared Start menu and desktop) |

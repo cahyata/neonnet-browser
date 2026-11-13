@@ -65,8 +65,8 @@ if (-not (Test-Path $wrapperLib)) {
 # --- 2. NeonNet.dll ---
 Write-Host '== NeonNet.dll'
 Push-Location src; Run rc @('/nologo', '/fo', '..\build\obj\app\app.res', 'app.rc'); Pop-Location
-Run cl ($cflags + @('/Fobuild\obj\app\', 'src\main.cpp', 'src\updater.cpp', 'src\store.cpp', 'src\perf.cpp'))
-$libs = @('build\obj\app\main.obj', 'build\obj\app\updater.obj', 'build\obj\app\store.obj', 'build\obj\app\perf.obj', 'build\obj\app\app.res', $wrapperLib, "$cef\Release\libcef.lib",
+Run cl ($cflags + @('/Fobuild\obj\app\', 'src\main.cpp', 'src\updater.cpp', 'src\store.cpp', 'src\perf.cpp', 'src\crash.cpp'))
+$libs = @('build\obj\app\main.obj', 'build\obj\app\updater.obj', 'build\obj\app\store.obj', 'build\obj\app\perf.obj', 'build\obj\app\crash.obj', 'build\obj\app\app.res', $wrapperLib, "$cef\Release\libcef.lib",
           'comctl32.lib','crypt32.lib','delayimp.lib','gdi32.lib','rpcrt4.lib','shlwapi.lib','wintrust.lib','ws2_32.lib',
           'user32.lib','ole32.lib','shell32.lib','advapi32.lib','dwmapi.lib','uuid.lib','winhttp.lib','bcrypt.lib')
 Remove-Item build\app\NeonNet.lib, build\app\NeonNet.exp -ErrorAction SilentlyContinue
