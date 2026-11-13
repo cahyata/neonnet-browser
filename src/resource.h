@@ -13,6 +13,7 @@
 #define IDR_PASSWORDS  210
 #define IDR_PERMISSIONS 211
 #define IDR_EXTENSIONS 212
+#define IDR_YT_ADSKIP  213
 
 #define APP_VERSION    L"1.7.0"
 #define APP_PUBLISHER  L"NeonNet"

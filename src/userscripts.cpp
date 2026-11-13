@@ -1,4 +1,5 @@
 #include "userscripts.h"
+#include "resource.h"
 
 #include <windows.h>
 #include <algorithm>
@@ -132,6 +133,21 @@ bool SaveIndexLocked() {
     return WriteFileAtomic(g_dir + L"\\index.txt", out);
 }
 
+bool LoadEmbeddedScript(int resId, std::string& out) {
+    out.clear();
+    HMODULE hm = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCWSTR)&LoadEmbeddedScript, &hm)) return false;
+    HRSRC hr = FindResourceW(hm, MAKEINTRESOURCEW(resId), RT_RCDATA);
+    if (!hr) return false;
+    HGLOBAL hg = LoadResource(hm, hr);
+    DWORD sz = hg ? SizeofResource(hm, hr) : 0;
+    const void* ptr = hg ? LockResource(hg) : nullptr;
+    if (!ptr || !sz) return false;
+    out.assign((const char*)ptr, sz);
+    return true;
+}
+
 void LoadLocked(const std::wstring& dataDir, bool readOnly) {
     g_scripts.clear();
     g_nextId = 1;
@@ -140,7 +156,25 @@ void LoadLocked(const std::wstring& dataDir, bool readOnly) {
     if (g_dir.empty()) return;
 
     std::string idx;
-    if (!ReadFileBytes(g_dir + L"\\index.txt", idx)) return;
+    if (!ReadFileBytes(g_dir + L"\\index.txt", idx)) {
+        // Seed built-in YouTube Ad Skipper on first run when index.txt does not exist yet.
+        if (!readOnly && GetFileAttributesW((g_dir + L"\\index.txt").c_str()) == INVALID_FILE_ATTRIBUTES) {
+            std::string code;
+            if (LoadEmbeddedScript(IDR_YT_ADSKIP, code)) {
+                CreateDirectoryW(dataDir.c_str(), nullptr);
+                CreateDirectoryW(g_dir.c_str(), nullptr);
+                Script s = ParseMeta(code);
+                s.id = g_nextId++;
+                s.enabled = true;
+                s.code = std::move(code);
+                if (WriteFileAtomic(ScriptFilePath(s.id), s.code)) {
+                    g_scripts.push_back(std::move(s));
+                    SaveIndexLocked();
+                }
+            }
+        }
+        return;
+    }
     size_t pos = 0, nl = idx.find('\n');
     if (nl == std::string::npos) return;
     std::string hdr = idx.substr(0, nl);
