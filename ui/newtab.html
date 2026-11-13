@@ -122,8 +122,7 @@ function tick(){
 }
 let clockTimer = 0, idleTimer = 0, userIdle = false, lastAct = 0;
 function applyIdle(){
-  const paused = document.hidden || !document.hasFocus() || userIdle;
-  document.documentElement.classList.toggle('idle', paused);
+  document.documentElement.classList.toggle('idle', document.hidden || userIdle);
 }
 function wakeGrid(e){
   const now = performance.now();
@@ -131,25 +130,25 @@ function wakeGrid(e){
   lastAct = now;
   if (userIdle) { userIdle = false; applyIdle(); }
   clearTimeout(idleTimer);
-  if (!document.hidden && document.hasFocus()) {
+  if (!document.hidden) {
     idleTimer = setTimeout(() => { userIdle = true; applyIdle(); }, 3500);
   }
 }
 function syncVis(){
-  const active = !document.hidden && document.hasFocus();
-  if (!active) {
+  if (document.hidden) {
     clearTimeout(idleTimer);
     if (clockTimer) { clearInterval(clockTimer); clockTimer = 0; }
     applyIdle();
   } else {
     tick();
     if (!clockTimer) clockTimer = setInterval(tick, 30000);
+    userIdle = false;
+    applyIdle();
     wakeGrid();
   }
 }
 document.addEventListener('visibilitychange', syncVis);
-window.addEventListener('focus', syncVis);
-window.addEventListener('blur', syncVis);
+window.addEventListener('focus', wakeGrid);
 for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel']) {
   window.addEventListener(ev, wakeGrid, {passive: true});
 }
