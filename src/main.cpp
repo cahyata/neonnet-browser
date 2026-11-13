@@ -2714,7 +2714,7 @@ static void OnChromeCommand(const std::wstring& msg) {
         if (cmd == L"move" && v.size() > 1) MoveTab(_wtoi(v[0].c_str()), _wtoi(v[1].c_str()));
         else if (cmd == L"tabmenu" && v.size() > 3) ShowTabMenu(_wtoi(v[0].c_str()), _wtoi(v[1].c_str()), _wtoi(v[2].c_str()), wcstod(v[3].c_str(), nullptr));
     }
-    else if (cmd == L"select") SelectTab(_wtoi(arg.c_str()), true);
+    else if (cmd == L"select") SelectTab(_wtoi(arg.c_str()), arg.find(L'\n') == std::wstring::npos);   // "<id>\nnofocus": a press that may become a drag
     else if (cmd == L"scan") ExecCmd(CMD_SCAN);
     else if (cmd == L"bookmark") ExecCmd(CMD_BOOKMARK);
     else if (cmd == L"find") { g.findText = arg.substr(0, 1000); DoFind(true); }

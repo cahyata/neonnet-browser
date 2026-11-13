@@ -221,7 +221,10 @@ function render(){
     d.querySelector('.t').textContent = (t.title || 'NEW TAB').toUpperCase();
     d.onmousedown = e => {
       if(e.button !== 0 || e.target.classList.contains('x')) return;
-      send('select', t.id);
+      // Select without moving the keyboard focus into the page: focus moving away from this
+      // toolbar page in the middle of a press would stop the mouse events a drag needs.
+      // The focus goes to the page when the button is released (see the mouseup handler).
+      send('select', t.id, 'nofocus');
       drag = {id: t.id, x0: e.clientX, on: false};   // becomes a real drag after a few pixels, see below
     };
     d.onauxclick = e => { if(e.button === 1 && !t.pinned) send('close', t.id); };
@@ -317,7 +320,12 @@ function endDrag(){
   }
   render();
 }
-document.addEventListener('mouseup', e => { if(e.button === 0) endDrag(); });
+document.addEventListener('mouseup', e => {
+  if(e.button !== 0) return;
+  const pressed = !!drag;
+  endDrag();
+  if(pressed) send('focusPage');
+});
 window.addEventListener('blur', () => endDrag());
 
 fq.addEventListener('input', () => { send('find', fq.value); if(!fq.value) showCount(0, 0); });
