@@ -1,278 +1,688 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NeonNet Browser — User Guide</title>
+<title>NEONNET // USER GUIDE</title>
 <style>
-  :root {
-    --bg: #0c041e;
-    --bg-card: #150930;
-    --bg-code: #090316;
-    --border: rgba(0, 245, 212, 0.22);
-    --text: #ece6ff;
-    --muted: #a699cc;
-    --cyan: #00f5d4;
-    --pink: #ff2a85;
-    --amber: #ffb84d;
-  }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: radial-gradient(circle at 18% 0%, #240c4f 0%, var(--bg) 55%);
-    color: var(--text);
-    line-height: 1.65;
-  }
-  a { color: var(--cyan); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  code, kbd {
-    font-family: "Cascadia Code", Consolas, monospace;
-    font-size: 0.9em;
-    background: var(--bg-code);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 4px;
-    padding: 1px 6px;
-  }
-  kbd {
-    color: var(--cyan);
-    border-color: rgba(0, 245, 212, 0.35);
-    box-shadow: 0 1px 0 rgba(0, 245, 212, 0.25);
-  }
-  .layout {
-    max-width: 1100px;
-    margin: 0 auto;
-    padding: 28px 20px 64px;
-    display: grid;
-    grid-template-columns: 240px 1fr;
-    gap: 28px;
-  }
-  aside {
-    position: sticky;
-    top: 20px;
-    align-self: start;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px;
-  }
-  .brand {
-    font-size: 1.15rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    color: var(--cyan);
-    text-shadow: 0 0 12px rgba(0, 245, 212, 0.45);
-    margin-bottom: 4px;
-  }
-  .ver {
-    font-size: 0.8rem;
-    color: var(--muted);
-    margin-bottom: 14px;
-  }
-  nav a {
-    display: block;
-    padding: 6px 8px;
-    border-radius: 6px;
-    color: var(--muted);
-    font-size: 0.92rem;
-  }
-  nav a:hover {
-    background: rgba(0, 245, 212, 0.08);
-    color: var(--text);
-    text-decoration: none;
-  }
-  main { min-width: 0; }
-  header.hero {
-    background: linear-gradient(135deg, rgba(0, 245, 212, 0.10), rgba(255, 42, 133, 0.10));
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 26px 28px;
-    margin-bottom: 24px;
-  }
-  header.hero h1 {
-    margin: 0 0 8px;
-    font-size: 2rem;
-    letter-spacing: 0.02em;
-  }
-  header.hero p {
-    margin: 0;
-    color: var(--muted);
-  }
-  section {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 22px 24px;
-    margin-bottom: 20px;
-  }
-  h2 {
-    margin: 0 0 14px;
-    font-size: 1.3rem;
-    color: var(--cyan);
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-    padding-bottom: 8px;
-  }
-  h3 {
-    margin: 18px 0 8px;
-    font-size: 1.05rem;
-    color: var(--pink);
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 10px 0;
-    font-size: 0.93rem;
-  }
-  th, td {
-    text-align: left;
-    padding: 8px 10px;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-  }
-  th { color: var(--muted); font-weight: 600; }
-  .note {
-    background: rgba(0, 245, 212, 0.07);
-    border-left: 3px solid var(--cyan);
-    padding: 10px 14px;
-    border-radius: 4px;
-    margin: 12px 0;
-    font-size: 0.94rem;
-  }
-  ul { padding-left: 20px; }
-  li { margin-bottom: 6px; }
-  footer {
-    text-align: center;
-    color: var(--muted);
-    font-size: 0.85rem;
-    margin-top: 28px;
-  }
-  @media (max-width: 820px) {
-    .layout { grid-template-columns: 1fr; }
-    aside { position: static; }
-  }
+:root{
+  --bg:#12062c;
+  --bg2:#0a0420;
+  --card:#190a38;
+  --row:#1b0b3d;
+  --tab:#2d1160;
+  --pink:#ff2e97;
+  --pink2:#ff7bc0;
+  --cyan:#00e5ff;
+  --yellow:#ffd600;
+  --green:#35ffa0;
+  --muted:#8a6fc0;
+  --line:#3a1a5e;
+  --text:#e8d8ff;
+  --scan:block;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+html,body{
+  margin:0;
+  min-height:100%;
+  background:var(--bg);
+  color:var(--text);
+  font:13px/1.65 "Cascadia Mono","Consolas","Courier New",monospace;
+}
+/* CRT scanline overlay (matches chrome.html / extensions.html) */
+body::after{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:50;
+  background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.16) 2px 3px);
+  display:var(--scan);
+}
+
+a{color:var(--cyan);text-decoration:none}
+a:hover{color:var(--yellow);text-decoration:underline}
+
+code,kbd{
+  font:12px "Cascadia Mono","Consolas",monospace;
+}
+code{
+  color:var(--green);
+  background:rgba(53,255,160,.08);
+  border:1px solid rgba(53,255,160,.25);
+  padding:1px 6px;
+}
+kbd{
+  display:inline-block;
+  color:var(--cyan);
+  background:var(--bg2);
+  border:1px solid var(--cyan);
+  padding:1px 7px;
+  font-weight:bold;
+  box-shadow:2px 2px 0 rgba(255,46,151,.45);
+}
+
+/* Top browser-inspired chrome bar */
+.topbar{
+  position:sticky;
+  top:0;
+  z-index:30;
+  background:var(--bg);
+  border-bottom:1px solid var(--cyan);
+  box-shadow:0 4px 24px rgba(10,4,32,.85);
+}
+.top-row{
+  max-width:1160px;
+  margin:0 auto;
+  padding:10px 18px;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.brand{
+  color:var(--yellow);
+  font-weight:bold;
+  letter-spacing:1.5px;
+  white-space:nowrap;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.brand b{color:var(--pink)}
+.badge{
+  padding:1px 6px;
+  border:1px solid var(--green);
+  color:var(--green);
+  font-size:11px;
+  letter-spacing:1px;
+}
+.addr{
+  flex:1;
+  min-width:220px;
+  height:32px;
+  display:flex;
+  align-items:center;
+  border:1px solid var(--cyan);
+  background:var(--bg2);
+  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px));
+}
+.addr span{color:var(--pink);padding:0 6px 0 10px;user-select:none}
+.addr input{
+  flex:1;
+  height:100%;
+  background:none;
+  border:0;
+  outline:0;
+  color:var(--cyan);
+  font:12px "Cascadia Mono","Consolas",monospace;
+}
+.addr input::placeholder{color:#5e4a8f}
+.addr button{
+  height:100%;
+  border:0;
+  background:none;
+  color:var(--muted);
+  padding:0 10px;
+  cursor:pointer;
+  font:inherit;
+  display:none;
+}
+.addr button.show{display:block}
+.addr button:hover{color:var(--pink)}
+
+.hud-actions{display:flex;gap:8px;align-items:center}
+.hud-btn{
+  height:30px;
+  padding:0 10px;
+  background:none;
+  border:1px solid var(--muted);
+  color:var(--muted);
+  font:bold 11px "Cascadia Mono","Consolas",monospace;
+  letter-spacing:1px;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  text-decoration:none;
+}
+.hud-btn.on{border-color:var(--cyan);color:var(--cyan)}
+.hud-btn:hover{background:var(--cyan);color:var(--bg);border-color:var(--cyan);text-decoration:none}
+.hud-btn.pink{border-color:var(--pink);color:var(--pink)}
+.hud-btn.pink:hover{background:var(--pink);color:var(--bg)}
+
+/* Main grid */
+.wrap{
+  max-width:1160px;
+  margin:0 auto;
+  padding:24px 18px 72px;
+  display:grid;
+  grid-template-columns:250px 1fr;
+  gap:24px;
+}
+
+/* Sidebar TOC */
+aside{
+  position:sticky;
+  top:72px;
+  align-self:start;
+  background:var(--bg2);
+  border:1px solid var(--line);
+  border-top:2px solid var(--pink);
+  padding:14px;
+  clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,0 100%);
+}
+.toc-title{
+  color:var(--yellow);
+  font-size:11px;
+  font-weight:bold;
+  letter-spacing:2px;
+  margin-bottom:10px;
+  display:flex;
+  justify-content:space-between;
+}
+.toc-title span{color:var(--muted)}
+nav a{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:7px 9px;
+  margin-bottom:4px;
+  border:1px solid transparent;
+  color:var(--muted);
+  font-size:12px;
+  text-decoration:none;
+  transition:all .12s;
+}
+nav a .num{color:var(--yellow);font-size:11px;opacity:.85}
+nav a:hover{
+  color:var(--cyan);
+  background:rgba(0,229,255,.06);
+  border-color:rgba(0,229,255,.3);
+  text-decoration:none;
+}
+nav a.active{
+  background:var(--tab);
+  color:var(--pink2);
+  border-color:var(--pink);
+  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%);
+}
+.aside-meta{
+  margin-top:14px;
+  padding-top:12px;
+  border-top:1px solid var(--line);
+  font-size:11px;
+  color:var(--muted);
+  line-height:1.6;
+}
+.aside-meta b{color:var(--cyan);font-weight:normal}
+
+/* Content column */
+main{min-width:0}
+
+/* Synthwave hero matching newtab.html */
+.hero{
+  position:relative;
+  overflow:hidden;
+  background:linear-gradient(180deg,#12062c 0%,#2a0f55 68%,#4a1568 100%);
+  border:1px solid var(--cyan);
+  border-bottom:2px solid var(--pink);
+  padding:28px 26px 26px;
+  margin-bottom:22px;
+  clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px));
+}
+.hero-sun{
+  position:absolute;
+  right:36px;
+  bottom:-46px;
+  width:150px;
+  height:150px;
+  border-radius:50%;
+  opacity:.85;
+  pointer-events:none;
+  filter:drop-shadow(0 0 22px rgba(255,46,151,.55));
+  background:linear-gradient(#ffd600 0%,#ff9a3c 45%,#ff2e97 100%);
+  -webkit-mask:linear-gradient(#000 0 50%,transparent 50% 53%,#000 53% 60%,transparent 60% 64%,#000 64% 70%,transparent 70% 75%,#000 75% 80%,transparent 80% 86%,#000 86%);
+  mask:linear-gradient(#000 0 50%,transparent 50% 53%,#000 53% 60%,transparent 60% 64%,#000 64% 70%,transparent 70% 75%,#000 75% 80%,transparent 80% 86%,#000 86%);
+}
+.hero-hud{
+  color:var(--muted);
+  font-size:11px;
+  letter-spacing:1.5px;
+  margin-bottom:10px;
+  position:relative;
+  z-index:2;
+}
+.hero-hud b{color:var(--yellow);font-weight:normal}
+.hero h1{
+  margin:0 0 6px;
+  font:italic 900 clamp(30px,5vw,52px) Impact,"Arial Black",sans-serif;
+  letter-spacing:3px;
+  color:var(--cyan);
+  text-shadow:3px 3px 0 var(--pink),0 0 18px rgba(0,229,255,.45);
+  position:relative;
+  z-index:2;
+}
+.hero .sub{
+  color:var(--yellow);
+  letter-spacing:2px;
+  margin:0 0 14px;
+  font-size:12px;
+  position:relative;
+  z-index:2;
+}
+.hero p{
+  margin:0;
+  max-width:650px;
+  color:#e2d4ff;
+  position:relative;
+  z-index:2;
+}
+.hero-chips{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:16px;
+  position:relative;
+  z-index:2;
+}
+.chip{
+  font-size:11px;
+  padding:3px 9px;
+  background:rgba(10,4,32,.85);
+  border:1px solid var(--cyan);
+  color:var(--cyan);
+}
+.chip.p{border-color:var(--pink);color:var(--pink2)}
+.chip.g{border-color:var(--green);color:var(--green)}
+
+/* Sections */
+section{
+  background:var(--card);
+  border:1px solid var(--line);
+  padding:20px 22px;
+  margin-bottom:18px;
+  scroll-margin-top:68px;
+}
+section.hidden{display:none}
+section h2{
+  margin:0 0 14px;
+  font:bold 13px "Cascadia Mono","Consolas",monospace;
+  color:var(--yellow);
+  letter-spacing:2px;
+  padding-bottom:6px;
+  border-bottom:1px solid rgba(255,46,151,.55);
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+}
+section h2 span.tag{
+  font-size:11px;
+  color:var(--muted);
+  font-weight:normal;
+  letter-spacing:1px;
+}
+section h3{
+  margin:18px 0 8px;
+  font-size:13px;
+  color:var(--pink2);
+  letter-spacing:1px;
+}
+p{margin:8px 0;color:#ded0fa}
+ul{margin:8px 0 8px 18px;padding:0;color:#ded0fa}
+li{margin:6px 0}
+li b, li strong{color:var(--cyan);font-weight:bold}
+
+/* Info callout (matches extensions.html .info) */
+.info{
+  background:var(--bg2);
+  border:1px solid rgba(0,229,255,.35);
+  border-left:3px solid var(--pink);
+  padding:13px 16px;
+  margin:14px 0;
+}
+.info-title{
+  color:var(--cyan);
+  font-weight:bold;
+  letter-spacing:1px;
+  margin-bottom:6px;
+}
+.info.warn{border-left-color:var(--yellow)}
+.info.warn .info-title{color:var(--yellow)}
+.info.ghost{border-left-color:var(--green);border-color:rgba(53,255,160,.4)}
+.info.ghost .info-title{color:var(--green)}
+
+/* Tables & rows (matches settings.html) */
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin:10px 0;
+  font-size:12.5px;
+}
+th,td{
+  text-align:left;
+  padding:9px 10px;
+  border-bottom:1px solid rgba(138,111,192,.22);
+  vertical-align:top;
+}
+th{
+  color:var(--yellow);
+  font-size:11px;
+  letter-spacing:1.5px;
+  border-bottom:1px solid rgba(255,46,151,.45);
+}
+tr:hover td{background:var(--row)}
+tr.hidden{display:none}
+
+/* Quick 2-column feature grid */
+.grid-2{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+  margin-top:10px;
+}
+.mini-card{
+  background:var(--bg2);
+  border:1px solid var(--line);
+  padding:12px 14px;
+  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%);
+}
+.mini-card:hover{border-color:rgba(0,229,255,.5)}
+.mini-card b{display:block;color:var(--cyan);margin-bottom:4px}
+.mini-card span{color:var(--muted);font-size:12px}
+
+.empty-search{
+  display:none;
+  border:1px dashed var(--pink);
+  background:var(--bg2);
+  padding:22px;
+  text-align:center;
+  color:var(--pink2);
+  margin-bottom:18px;
+}
+.empty-search.show{display:block}
+
+footer{
+  margin-top:26px;
+  padding-top:14px;
+  border-top:1px solid var(--line);
+  display:flex;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  gap:10px;
+  color:var(--muted);
+  font-size:12px;
+}
+
+@media (max-width:860px){
+  .wrap{grid-template-columns:1fr}
+  aside{position:static}
+  .grid-2{grid-template-columns:1fr}
+  .hero-sun{width:110px;height:110px;right:16px;bottom:-36px}
+}
 </style>
 </head>
 <body>
-<div class="layout">
+
+<header class="topbar">
+  <div class="top-row">
+    <div class="brand">&#9632; <b>NEON</b>NET <span class="badge">v1.7.0</span></div>
+    <div class="addr">
+      <span>&gt;&gt;</span>
+      <input id="filter" spellcheck="false" placeholder="filter docs, shortcuts, pages, or commands (Ctrl+K)">
+      <button id="clearFilter" title="Clear filter">&#10005;</button>
+    </div>
+    <div class="hud-actions">
+      <button id="scanBtn" class="hud-btn on" title="Toggle CRT scanlines">SCAN: ON</button>
+      <a class="hud-btn pink" href="https://github.com/cahyata/neonnet-browser" target="_blank" rel="noopener">GITHUB</a>
+      <a class="hud-btn" href="https://github.com/cahyata/neonnet-browser/releases" target="_blank" rel="noopener">RELEASES</a>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
   <aside>
-    <div class="brand">NEONNET</div>
-    <div class="ver">User Guide &bull; v1.7.0</div>
-    <nav>
-      <a href="#getting-started">Getting Started</a>
-      <a href="#shortcuts">Keyboard Shortcuts</a>
-      <a href="#pages">Built-in Pages</a>
-      <a href="#extensions">Extensions (Userscripts)</a>
-      <a href="#performance">Performance &amp; Network Limiter</a>
-      <a href="#privacy">Privacy &amp; Data</a>
-      <a href="#troubleshooting">Crash Logs &amp; Updates</a>
+    <div class="toc-title">INDEX <span>// F1 DOCS</span></div>
+    <nav id="toc">
+      <a href="#start" class="active"><span class="num">01</span>Getting Started</a>
+      <a href="#shortcuts"><span class="num">02</span>Keyboard Shortcuts</a>
+      <a href="#pages"><span class="num">03</span>Built-in Pages</a>
+      <a href="#extensions"><span class="num">04</span>Extensions (Userscripts)</a>
+      <a href="#perf"><span class="num">05</span>Performance &amp; Network</a>
+      <a href="#privacy"><span class="num">06</span>Privacy, Ghost &amp; Blocker</a>
+      <a href="#system"><span class="num">07</span>Updates &amp; Crash Logs</a>
     </nav>
+    <div class="aside-meta">
+      <div><b>SHORTCUT</b> &rarr; <kbd>F1</kbd></div>
+      <div><b>MENU</b> &rarr; <code>&equiv; &rarr; User guide</code></div>
+      <div><b>ENGINE</b> &rarr; Chromium / CEF 156</div>
+      <div><b>HOST</b> &rarr; GitHub Pages</div>
+    </div>
   </aside>
 
   <main>
-    <header class="hero">
-      <h1>NeonNet Browser User Guide</h1>
-      <p>Fast, lightweight Windows desktop browser powered by Chromium Embedded Framework (CEF) with built-in ad blocking, userscripts, performance controls, and a retro neon shell.</p>
-    </header>
+    <div class="hero">
+      <div class="hero-sun"></div>
+      <div class="hero-hud"><b>&#9632;</b> NEON//NET.OS &nbsp; NODE 2099 // MANUAL</div>
+      <h1>USER GUIDE</h1>
+      <div class="sub">&gt; FAST DESKTOP BROWSER // CHROMIUM ENGINE + SYNTHWAVE SHELL</div>
+      <p>Everything you need to navigate NeonNet, control RAM/CPU/bandwidth in real time, block trackers, and run <code>.user.js</code> userscripts.</p>
+      <div class="hero-chips">
+        <span class="chip">F1 HELP</span>
+        <span class="chip p">USERSCRIPTS (.USER.JS)</span>
+        <span class="chip g">NETWORK LIMITER</span>
+        <span class="chip">AD &amp; TRACKER BLOCKER</span>
+        <span class="chip p">CRASH.LOG + AUTO UPDATE</span>
+      </div>
+    </div>
 
-    <section id="getting-started">
-      <h2>Getting Started</h2>
-      <ul>
-        <li><strong>Address bar:</strong> Type any URL or search term and press <kbd>Enter</kbd>. Focus it anytime with <kbd>Ctrl</kbd>+<kbd>L</kbd> or <kbd>F6</kbd>.</li>
-        <li><strong>Tabs:</strong> Open with <kbd>Ctrl</kbd>+<kbd>T</kbd>, close with <kbd>Ctrl</kbd>+<kbd>W</kbd>, and reopen the last closed tab with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd>.</li>
-        <li><strong>Menu:</strong> Click the <code>&equiv;</code> button on the top-right to access bookmarks, history, downloads, extensions, performance panel, scanlines, settings, updates, and this guide (<kbd>F1</kbd>).</li>
-        <li><strong>Incognito:</strong> Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> for a separate session whose history, cache, and cookies are wiped on exit.</li>
-      </ul>
+    <div id="emptySearch" class="empty-search">
+      NO MATCHING DOCS FOR "<span id="emptyQuery"></span>" &mdash; CLEAR THE FILTER ABOVE TO VIEW ALL SECTIONS.
+    </div>
+
+    <section id="start">
+      <h2>01 // GETTING STARTED <span class="tag">NAVIGATION &amp; SHELL</span></h2>
+      <div class="grid-2">
+        <div class="mini-card">
+          <b>Address Bar &amp; Suggestions</b>
+          <span>Press <kbd>Ctrl</kbd>+<kbd>L</kbd> or <kbd>F6</kbd>. Type a URL or search query; local matches rank bookmarks and history offline before anything leaves your PC.</span>
+        </div>
+        <div class="mini-card">
+          <b>Tabs, Pins &amp; Reopen</b>
+          <span>Drag tabs to reorder, middle-click or press <kbd>Ctrl</kbd>+<kbd>W</kbd> to close, right-click to pin, and restore closed tabs with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd>.</span>
+        </div>
+        <div class="mini-card">
+          <b>Audio Indicator &amp; Mute</b>
+          <span>Tabs playing audio pulse a speaker icon in the tab strip. Click it to mute/unmute, even across tab sleep cycles.</span>
+        </div>
+        <div class="mini-card">
+          <b>CRT Scanlines</b>
+          <span>Click <code>SCAN</code> next to the address bar or toggle it in <code>&equiv; &rarr; Scanlines</code> for the retro monitor overlay.</span>
+        </div>
+      </div>
     </section>
 
     <section id="shortcuts">
-      <h2>Keyboard Shortcuts</h2>
+      <h2>02 // KEYBOARD SHORTCUTS <span class="tag">QUICK REFERENCE</span></h2>
       <table>
-        <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+        <thead><tr><th>Keys</th><th>Action</th><th>Notes</th></tr></thead>
         <tbody>
-          <tr><td><kbd>F1</kbd></td><td>Open this User Guide</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>T</kbd> / <kbd>Ctrl</kbd>+<kbd>W</kbd></td><td>New tab / Close current tab</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></td><td>Reopen closed tab</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Next / Previous tab</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd>&ndash;<kbd>9</kbd></td><td>Jump to tab 1&ndash;8, or last tab (<kbd>9</kbd>)</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>New Incognito window</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>L</kbd> / <kbd>F6</kbd></td><td>Focus address bar</td></tr>
-          <tr><td><kbd>Alt</kbd>+<kbd>Left</kbd> / <kbd>Alt</kbd>+<kbd>Right</kbd></td><td>Back / Forward</td></tr>
-          <tr><td><kbd>F5</kbd> / <kbd>Alt</kbd>+<kbd>Home</kbd></td><td>Reload / Home page</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>F3</kbd></td><td>Find in page / Find next</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Bookmark page / Open bookmarks</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd></td><td>Toggle bookmarks bar</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd> / <kbd>Ctrl</kbd>+<kbd>J</kbd></td><td>History / Downloads</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></td><td>Extensions (Userscripts)</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></td><td>Performance &amp; Network Limiter panel</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd></td><td>Zoom in / out / reset</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd> / <kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Print / Settings</td></tr>
-          <tr><td><kbd>F11</kbd> / <kbd>F12</kbd></td><td>Fullscreen / Developer tools</td></tr>
+          <tr><td><kbd>F1</kbd></td><td>User guide</td><td>Opens this documentation in a new tab</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>T</kbd> / <kbd>Ctrl</kbd>+<kbd>W</kbd></td><td>New tab / Close tab</td><td><kbd>Ctrl</kbd>+<kbd>F4</kbd> also closes tab</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></td><td>Reopen last closed tab</td><td>Remembers closed tab history</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>New Ghost (Incognito) window</td><td>Green neon accent; clears data on close</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Next / Previous tab</td><td>Also switches via <kbd>Ctrl</kbd>+<kbd>1</kbd>&ndash;<kbd>9</kbd></td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>L</kbd> / <kbd>F6</kbd></td><td>Focus address bar</td><td>Selects current URL for fast typing</td></tr>
+          <tr><td><kbd>Alt</kbd>+<kbd>Left</kbd> / <kbd>Alt</kbd>+<kbd>Right</kbd></td><td>Back / Forward</td><td><kbd>Alt</kbd>+<kbd>Home</kbd> opens home page</td></tr>
+          <tr><td><kbd>F5</kbd> / <kbd>Ctrl</kbd>+<kbd>R</kbd></td><td>Reload page</td><td>Reloads active tab</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>F3</kbd></td><td>Find in page / Next match</td><td><kbd>Shift</kbd>+<kbd>F3</kbd> finds previous match</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Bookmark page / Bookmarks</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> toggles bookmarks bar</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd> / <kbd>Ctrl</kbd>+<kbd>J</kbd></td><td>History / Downloads</td><td>Opens built-in management pages</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></td><td>Extensions (Userscripts)</td><td>Manage &amp; edit <code>.user.js</code> scripts</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></td><td>Performance panel</td><td>RAM, CPU, Tab Sleep &amp; Network Limiter</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd></td><td>Zoom in / out / reset</td><td>Per-domain zoom level</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd> / <kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Print / Settings</td><td>Opens NeonNet settings</td></tr>
+          <tr><td><kbd>F11</kbd> / <kbd>F12</kbd></td><td>Fullscreen / Developer tools</td><td><kbd>Esc</kbd> exits fullscreen</td></tr>
         </tbody>
       </table>
     </section>
 
     <section id="pages">
-      <h2>Built-in Pages</h2>
+      <h2>03 // BUILT-IN PAGES <span class="tag">NEONNET://</span></h2>
       <table>
-        <thead><tr><th>Address</th><th>Purpose</th></tr></thead>
+        <thead><tr><th>Address</th><th>Description</th></tr></thead>
         <tbody>
-          <tr><td><code>neonnet://newtab</code></td><td>New Tab with live clock, search bar, and pinned shortcuts</td></tr>
-          <tr><td><code>neonnet://bookmarks</code></td><td>Search, edit, or delete saved bookmarks</td></tr>
-          <tr><td><code>neonnet://history</code></td><td>Browse and clear visited pages</td></tr>
-          <tr><td><code>neonnet://downloads</code></td><td>Manage active and completed downloads</td></tr>
-          <tr><td><code>neonnet://extensions</code></td><td>Manage, create, and toggle <code>.user.js</code> userscripts</td></tr>
-          <tr><td><code>neonnet://settings</code></td><td>Search engine, startup, ad blocker, scanlines, DevTools dock, updates, and data clearing</td></tr>
+          <tr><td><code>neonnet://newtab</code></td><td>Synthwave grid New Tab with live clock, search, pinned links, and idle CPU pause</td></tr>
+          <tr><td><code>neonnet://bookmarks</code></td><td>Search, edit titles/URLs, or delete saved bookmarks</td></tr>
+          <tr><td><code>neonnet://history</code></td><td>Browse visited pages chronologically and clear entries</td></tr>
+          <tr><td><code>neonnet://downloads</code></td><td>Track active transfers, open downloaded files, or show in Explorer</td></tr>
+          <tr><td><code>neonnet://extensions</code></td><td>Install, drag-and-drop, toggle, or edit <code>.user.js</code> userscripts</td></tr>
+          <tr><td><code>neonnet://settings</code></td><td>Search engine, default browser, startup/home, ad blocker, DevTools dock, updates, and data clearing</td></tr>
         </tbody>
       </table>
     </section>
 
     <section id="extensions">
-      <h2>Extensions (Userscripts)</h2>
-      <p>NeonNet supports <strong>userscripts (<code>.user.js</code>)</strong> via <code>neonnet://extensions</code> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>).</p>
-      <div class="note">
-        <strong>Why not Chrome Web Store (<code>.crx</code>) extensions?</strong><br>
-        NeonNet uses a custom Win32/HTML Alloy shell instead of the full Chrome browser toolbar UI, so Chrome Web Store extension popups and APIs are not loaded. Standard <code>.user.js</code> userscripts (compatible with Tampermonkey/Violentmonkey metadata) run cleanly on matching pages instead.
+      <h2>04 // EXTENSIONS (USERSCRIPTS) <span class="tag">CTRL+SHIFT+E</span></h2>
+      <p>NeonNet runs <strong>userscripts (<code>.user.js</code>)</strong> from <code>neonnet://extensions</code> so you can customize websites without bloat.</p>
+      <div class="info">
+        <div class="info-title">WHY USERSCRIPTS INSTEAD OF CHROME WEB STORE (.CRX)?</div>
+        NeonNet uses a custom Win32 + HTML Alloy shell instead of the full Chrome browser toolbar UI, so Chrome Web Store <code>.crx</code> extension popups and Chrome-runtime extension APIs are unavailable. Standard Tampermonkey / Violentmonkey-style <code>.user.js</code> scripts run cleanly on matching pages instead.
       </div>
       <ul>
-        <li>Supports <code>@name</code>, <code>@version</code>, <code>@description</code>, <code>@match</code>, <code>@include</code>, <code>@exclude</code>, and <code>@run-at</code> (<code>document-start</code>, <code>document-end</code>, <code>document-idle</code>).</li>
-        <li>Provides <code>GM_getValue</code>, <code>GM_setValue</code>, <code>GM_deleteValue</code>, <code>GM_listValues</code>, <code>GM_addStyle</code>, and <code>GM_info</code>.</li>
-        <li>Scripts are stored as plain files in <code>%LOCALAPPDATA%\NeonNet\UserData\userscripts\</code>.</li>
+        <li><strong>Metadata headers:</strong> Supports <code>@name</code>, <code>@version</code>, <code>@description</code>, <code>@match</code>, <code>@include</code>, <code>@exclude</code>, and <code>@run-at</code> (<code>document-start</code>, <code>document-end</code>, <code>document-idle</code>).</li>
+        <li><strong>GM APIs included:</strong> <code>GM_getValue</code>, <code>GM_setValue</code>, <code>GM_deleteValue</code>, <code>GM_listValues</code>, <code>GM_addStyle</code>, and <code>GM_info</code>.</li>
+        <li><strong>Easy import:</strong> Drag and drop any <code>.user.js</code> file onto <code>neonnet://extensions</code>, click <b>+ NEW SCRIPT</b>, or edit files in <code>%LOCALAPPDATA%\NeonNet\UserData\userscripts\</code>.</li>
       </ul>
     </section>
 
-    <section id="performance">
-      <h2>Performance Panel &amp; Network Limiter</h2>
-      <p>Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> or open <code>&equiv; &rarr; Performance panel</code> to monitor and control NeonNet resources in real time:</p>
+    <section id="perf">
+      <h2>05 // PERFORMANCE &amp; NETWORK LIMITER <span class="tag">CTRL+SHIFT+M</span></h2>
+      <p>Click <code>PERF</code> on the toolbar or press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> to open the live resource panel:</p>
       <ul>
-        <li><strong>RAM &amp; CPU meters:</strong> Live total memory and CPU usage across NeonNet processes, plus <strong>Trim memory</strong> to release unused working set pages.</li>
-        <li><strong>CPU / RAM limiters:</strong> Optional caps to keep background tabs light on battery or low-spec machines.</li>
-        <li><strong>Network limiter:</strong> Set download/upload bandwidth caps (KB/s or MB/s) for testing or conserving connection bandwidth.</li>
-        <li><strong>Tab sleep:</strong> Automatically suspends inactive background tabs after an idle timeout.</li>
+        <li><strong>Live Telemetry:</strong> Real-time RAM &amp; CPU breakdown across tabs, browser shell, and Chromium helper processes. Tabs above 20% CPU are tagged <code>HOT</code>.</li>
+        <li><strong>Clean Memory:</strong> Triggers garbage collection and trims unused Windows working-set pages immediately.</li>
+        <li><strong>RAM Limiter &amp; Tab Sleep:</strong> Set a total memory cap (1&ndash;8 GB) or put idle background tabs to sleep while protecting tabs marked <code>SOUND</code>, <code>TYPING</code>, or <code>AWAKE</code>.</li>
+        <li><strong>CPU Limiter:</strong> Applies low priority and Windows Efficiency Mode to background tabs so your active tab stays responsive.</li>
+        <li><strong>Network Limiter:</strong> Throttle download bandwidth (Off, <code>KB/s</code>, or <code>MB/s</code>) for <b>All tabs</b> or <b>Background tabs only</b>.</li>
       </ul>
     </section>
 
     <section id="privacy">
-      <h2>Privacy &amp; Data</h2>
+      <h2>06 // PRIVACY, GHOST MODE &amp; AD BLOCKER <span class="tag">LOCAL FIRST</span></h2>
+      <div class="info ghost">
+        <div class="info-title">&gt; GHOST MODE (INCOGNITO &bull; CTRL+SHIFT+N)</div>
+        Opens a green-accented window backed by a temporary profile folder. History, cookies, and site storage from that session are deleted automatically after the window closes. Bookmarks and downloaded files remain saved.
+      </div>
       <ul>
-        <li><strong>Ad &amp; Tracker Blocker:</strong> Toggle in <code>&equiv;</code> or <code>neonnet://settings</code> to block common ad/analytics hosts before requests leave your machine.</li>
-        <li><strong>Local Storage:</strong> Bookmarks, history, settings, and userscripts stay local on your PC under <code>%LOCALAPPDATA%\NeonNet\</code>.</li>
-        <li><strong>Incognito Mode:</strong> Uses an isolated temporary profile directory that is automatically deleted after the Incognito window closes.</li>
+        <li><strong>Ad &amp; Tracker Blocker:</strong> Built-in domain blocker (toggle in <code>&equiv;</code> or <code>neonnet://settings</code>) stops known ad and tracking requests before they connect.</li>
+        <li><strong>Local Data Directory:</strong> Bookmarks, history, settings, and userscripts live locally under <code>%LOCALAPPDATA%\NeonNet\</code>. Clear browsing data anytime in <code>neonnet://settings</code>.</li>
       </ul>
     </section>
 
-    <section id="troubleshooting">
-      <h2>Crash Logs &amp; Updates</h2>
+    <section id="system">
+      <h2>07 // AUTO-UPDATE &amp; CRASH LOGS <span class="tag">MAINTENANCE</span></h2>
+      <div class="info warn">
+        <div class="info-title">DIAGNOSTIC CRASH LOGS</div>
+        If NeonNet exits unexpectedly, it writes a stack trace, exception code, and timestamp to <code>%LOCALAPPDATA%\NeonNet\UserData\crash.log</code> (without needing a debugger or extra runtime DLLs). Attach this file when opening an issue on GitHub.
+      </div>
       <ul>
-        <li><strong>Auto-Update:</strong> Installed copies check GitHub Releases once a day (or manually via <code>&equiv; &rarr; Check for updates</code>) and verify SHA-256 checksums before applying.</li>
-        <li><strong>Crash Logs:</strong> Unexpected crashes write a diagnostic log to <code>%LOCALAPPDATA%\NeonNet\UserData\crash.log</code> (including exception code, address, and stack trace) for easier bug reporting.</li>
+        <li><strong>Verified Updates:</strong> Installed builds check GitHub Releases at most once per day (or manually via <code>&equiv; &rarr; Check for updates</code>) and verify the installer SHA-256 checksum before applying.</li>
+        <li><strong>Source &amp; Releases:</strong> <a href="https://github.com/cahyata/neonnet-browser" target="_blank" rel="noopener">github.com/cahyata/neonnet-browser</a></li>
       </ul>
-      <p>Source code &amp; releases: <a href="https://github.com/cahyata/neonnet-browser">github.com/cahyata/neonnet-browser</a></p>
     </section>
 
     <footer>
-      NeonNet Browser &bull; MIT License &bull; Hosted on GitHub Pages
+      <span>NEONNET BROWSER // MIT LICENSE</span>
+      <span><a href="#start">&uarr; BACK TO TOP</a></span>
     </footer>
   </main>
 </div>
+
+<script>
+// Live filter across sections and shortcut/page rows
+const filterInput = document.getElementById('filter');
+const clearBtn = document.getElementById('clearFilter');
+const sections = Array.from(document.querySelectorAll('main section'));
+const emptyBox = document.getElementById('emptySearch');
+const emptyQuery = document.getElementById('emptyQuery');
+
+function applyFilter() {
+  const q = filterInput.value.trim().toLowerCase();
+  clearBtn.classList.toggle('show', q.length > 0);
+  let visibleSections = 0;
+
+  for (const sec of sections) {
+    if (!q) {
+      sec.classList.remove('hidden');
+      sec.querySelectorAll('tbody tr').forEach(r => r.classList.remove('hidden'));
+      visibleSections++;
+      continue;
+    }
+    const rows = Array.from(sec.querySelectorAll('tbody tr'));
+    if (rows.length > 0) {
+      let rowHits = 0;
+      const headHit = sec.querySelector('h2').textContent.toLowerCase().includes(q);
+      for (const r of rows) {
+        const hit = headHit || r.textContent.toLowerCase().includes(q);
+        r.classList.toggle('hidden', !hit);
+        if (hit) rowHits++;
+      }
+      const secHit = rowHits > 0 || headHit;
+      sec.classList.toggle('hidden', !secHit);
+      if (secHit) visibleSections++;
+    } else {
+      const hit = sec.textContent.toLowerCase().includes(q);
+      sec.classList.toggle('hidden', !hit);
+      if (hit) visibleSections++;
+    }
+  }
+
+  emptyQuery.textContent = filterInput.value.trim();
+  emptyBox.classList.toggle('show', q.length > 0 && visibleSections === 0);
+}
+
+filterInput.addEventListener('input', applyFilter);
+clearBtn.addEventListener('click', () => { filterInput.value = ''; applyFilter(); filterInput.focus(); });
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    filterInput.focus();
+    filterInput.select();
+  } else if (e.key === 'Escape' && document.activeElement === filterInput && filterInput.value) {
+    filterInput.value = '';
+    applyFilter();
+  }
+});
+
+// Scanline toggle (mirrors NeonNet's SCAN toolbar button)
+const scanBtn = document.getElementById('scanBtn');
+let scanOn = localStorage.getItem('nn-docs-scan') !== '0';
+function renderScan() {
+  document.documentElement.style.setProperty('--scan', scanOn ? 'block' : 'none');
+  scanBtn.textContent = scanOn ? 'SCAN: ON' : 'SCAN: OFF';
+  scanBtn.classList.toggle('on', scanOn);
+}
+scanBtn.addEventListener('click', () => {
+  scanOn = !scanOn;
+  localStorage.setItem('nn-docs-scan', scanOn ? '1' : '0');
+  renderScan();
+});
+renderScan();
+
+// Highlight active TOC link while scrolling
+const tocLinks = Array.from(document.querySelectorAll('#toc a'));
+const obs = new IntersectionObserver(entries => {
+  for (const entry of entries) {
+    if (entry.isIntersecting) {
+      const id = '#' + entry.target.id;
+      tocLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === id));
+    }
+  }
+}, { rootMargin: '-18% 0px -70% 0px' });
+sections.forEach(s => obs.observe(s));
+</script>
 </body>
 </html>
