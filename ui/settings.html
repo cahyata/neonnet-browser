@@ -62,6 +62,10 @@ select option{background:var(--bg2);color:var(--cyan)}
       <button class="btn" id="homeSave">SAVE</button></div>
   </div>
   <div class="row">
+    <div class="lab"><b>Site icons on tabs</b><span>Shows each site's own icon in its tab. The icon is fetched from the site, as the page itself would.</span></div>
+    <button class="tog" id="favicons">ON</button>
+  </div>
+  <div class="row">
     <div class="lab"><b>Continue where you left off</b><span id="restoreHint"></span></div>
     <button class="tog" id="restoreSession">OFF</button>
   </div>
@@ -124,6 +128,7 @@ async function load(){
   setTog('#askDownload', cfg.askDownload);
   $('#dlHint').textContent = cfg.askDownload ? 'A save dialog opens for every download.'
     : 'Files are saved straight into ' + cfg.downloadDir + ' (a number is added if the name is taken).';
+  setTog('#favicons', cfg.favicons);
   setTog('#restoreSession', cfg.restoreSession);
   $('#restoreHint').textContent = cfg.restoreSession
     ? 'All tabs of the last session come back at start-up. They load when you click them. Pinned tabs always come back.'
@@ -149,7 +154,7 @@ async function set(key, value){
 }
 
 $('#engine').onchange = async () => { await set('search', $('#engine').value); load(); };
-for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession']]){
+for(const [id, key] of [['#askDownload','askDownload'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons']]){
   $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };
 }
 async function saveHome(){

@@ -133,6 +133,7 @@ struct Tab {
     ULONGLONG audioUntil = 0;      // the page said it is playing sound: audible until this tick (see MEDIA_HOOK_JS)
     bool audible = false;          // as last shown to the UI
     bool dirty = false;            // a text field on the page holds text the user typed: do not unload it
+    std::wstring icon;             // address of the page's favicon (http/https), shown in the tab strip
     bool pinned = false;           // pinned tabs sit at the left, are narrow and come back at the next start
 };
 
@@ -171,6 +172,7 @@ struct App {
     std::wstring hoverText, download;
     std::wstring alert;   // urgent status bar message (unsupported video / DRM), shown above everything else
     std::wstring startUrl;
+    bool favicons = true;             // show site icons on tabs (registry ShowFavicons)
     bool sessionPending = false;      // a write of the open tabs to session.txt is scheduled
     std::string lastSession;          // what session.txt holds now, so an unchanged strip is not written again
     bool closing = false;
@@ -464,7 +466,8 @@ static void SendState() {
         j += L"{\"id\":" + std::to_wstring(t->id) + L",\"title\":" + JsonStr(t->title) +
              L",\"loading\":" + (t->loading ? L"true" : L"false") + L",\"discarded\":" + (t->discarded ? L"true" : L"false") +
              L",\"audible\":" + (t->audible ? L"true" : L"false") + L",\"muted\":" + (t->muted ? L"true" : L"false") +
-             L",\"pinned\":" + (t->pinned ? L"true" : L"false") + L"}";
+             L",\"pinned\":" + (t->pinned ? L"true" : L"false") +
+             (g.favicons && !t->icon.empty() ? L",\"icon\":" + JsonStr(t->icon) : L"") + L"}";
     }
     j += L"],\"active\":" + std::to_wstring(g.active);
     ScheduleSession();   // every change of the tab strip (and of titles and addresses) ends up here
@@ -473,6 +476,7 @@ static void SendState() {
     j += std::wstring(L",\"canFwd\":") + (a && a->canFwd && a->errorUrl.empty() ? L"true" : L"false");
     j += std::wstring(L",\"loading\":") + (a && a->loading ? L"true" : L"false");
     j += std::wstring(L",\"scan\":") + (g.scan ? L"true" : L"false");
+    j += std::wstring(L",\"favicons\":") + (g.favicons ? L"true" : L"false");
     j += std::wstring(L",\"incognito\":") + (g.incognito ? L"true" : L"false");
     j += std::wstring(L",\"perf\":") + (g.panelOpen ? L"true" : L"false");
     j += std::wstring(L",\"max\":") + (IsZoomed(g.hwnd) ? L"true" : L"false");
@@ -979,9 +983,23 @@ public:
             SendState();
         }
     }
+    // The page's own icon. Only plain http(s) addresses are passed on to the tab strip.
+    void OnFaviconURLChange(CefRefPtr<CefBrowser> browser, const std::vector<CefString>& icon_urls) override {
+        Tab* t = TabOf(browser);
+        if (!t) return;
+        std::wstring icon;
+        for (const auto& u : icon_urls) {
+            std::wstring w = u.ToWString();
+            if (w.size() < 2000 && (w.rfind(L"https://", 0) == 0 || w.rfind(L"http://", 0) == 0)) { icon = w; break; }
+        }
+        if (icon != t->icon) { t->icon = icon; if (g.favicons) SendState(); }
+    }
     void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString& url) override {
         if (!frame->IsMain()) return;
         if (Tab* t = TabOf(browser)) {
+            // a page on another site brings its own icon; until it arrives the tab shows none
+            auto site = [](const std::wstring& u) { size_t s = u.find(L"://"); size_t e = s == std::wstring::npos ? s : u.find(L'/', s + 3); return u.substr(0, e); };
+            if (site(url.ToWString()) != site(t->url)) t->icon.clear();
             t->url = url.ToWString();
             if (t->errorPending) t->errorPending = false;
             else t->errorUrl.clear();
@@ -1388,7 +1406,7 @@ static std::string SettingsJson() {
                             std::to_wstring(cef_version_info(6)) + L"." + std::to_wstring(cef_version_info(7));
     o += std::string("],\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
          ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
-         ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
+         ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
          ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
     return o;
@@ -1450,7 +1468,7 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
         bool ok = false;
         if (key == L"search") { for (const auto& e : SEARCH_ENGINES) if (val == e.id) ok = true; }
-        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession") ok = (val == L"0" || val == L"1");
+        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons") ok = (val == L"0" || val == L"1");
         else if (key == L"home") {
             std::wstring low = val; for (auto& ch : low) ch = towlower(ch);
             ok = val.empty() || (val.size() < 500 && (low.rfind(L"http://", 0) == 0 || low.rfind(L"https://", 0) == 0 || low.rfind(L"file:///", 0) == 0));
@@ -2994,6 +3012,11 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
     } else if (key == L"askDownload") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"AskDownload", REG_DWORD, &v, sizeof(v));
+    } else if (key == L"favicons") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"ShowFavicons", REG_DWORD, &v, sizeof(v));
+        g.favicons = v != 0;
+        SendState();
     } else if (key == L"restoreSession") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"RestoreSession", REG_DWORD, &v, sizeof(v));
@@ -3398,6 +3421,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     }
     EnableDarkMenus();
     g.scan = RegGetDword(L"Scanlines", 1) != 0;
+    g.favicons = RegGetDword(L"ShowFavicons", 1) != 0;
     { DWORD r = RegGetDword(L"RamLimitMB", 0); g.ramLimitMB = (r >= 512 && r <= 65536) ? r : 0; }
     g.bgLimit = RegGetDword(L"BgLimit", 0) != 0;
     {

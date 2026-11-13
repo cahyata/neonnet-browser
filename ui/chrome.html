@@ -45,6 +45,9 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;app-re
 .tab .x{width:18px;height:18px;line-height:18px;text-align:center;visibility:hidden;color:var(--muted)}
 .tab:hover .x,.tab.active .x{visibility:visible}
 .tab .x:hover{color:var(--bg);background:var(--pink)}
+.tab .ico{width:14px;height:14px;flex:none;display:none;object-fit:contain}
+.tab.hasico .ico{display:block}
+.tab.hasico .pin{display:none!important}
 .tab .pin{display:none;flex:none;color:var(--yellow);align-items:center}
 .tab.pinned{width:66px;min-width:66px;flex:0 0 66px;padding:0 8px;gap:5px}
 .tab.pinned .pin{display:flex}
@@ -207,11 +210,13 @@ function render(){
   state.tabs.forEach((t, i) => {
     const d = document.createElement('div');
     d.className = 'tab' + (t.id === state.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.discarded ? ' discarded' : '') +
-      (t.audible ? ' snd' : '') + (t.muted ? ' muted' : '') + (t.pinned ? ' pinned' : '');
+      (t.audible ? ' snd' : '') + (t.muted ? ' muted' : '') + (t.pinned ? ' pinned' : '') + (t.icon && state.favicons ? ' hasico' : '');
     d.dataset.id = t.id;
     d.title = t.title;
-    d.innerHTML = '<span class="pin"></span><span class="n"></span><span class="spk"></span><span class="t"></span><button class="x" title="Close tab (Ctrl+W)">&#10005;</button>';
+    d.innerHTML = '<span class="pin"></span><span class="n"></span><img class="ico" alt="" draggable="false"><span class="spk"></span><span class="t"></span><button class="x" title="Close tab (Ctrl+W)">&#10005;</button>';
     d.querySelector('.pin').innerHTML = PIN;
+    const ico = d.querySelector('.ico');
+    if(t.icon && state.favicons){ ico.src = t.icon; ico.onerror = () => d.classList.remove('hasico'); }
     const spk = d.querySelector('.spk');
     spk.innerHTML = t.muted ? SPK_OFF : SPK_ON;
     spk.title = t.muted ? 'Sound is muted. Click to unmute this tab' : 'This tab is playing sound. Click to mute it';
