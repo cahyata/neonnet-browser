@@ -31,7 +31,8 @@ Done without being planned here first (the planned ones are ticked in the lists 
 - [x] **Settings page** (M, 1.2.0). One place for home page, search engine, start-up behaviour, default download folder, scanlines and auto-update. Several of these are only in the menu or the registry now.
 - [x] **Open unplayable videos in the system player, and warn about DRM** (M, 1.3.0). NeonNet has no H.264 or AAC (patent licences), so such videos are opened in the user's own player from a temporary copy that is deleted afterwards. The status bar warns when a site asks for DRM.
 - [x] **Clear browsing data** (S, 1.4.0). Cookies, site data, cache and history, each for a chosen period.
-- [ ] **Permission prompts** (M). Camera, microphone, location and notification requests need an in-app prompt with allow/block and a remembered choice.
+- [x] **Permission prompts** (M, unreleased). Camera, microphone, location, notifications and similar requests show a NeonNet-themed prompt with allow and block. The choice is remembered only until NeonNet closes; a saved list with a way to review it is still to do. Page alerts and the leave-site question use the same themed window.
+- [ ] **HTTP sign-in dialog** (M). Sites that ask for a user name and password (HTTP Basic) fail with SIGNAL LOST, because the engine never calls `GetAuthCredentials` in this build. Needs another way to get the credentials.
 
 ## Tabs and windows
 

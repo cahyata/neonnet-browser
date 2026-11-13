@@ -151,6 +151,14 @@ Ctrl+F opens the find bar under the address bar. Matches are highlighted as you 
 
 The find bar belongs to the tab it was opened in and closes when you switch to another tab. Ctrl+F or F3 brings it back with the last search.
 
+## Page dialogs and permission prompts
+
+When a page shows an alert, a question (OK / CANCEL), a box to type in, or asks "leave this site?", the dialog opens in the middle of the window in the NeonNet theme, with the name of the site in its title. The window behind it waits until you answer. Enter presses the highlighted button, Esc is the same as CANCEL (or STAY). In a prompt the text is selected, so you can type over it.
+
+A **permission prompt** appears when a site wants to use your camera, microphone, location, notifications, the clipboard, or another feature of your device. It lists what it wants, and has **ALLOW** and **BLOCK**. Enter blocks; Esc dismisses the question without an answer (the site is told the permission was denied, and may ask again later). Your answer is remembered until NeonNet is closed, so the same site is not asked twice. Nothing is saved to disk: after a restart sites ask again.
+
+Not covered: a site that asks for a **user name and password** (HTTP sign-in) fails with a SIGNAL LOST page in this version, because the engine does not hand these requests to NeonNet. File choosers, print and the colour picker are windows of Windows or of Chromium.
+
 ## Pinned tabs and moving tabs
 
 - **Reorder:** press a tab and drag it left or right. The other tabs make room as you pass them. Clicking a tab still selects it at once.

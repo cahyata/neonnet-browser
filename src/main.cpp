@@ -84,6 +84,7 @@ static const UINT WM_APP_SETTING = WM_APP + 7;  // lParam = const std::pair<std:
 static const UINT WM_APP_MEDIA = WM_APP + 8;    // lParam = new MediaAsk (a video NeonNet cannot play was opened)
 static const UINT WM_APP_CTXMENU = WM_APP + 9;  // lParam = new CtxMenu (a right-click menu to show in the NeonNet theme)
 static const UINT WM_APP_CLEARDATA = WM_APP + 10;   // lParam = new ClearReq (from the settings page)
+static const UINT WM_APP_DIALOG = WM_APP + 12;      // lParam = new DlgReq (a page dialog, permission prompt or sign-in to show in the NeonNet theme)
 static const UINT WM_APP_CLEARSITES = WM_APP + 11;  // lParam = new ClearSites (cookies are done, site data is next)
 
 static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5,
@@ -139,6 +140,21 @@ struct Tab {
 
 struct ClosedTab { std::wstring url; int index; bool pinned = false; };
 
+// Something Chromium would ask the user in a window of its own: a page's alert, confirm or prompt,
+// the "leave this site?" question, or a permission prompt (camera, location ...). The
+// browser callback hands over one of these; it is shown in the NeonNet theme later, from the
+// window procedure (never inside the callback), and the callback is answered afterwards.
+struct DlgReq {
+    enum Kind { ALERT, CONFIRM, PROMPT, UNLOAD, PERM, MEDIA } kind = ALERT;
+    int tabId = 0;
+    std::wstring origin, message, defText;
+    bool isReload = false;
+    uint32_t perms = 0;
+    CefRefPtr<CefJSDialogCallback> js;
+    CefRefPtr<CefPermissionPromptCallback> perm;
+    CefRefPtr<CefMediaAccessCallback> media;
+};
+
 struct App {
     HMODULE hmod = nullptr;   // NeonNet.dll (resources live here)
     HWND hwnd = nullptr;
@@ -173,6 +189,9 @@ struct App {
     std::wstring alert;   // urgent status bar message (unsupported video / DRM), shown above everything else
     std::wstring startUrl;
     bool favicons = true;             // show site icons on tabs (registry ShowFavicons)
+    std::deque<std::unique_ptr<DlgReq>> dlgQueue;   // dialogs waiting for the one on screen
+    bool dlgBusy = false;
+    std::map<std::wstring, int> permMemo;           // answers given to permission prompts since NeonNet started: 1 allow, 2 block
     bool sessionPending = false;      // a write of the open tabs to session.txt is scheduled
     std::string lastSession;          // what session.txt holds now, so an unchanged strip is not written again
     bool closing = false;
@@ -890,7 +909,7 @@ static size_t OpenBrowsers() { return g_all.size(); }
 
 class Client : public CefClient, public CefLifeSpanHandler, public CefDisplayHandler, public CefLoadHandler,
                public CefKeyboardHandler, public CefDownloadHandler, public CefContextMenuHandler,
-               public CefRequestHandler, public CefFindHandler {
+               public CefRequestHandler, public CefFindHandler, public CefJSDialogHandler, public CefPermissionHandler {
 public:
     CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
@@ -900,6 +919,53 @@ public:
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
     CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+    CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
+    CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
+
+    // --- dialogs, permission prompts and sign-in: shown by ShowDlgReq() in the NeonNet theme ---
+    static bool QueueDialog(DlgReq* r) {
+        if (!g.hwnd || g.closing || !PostMessageW(g.hwnd, WM_APP_DIALOG, 0, (LPARAM)r)) { delete r; return false; }
+        return true;
+    }
+    bool OnJSDialog(CefRefPtr<CefBrowser> browser, const CefString& origin_url, JSDialogType type, const CefString& message_text,
+                    const CefString& default_prompt_text, CefRefPtr<CefJSDialogCallback> callback, bool& suppress_message) override {
+        if (IsUiBrowser(browser)) return false;
+        auto* r = new DlgReq;
+        r->kind = type == JSDIALOGTYPE_ALERT ? DlgReq::ALERT : type == JSDIALOGTYPE_CONFIRM ? DlgReq::CONFIRM : DlgReq::PROMPT;
+        if (Tab* t = TabOf(browser)) r->tabId = t->id;
+        r->origin = origin_url.ToWString(); r->message = message_text.ToWString(); r->defText = default_prompt_text.ToWString();
+        r->js = callback;
+        if (!QueueDialog(r)) callback->Continue(false, CefString());
+        return true;
+    }
+    bool OnBeforeUnloadDialog(CefRefPtr<CefBrowser> browser, const CefString&, bool is_reload, CefRefPtr<CefJSDialogCallback> callback) override {
+        if (IsUiBrowser(browser)) return false;
+        auto* r = new DlgReq;
+        r->kind = DlgReq::UNLOAD; r->isReload = is_reload; r->js = callback;
+        if (Tab* t = TabOf(browser)) { r->tabId = t->id; r->origin = t->url; }
+        if (!QueueDialog(r)) callback->Continue(true, CefString());
+        return true;
+    }
+    bool OnShowPermissionPrompt(CefRefPtr<CefBrowser> browser, uint64_t, const CefString& requesting_origin, uint32_t requested_permissions,
+                                CefRefPtr<CefPermissionPromptCallback> callback) override {
+        // NeonNet's own pages never ask: the toolbar loading a site's icon from a local address would
+        // otherwise bring up Chromium's "access other apps on this device" bubble
+        if (IsUiBrowser(browser)) { callback->Continue(CEF_PERMISSION_RESULT_DENY); return true; }
+        auto* r = new DlgReq;
+        r->kind = DlgReq::PERM; r->origin = requesting_origin.ToWString(); r->perms = requested_permissions; r->perm = callback;
+        if (Tab* t = TabOf(browser)) r->tabId = t->id;
+        if (!QueueDialog(r)) callback->Continue(CEF_PERMISSION_RESULT_DISMISS);
+        return true;
+    }
+    bool OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, const CefString& requesting_origin,
+                                        uint32_t requested_permissions, CefRefPtr<CefMediaAccessCallback> callback) override {
+        if (IsUiBrowser(browser)) { callback->Cancel(); return true; }
+        auto* r = new DlgReq;
+        r->kind = DlgReq::MEDIA; r->origin = requesting_origin.ToWString(); r->perms = requested_permissions; r->media = callback;
+        if (Tab* t = TabOf(browser)) r->tabId = t->id;
+        if (!QueueDialog(r)) callback->Cancel();
+        return true;
+    }
 
     // --- life span ---
     bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, int, const CefString& target_url,
@@ -2279,6 +2345,25 @@ static int MenuHit(const MenuState& st, POINT p) {
     return -1;
 }
 
+// Thin dark lines over the window, like the CRT effect of the rest of the UI.
+static void PaintScanlines(HDC mem, int w, int h) {
+    if (g.scan) {
+        BITMAPINFO bi{}; bi.bmiHeader = { sizeof(BITMAPINFOHEADER), 1, 1, 1, 32, BI_RGB };
+        void* bits = nullptr;
+        HBITMAP dot = CreateDIBSection(mem, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (dot && bits) {
+            *(DWORD*)bits = 0x2E000000;   // black, alpha 0.18 (premultiplied)
+            HDC dd = CreateCompatibleDC(mem);
+            HGDIOBJ od = SelectObject(dd, dot);
+            BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+            int step = std::max(3, S(3));
+            for (int y = 2; y < h; y += step) GdiAlphaBlend(mem, 0, y, w, 1, dd, 0, 0, 1, 1, bf);
+            SelectObject(dd, od); DeleteDC(dd);
+        }
+        if (dot) DeleteObject(dot);
+    }
+}
+
 static void PaintMenu(HWND hwnd, MenuState& st, HDC hdc) {
     RECT rc; GetClientRect(hwnd, &rc);
     int w = rc.right, h = rc.bottom, c = S(MENU_CUT_DIP);
@@ -2331,22 +2416,7 @@ static void PaintMenu(HWND hwnd, MenuState& st, HDC hdc) {
         DrawTextW(mem, it.keys.c_str(), -1, &tr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     }
 
-    // scanlines, like the rest of the UI
-    if (g.scan) {
-        BITMAPINFO bi{}; bi.bmiHeader = { sizeof(BITMAPINFOHEADER), 1, 1, 1, 32, BI_RGB };
-        void* bits = nullptr;
-        HBITMAP dot = CreateDIBSection(mem, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
-        if (dot && bits) {
-            *(DWORD*)bits = 0x2E000000;   // black, alpha 0.18 (premultiplied)
-            HDC dd = CreateCompatibleDC(mem);
-            HGDIOBJ od = SelectObject(dd, dot);
-            BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-            int step = std::max(3, S(3));
-            for (int y = 2; y < h; y += step) GdiAlphaBlend(mem, 0, y, w, 1, dd, 0, 0, 1, 1, bf);
-            SelectObject(dd, od); DeleteDC(dd);
-        }
-        if (dot) DeleteObject(dot);
-    }
+    PaintScanlines(mem, w, h);
 
     // frame: pink outline following the clipped corners (top-right and bottom-left)
     HPEN pink = CreatePen(PS_SOLID, 1, Accent());
@@ -2492,6 +2562,349 @@ static int RunMenu(std::vector<MenuItem> items, POINT rightTop, const wchar_t* t
     g_menuClosedAt = GetTickCount64();
     if (!g.closing) SetForegroundWindow(g.hwnd);
     return st.result;
+}
+
+// ---------------------------------------------------------------------------
+// Dialogs in the NeonNet theme: page alerts, permission prompts, sign-in.
+// One window type: a title, a message, optional text boxes and buttons, drawn like the menus.
+
+struct DlgField { std::wstring label, value; HWND edit = nullptr; RECT labelR{}, boxR{}; };
+struct DlgButton { std::wstring text; int id = 0; RECT r{}; };
+struct DlgState {
+    std::wstring title, message;
+    std::vector<DlgField> fields;
+    std::vector<DlgButton> buttons;   // left to right
+    int defId = 0, cancelId = 0;      // answers for Enter and Esc
+    HFONT font = nullptr;
+    HBRUSH editBrush = nullptr;
+    RECT msgR{};
+    int hot = -1, result = 0;
+    bool done = false, tracking = false;
+};
+
+static void PaintDialog(HWND hwnd, DlgState& st, HDC hdc) {
+    RECT rc; GetClientRect(hwnd, &rc);
+    int w = rc.right, h = rc.bottom, c = S(MENU_CUT_DIP);
+    HDC mem = CreateCompatibleDC(hdc);
+    HBITMAP bmp = CreateCompatibleBitmap(hdc, w, h);
+    HGDIOBJ oldBmp = SelectObject(mem, bmp);
+    HBRUSH bg = CreateSolidBrush(C_MENU_BG); FillRect(mem, &rc, bg); DeleteObject(bg);
+    SelectObject(mem, st.font);
+    SetBkMode(mem, TRANSPARENT);
+
+    RECT hr{ S(18), S(8), w - S(18), S(30) };
+    SetTextColor(mem, C_YELLOW);
+    std::wstring head = L"> " + st.title;
+    DrawTextW(mem, head.c_str(), -1, &hr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+    SetTextColor(mem, C_TEXT);
+    DrawTextW(mem, st.message.c_str(), -1, &st.msgR, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+
+    for (auto& f : st.fields) {
+        SetTextColor(mem, C_MUTED);
+        DrawTextW(mem, f.label.c_str(), -1, &f.labelR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        HBRUSH eb = CreateSolidBrush(C_BG); FillRect(mem, &f.boxR, eb); DeleteObject(eb);
+        HPEN pen = CreatePen(PS_SOLID, 1, C_CYAN);
+        HGDIOBJ op = SelectObject(mem, pen);
+        HGDIOBJ ob = SelectObject(mem, GetStockObject(NULL_BRUSH));
+        Rectangle(mem, f.boxR.left, f.boxR.top, f.boxR.right, f.boxR.bottom);
+        SelectObject(mem, ob); SelectObject(mem, op); DeleteObject(pen);
+    }
+
+    for (size_t i = 0; i < st.buttons.size(); i++) {
+        const DlgButton& b = st.buttons[i];
+        bool hot = (int)i == st.hot, def = b.id == st.defId;
+        int k = S(7);
+        POINT pts[5] = { {b.r.left, b.r.top}, {b.r.right - k, b.r.top}, {b.r.right, b.r.top + k}, {b.r.right, b.r.bottom}, {b.r.left, b.r.bottom} };
+        HRGN rg = CreatePolygonRgn(pts, 5, WINDING);
+        HBRUSH fill = CreateSolidBrush(hot ? C_CYAN : def ? Accent() : C_MENU_BG);
+        FillRgn(mem, rg, fill);
+        if (!hot && !def) { HBRUSH fr = CreateSolidBrush(C_MUTED); FrameRgn(mem, rg, fr, 1, 1); DeleteObject(fr); }
+        DeleteObject(fill); DeleteObject(rg);
+        SetTextColor(mem, hot || def ? C_BG : C_TEXT);
+        RECT tr = b.r;
+        DrawTextW(mem, b.text.c_str(), -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    }
+
+    PaintScanlines(mem, w, h);
+    HPEN pink = CreatePen(PS_SOLID, 1, Accent());
+    HGDIOBJ op = SelectObject(mem, pink);
+    POINT pts[7] = { {0, 0}, {w - c - 1, 0}, {w - 1, c}, {w - 1, h - 1}, {c, h - 1}, {0, h - c - 1}, {0, 0} };
+    Polyline(mem, pts, 7);
+    SelectObject(mem, op); DeleteObject(pink);
+
+    BitBlt(hdc, 0, 0, w, h, mem, 0, 0, SRCCOPY);
+    SelectObject(mem, oldBmp); DeleteObject(bmp); DeleteDC(mem);
+}
+
+static int DlgButtonAt(const DlgState& st, POINT p) {
+    for (size_t i = 0; i < st.buttons.size(); i++) if (PtInRect(&st.buttons[i].r, p)) return (int)i;
+    return -1;
+}
+
+static LRESULT CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    auto* st = (DlgState*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    switch (msg) {
+    case WM_NCCREATE:
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW*)lp)->lpCreateParams);
+        break;
+    case WM_ERASEBKGND: return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT ps; HDC hdc = BeginPaint(hwnd, &ps);
+        if (st) PaintDialog(hwnd, *st, hdc);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_CTLCOLOREDIT: {
+        if (!st) break;
+        HDC dc = (HDC)wp;
+        SetTextColor(dc, C_CYAN); SetBkColor(dc, C_BG);
+        return (LRESULT)st->editBrush;
+    }
+    case WM_MOUSEMOVE: {
+        if (!st) break;
+        if (!st->tracking) {
+            TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd, 0 };
+            st->tracking = TrackMouseEvent(&tme) != FALSE;
+        }
+        int hot = DlgButtonAt(*st, { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) });
+        if (hot != st->hot) { st->hot = hot; InvalidateRect(hwnd, nullptr, FALSE); }
+        return 0;
+    }
+    case WM_MOUSELEAVE:
+        if (st) { st->tracking = false; st->hot = -1; InvalidateRect(hwnd, nullptr, FALSE); }
+        return 0;
+    case WM_LBUTTONUP:
+        if (st) {
+            int i = DlgButtonAt(*st, { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) });
+            if (i >= 0) { st->result = st->buttons[i].id; st->done = true; }
+        }
+        return 0;
+    case WM_MOUSEACTIVATE: return MA_ACTIVATE;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+// Shows the dialog and runs a message loop until it is answered. Returns the id of the button
+// pressed (or cancelId for Esc, or when NeonNet is closing); the text boxes are read back into st.
+static int RunDialog(DlgState& st) {
+    static bool registered = false;
+    if (!registered) {
+        WNDCLASSEXW wc{ sizeof(wc) };
+        wc.style = CS_DROPSHADOW;
+        wc.lpfnWndProc = DialogProc;
+        wc.hInstance = g.hmod;
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.lpszClassName = L"NeonNetDialog";
+        registered = RegisterClassExW(&wc) != 0;
+    }
+    st.font = CreateFontW(-S(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                          CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
+    st.editBrush = CreateSolidBrush(C_BG);
+
+    // layout
+    int W = S(480), pad = S(18);
+    HDC dc = GetDC(g.hwnd);
+    HGDIOBJ of = SelectObject(dc, st.font);
+    RECT mr{ 0, 0, W - 2 * pad, 0 };
+    if (!st.message.empty()) DrawTextW(dc, st.message.c_str(), -1, &mr, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+    int mh = std::min((int)mr.bottom, S(260));
+    int y = S(40);
+    st.msgR = { pad, y, W - pad, y + mh };
+    y += mh + (mh ? S(14) : 0);
+    for (auto& f : st.fields) {
+        if (!f.label.empty()) { f.labelR = { pad, y, W - pad, y + S(18) }; y += S(20); }
+        f.boxR = { pad, y, W - pad, y + S(30) };
+        y += S(40);
+    }
+    y += S(4);
+    int bh = S(32), gap = S(10), total = 0;
+    for (auto& b : st.buttons) {
+        SIZE sz{}; GetTextExtentPoint32W(dc, b.text.c_str(), (int)b.text.size(), &sz);
+        b.r = { 0, y, std::max(S(96), (int)sz.cx + S(40)), y + bh };
+        total += b.r.right + gap;
+    }
+    SelectObject(dc, of);
+    ReleaseDC(g.hwnd, dc);
+    int x = W - pad - (total - gap);
+    for (auto& b : st.buttons) { int bw = b.r.right; b.r.left = x; b.r.right = x + bw; x += bw + gap; }
+    int H = y + bh + S(20);
+
+    // centred over the window
+    RECT wr{}; GetWindowRect(g.hwnd, &wr);
+    MONITORINFO mi{ sizeof(mi) };
+    GetMonitorInfoW(MonitorFromWindow(g.hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+    int px = std::max((int)mi.rcWork.left, std::min((int)((wr.left + wr.right - W) / 2), (int)mi.rcWork.right - W));
+    int py = std::max((int)mi.rcWork.top, std::min((int)((wr.top + wr.bottom - H) / 3), (int)mi.rcWork.bottom - H));
+
+    EnableWindow(g.hwnd, FALSE);   // modal: the window behind does nothing until the dialog is answered
+    HWND hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"NeonNetDialog", L"", WS_POPUP, px, py, W, H, g.hwnd, nullptr, g.hmod, &st);
+    if (!hwnd) { EnableWindow(g.hwnd, TRUE); DeleteObject(st.font); DeleteObject(st.editBrush); return st.cancelId; }
+    int cut = S(MENU_CUT_DIP);
+    POINT rp[6] = { {0, 0}, {W - cut, 0}, {W, cut}, {W, H}, {cut, H}, {0, H - cut} };
+    SetWindowRgn(hwnd, CreatePolygonRgn(rp, 6, WINDING), FALSE);
+    for (auto& f : st.fields) {
+        f.edit = CreateWindowExW(0, L"EDIT", f.value.c_str(), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+                                 f.boxR.left + S(8), f.boxR.top + S(6), f.boxR.right - f.boxR.left - S(16), S(19), hwnd, nullptr, g.hmod, nullptr);
+        SendMessageW(f.edit, WM_SETFONT, (WPARAM)st.font, TRUE);
+    }
+    ShowWindow(hwnd, SW_SHOW);
+    SetForegroundWindow(hwnd);
+    if (!st.fields.empty()) { SetFocus(st.fields[0].edit); SendMessageW(st.fields[0].edit, EM_SETSEL, 0, -1); }
+    else SetFocus(hwnd);
+
+    MSG m;
+    while (!st.done && !g.closing) {
+        BOOL r = GetMessageW(&m, nullptr, 0, 0);
+        if (r <= 0) { if (r == 0) PostQuitMessage((int)m.wParam); break; }
+        if (m.message == WM_KEYDOWN) {
+            if (m.wParam == VK_RETURN) { st.result = st.defId; st.done = true; continue; }
+            if (m.wParam == VK_ESCAPE) { st.result = st.cancelId; st.done = true; continue; }
+            if (m.wParam == VK_TAB && st.fields.size() > 1) {
+                size_t cur = 0;
+                for (size_t i = 0; i < st.fields.size(); i++) if (GetFocus() == st.fields[i].edit) cur = i;
+                size_t nx = (cur + (GetKeyState(VK_SHIFT) < 0 ? st.fields.size() - 1 : 1)) % st.fields.size();
+                SetFocus(st.fields[nx].edit); SendMessageW(st.fields[nx].edit, EM_SETSEL, 0, -1);
+                continue;
+            }
+        }
+        // keys typed while the dialog is open belong to the dialog
+        if (m.message >= WM_KEYFIRST && m.message <= WM_KEYLAST && GetAncestor(m.hwnd, GA_ROOT) != hwnd)
+            m.hwnd = st.fields.empty() ? hwnd : st.fields[0].edit;
+        TranslateMessage(&m);
+        DispatchMessageW(&m);
+    }
+    if (!st.done) st.result = st.cancelId;
+    for (auto& f : st.fields) {
+        int n = GetWindowTextLengthW(f.edit);
+        f.value.assign((size_t)n + 1, L'\0');
+        GetWindowTextW(f.edit, &f.value[0], n + 1);
+        f.value.resize((size_t)n);
+    }
+    EnableWindow(g.hwnd, TRUE);
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+    DestroyWindow(hwnd);
+    DeleteObject(st.font); DeleteObject(st.editBrush);
+    if (!g.closing) SetForegroundWindow(g.hwnd);
+    return st.result;
+}
+
+static std::wstring OriginHost(const std::wstring& o) {
+    size_t s = o.find(L"://");
+    std::wstring h = s == std::wstring::npos ? o : o.substr(s + 3);
+    h = h.substr(0, h.find_first_of(L"/?#"));
+    for (auto& c : h) c = (wchar_t)towupper(c);
+    return h.empty() ? L"THIS PAGE" : h;
+}
+
+// What a permission request is for, one line each.
+static std::wstring PermissionLines(bool media, uint32_t p) {
+    struct P { uint32_t bit; const wchar_t* text; };
+    static const P perms[] = {
+        { CEF_PERMISSION_TYPE_CAMERA_STREAM, L"use your camera" }, { CEF_PERMISSION_TYPE_MIC_STREAM, L"use your microphone" },
+        { CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM, L"move and zoom your camera" }, { CEF_PERMISSION_TYPE_GEOLOCATION, L"know your location" },
+        { CEF_PERMISSION_TYPE_NOTIFICATIONS, L"show notifications" }, { CEF_PERMISSION_TYPE_CLIPBOARD, L"see what you copy to the clipboard" },
+        { CEF_PERMISSION_TYPE_MIDI_SYSEX, L"use your MIDI devices" }, { CEF_PERMISSION_TYPE_KEYBOARD_LOCK, L"take over your keyboard" },
+        { CEF_PERMISSION_TYPE_POINTER_LOCK, L"hide and capture your mouse pointer" }, { CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS, L"download several files" },
+        { CEF_PERMISSION_TYPE_LOCAL_FONTS, L"see the fonts installed on this computer" }, { CEF_PERMISSION_TYPE_IDLE_DETECTION, L"know when you are idle" },
+        { CEF_PERMISSION_TYPE_WINDOW_MANAGEMENT, L"manage windows on all your screens" }, { CEF_PERMISSION_TYPE_FILE_SYSTEM_ACCESS, L"edit files on this computer" },
+        { CEF_PERMISSION_TYPE_STORAGE_ACCESS | CEF_PERMISSION_TYPE_TOP_LEVEL_STORAGE_ACCESS, L"use its cookies and site data while embedded in another site" },
+        { CEF_PERMISSION_TYPE_SENSORS, L"use your motion sensors" }, { CEF_PERMISSION_TYPE_PROTECTED_MEDIA_IDENTIFIER, L"identify this device for protected content" },
+        { CEF_PERMISSION_TYPE_REGISTER_PROTOCOL_HANDLER, L"open links of its own kind" },
+        { CEF_PERMISSION_TYPE_LOCAL_NETWORK | CEF_PERMISSION_TYPE_LOOPBACK_NETWORK, L"reach devices on your network" },
+    };
+    std::wstring o;
+    auto add = [&](const wchar_t* t) { o += L"  - "; o += t; o += L"\n"; };
+    if (media) {
+        if (p & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE) add(L"use your camera");
+        if (p & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE) add(L"use your microphone");
+        if (p & (CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE)) add(L"see and record your screen");
+    } else {
+        uint32_t known = 0;
+        for (const auto& e : perms) { known |= e.bit; if (p & e.bit) add(e.text); }
+        if (p & ~known) add(L"use another feature of this device");
+    }
+    if (o.empty()) o = L"  - use a feature of this device\n";
+    if (!o.empty() && o.back() == L'\n') o.pop_back();
+    return o;
+}
+
+// Shows one request and answers its callback.
+static void ShowDlgReq(DlgReq& r) {
+    auto cancelAll = [&] {
+        if (r.js) r.js->Continue(r.kind == DlgReq::UNLOAD, CefString());
+        if (r.perm) r.perm->Continue(CEF_PERMISSION_RESULT_DISMISS);
+        if (r.media) r.media->Cancel();
+    };
+    if (g.closing) { cancelAll(); return; }
+    std::wstring memo;
+    if (r.kind == DlgReq::PERM || r.kind == DlgReq::MEDIA) {
+        memo = r.origin + L"|" + std::to_wstring((int)r.kind) + L"|" + std::to_wstring(r.perms);
+        auto it = g.permMemo.find(memo);
+        if (it != g.permMemo.end()) {   // asked and answered before in this run: no second question
+            bool allow = it->second == 1;
+            if (r.perm) r.perm->Continue(allow ? CEF_PERMISSION_RESULT_ACCEPT : CEF_PERMISSION_RESULT_DENY);
+            if (r.media) { if (allow) r.media->Continue(r.perms); else r.media->Cancel(); }
+            return;
+        }
+    }
+    if (r.tabId) if (Tab* t = FindTab(r.tabId)) if (t->id != g.active) SelectTab(t->id, false);   // the page that asks is shown
+
+    DlgState st;
+    std::wstring host = OriginHost(r.origin);
+    switch (r.kind) {
+    case DlgReq::ALERT:
+        st.title = host + L" SAYS"; st.message = r.message;
+        st.buttons = { { L"OK", 1 } }; st.defId = st.cancelId = 1;
+        break;
+    case DlgReq::CONFIRM:
+        st.title = host + L" SAYS"; st.message = r.message;
+        st.buttons = { { L"OK", 1 }, { L"CANCEL", 0 } }; st.defId = 1; st.cancelId = 0;
+        break;
+    case DlgReq::PROMPT:
+        st.title = host + L" SAYS"; st.message = r.message;
+        { DlgField f; f.value = r.defText; st.fields.push_back(f); }
+        st.buttons = { { L"OK", 1 }, { L"CANCEL", 0 } }; st.defId = 1; st.cancelId = 0;
+        break;
+    case DlgReq::UNLOAD:
+        st.title = host + (r.isReload ? L" - RELOAD?" : L" - LEAVE?");
+        st.message = r.isReload ? L"Reload this site?\nChanges you made may not be saved." : L"Leave this site?\nChanges you made may not be saved.";
+        st.buttons = { { r.isReload ? L"RELOAD" : L"LEAVE", 1 }, { L"STAY", 0 } }; st.defId = 1; st.cancelId = 0;
+        break;
+    case DlgReq::PERM: case DlgReq::MEDIA:
+        st.title = host + L" WANTS TO";
+        st.message = PermissionLines(r.kind == DlgReq::MEDIA, r.perms);
+        st.buttons = { { L"ALLOW", 1 }, { L"BLOCK", 2 } }; st.defId = 2; st.cancelId = 0;   // Enter blocks: the safe answer
+        break;
+    }
+    int res = RunDialog(st);
+
+    switch (r.kind) {
+    case DlgReq::ALERT: case DlgReq::CONFIRM: r.js->Continue(res == 1, CefString()); break;
+    case DlgReq::PROMPT: r.js->Continue(res == 1, st.fields[0].value); break;
+    case DlgReq::UNLOAD: r.js->Continue(res == 1, CefString()); break;
+    case DlgReq::PERM:
+        if (res) g.permMemo[memo] = res;
+        r.perm->Continue(res == 1 ? CEF_PERMISSION_RESULT_ACCEPT : res == 2 ? CEF_PERMISSION_RESULT_DENY : CEF_PERMISSION_RESULT_DISMISS);
+        break;
+    case DlgReq::MEDIA:
+        if (res) g.permMemo[memo] = res;
+        if (res == 1) r.media->Continue(r.perms); else r.media->Cancel();
+        break;
+    }
+}
+
+// Dialogs one after the other: a page that opens several (or two tabs asking at once) gets them in order.
+static void OnDialogMsg(std::unique_ptr<DlgReq> r) {
+    g.dlgQueue.push_back(std::move(r));
+    if (g.dlgBusy) return;
+    g.dlgBusy = true;
+    while (!g.dlgQueue.empty()) {
+        std::unique_ptr<DlgReq> next = std::move(g.dlgQueue.front());
+        g.dlgQueue.pop_front();
+        ShowDlgReq(*next);
+    }
+    g.dlgBusy = false;
 }
 
 static void ShowMenu(int cssRightGap, int cssY, double ratio) {
@@ -3280,6 +3693,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APP_STORE: ScheduleSave(); SendState(); return 0;
     case WM_APP_DOWNLOAD: DoDownloadAction((int)wp, (long long)lp); return 0;
     case WM_APP_MEDIA: AskMedia(std::unique_ptr<MediaAsk>((MediaAsk*)lp)); return 0;
+    case WM_APP_DIALOG: OnDialogMsg(std::unique_ptr<DlgReq>((DlgReq*)lp)); return 0;
     case WM_APP_CTXMENU: ShowContextMenu(std::unique_ptr<CtxMenu>((CtxMenu*)lp)); return 0;
     case WM_APP_CLEARDATA: StartClearData(std::unique_ptr<ClearReq>((ClearReq*)lp)); return 0;
     case WM_APP_CLEARSITES: ClearSiteData(std::unique_ptr<ClearSites>((ClearSites*)lp)); return 0;
