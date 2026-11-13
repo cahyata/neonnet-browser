@@ -28,6 +28,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:#e8d8f
   background-size:48px 48px;
   animation:run 1.2s linear infinite}
 html.idle #grid{animation-play-state:paused}
+@media (prefers-reduced-motion:reduce){#grid{animation:none}}
 #floor::after{content:"";position:absolute;inset:0;background:linear-gradient(var(--bg2) 0%,rgba(10,4,32,.6) 18%,transparent 45%);pointer-events:none}
 @keyframes run{from{transform:rotateX(58deg) translate3d(0,0,0)}to{transform:rotateX(58deg) translate3d(0,48px,0)}}
 #scan{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.16) 2px 3px)}
@@ -109,24 +110,49 @@ document.getElementById('f').addEventListener('submit', e => {
   const u = toUrl(document.getElementById('q').value);
   if(u) location.href = u;
 });
+let lastClock = '';
 function tick(){
   const d = new Date();
-  document.getElementById('clock').textContent =
-    d.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short'}).toUpperCase() + '  ' +
+  const s = d.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short'}).toUpperCase() + '  ' +
     d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  if (s !== lastClock) {
+    lastClock = s;
+    document.getElementById('clock').textContent = s;
+  }
 }
-let clockTimer = 0;
+let clockTimer = 0, idleTimer = 0, userIdle = false, lastAct = 0;
+function applyIdle(){
+  const paused = document.hidden || !document.hasFocus() || userIdle;
+  document.documentElement.classList.toggle('idle', paused);
+}
+function wakeGrid(e){
+  const now = performance.now();
+  if (e && e.type === 'pointermove' && !userIdle && now - lastAct < 500) return;
+  lastAct = now;
+  if (userIdle) { userIdle = false; applyIdle(); }
+  clearTimeout(idleTimer);
+  if (!document.hidden && document.hasFocus()) {
+    idleTimer = setTimeout(() => { userIdle = true; applyIdle(); }, 3500);
+  }
+}
 function syncVis(){
-  const hidden = document.hidden;
-  document.documentElement.classList.toggle('idle', hidden);
-  if (hidden) {
+  const active = !document.hidden && document.hasFocus();
+  if (!active) {
+    clearTimeout(idleTimer);
     if (clockTimer) { clearInterval(clockTimer); clockTimer = 0; }
+    applyIdle();
   } else {
     tick();
-    if (!clockTimer) clockTimer = setInterval(tick, 10000);
+    if (!clockTimer) clockTimer = setInterval(tick, 30000);
+    wakeGrid();
   }
 }
 document.addEventListener('visibilitychange', syncVis);
+window.addEventListener('focus', syncVis);
+window.addEventListener('blur', syncVis);
+for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel']) {
+  window.addEventListener(ev, wakeGrid, {passive: true});
+}
 syncVis();
 
 // Once there are bookmarks, the newest nine replace the default quick links.

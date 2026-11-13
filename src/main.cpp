@@ -27,6 +27,7 @@
 #include <iphlpapi.h>
 #pragma comment(lib, "iphlpapi.lib")
 #include <string>
+#include <string_view>
 #include <vector>
 #include <algorithm>
 
@@ -1536,56 +1537,60 @@ static size_t OpenBrowsers() { return g_all.size(); }
 // (or one of its subdomains) is cancelled when the page that makes it belongs to another site, and
 // never for the page itself: main frame navigations and a site's own requests are left alone.
 
-static std::unordered_set<std::string> g_blocklist;   // filled once (the first time blocking is on), then only read
+static std::string g_blockArena;                     // single contiguous backing buffer for g_blockSorted
+static std::vector<std::string_view> g_blockSorted;   // sorted unique domains (filled once before g_blocklistReady)
 static std::atomic<bool> g_blocklistReady{ false };    // set after the fill: the IO thread reads the list only then
 
 static void LoadBlocklist() {
     if (g_blocklistReady.load()) return;
-    std::string text;
-    if (!LoadUi(IDR_BLOCKLIST, text)) return;
-    g_blocklist.reserve(90000);
+    if (!LoadUi(IDR_BLOCKLIST, g_blockArena)) return;
+    for (auto& c : g_blockArena) {
+        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+    }
+    g_blockSorted.reserve(90000);
     size_t pos = 0;
-    while (pos < text.size()) {
-        size_t e = text.find('\n', pos);
-        if (e == std::string::npos) e = text.size();
+    const size_t len = g_blockArena.size();
+    while (pos < len) {
+        size_t e = g_blockArena.find('\n', pos);
+        if (e == std::string::npos) e = len;
         size_t s = pos;
         pos = e + 1;
-        while (e > s && (text[e - 1] == '\r' || text[e - 1] == ' ' || text[e - 1] == '\t')) e--;
-        if (e <= s || text[s] == '#') continue;
-        std::string line = text.substr(s, e - s);
-        for (auto& c : line) c = (char)tolower((unsigned char)c);
-        g_blocklist.insert(std::move(line));
+        while (e > s && (g_blockArena[e - 1] == '\r' || g_blockArena[e - 1] == ' ' || g_blockArena[e - 1] == '\t')) e--;
+        if (e <= s || g_blockArena[s] == '#') continue;
+        g_blockSorted.emplace_back(g_blockArena.data() + s, e - s);
     }
+    std::sort(g_blockSorted.begin(), g_blockSorted.end());
+    g_blockSorted.erase(std::unique(g_blockSorted.begin(), g_blockSorted.end()), g_blockSorted.end());
+    g_blockSorted.shrink_to_fit();
     g_blocklistReady = true;
 }
 
 // The part of a host name a site is known by: example.com, or example.co.uk for the common two-part endings.
-static std::string SiteOf(const std::string& host) {
-    std::vector<std::string> parts;
-    for (size_t s = 0;;) {
-        size_t d = host.find('.', s);
-        parts.push_back(host.substr(s, d == std::string::npos ? std::string::npos : d - s));
-        if (d == std::string::npos) break;
-        s = d + 1;
+static std::string_view SiteOf(std::string_view host) {
+    size_t d1 = host.rfind('.');
+    if (d1 == std::string_view::npos || d1 == 0) return host;
+    size_t d2 = host.rfind('.', d1 - 1);
+    if (d2 == std::string_view::npos) return host;
+    static const std::string_view second[] = { "co", "com", "net", "org", "gov", "edu", "ac", "or", "go" };
+    std::string_view tld = host.substr(d1 + 1);
+    std::string_view sld = host.substr(d2 + 1, d1 - d2 - 1);
+    bool two = tld.size() == 2;
+    bool isSecond = false;
+    for (auto x : second) if (sld == x) { isSecond = true; break; }
+    if (two && isSecond) {
+        if (d2 == 0) return host;
+        size_t d3 = host.rfind('.', d2 - 1);
+        return d3 == std::string_view::npos ? host : host.substr(d3 + 1);
     }
-    size_t n = parts.size();
-    if (n <= 2) return host;
-    static const char* second[] = { "co", "com", "net", "org", "gov", "edu", "ac", "or", "go" };
-    bool two = parts[n - 1].size() == 2;
-    bool sld = false;
-    for (auto* x : second) if (parts[n - 2] == x) sld = true;
-    size_t keep = (two && sld) ? 3 : 2;
-    std::string r;
-    for (size_t i = n - keep; i < n; i++) { if (!r.empty()) r += '.'; r += parts[i]; }
-    return r;
+    return host.substr(d2 + 1);
 }
 
-static bool IsBlockedHost(const std::string& host) {
+static bool IsBlockedHost(std::string_view host) {
     for (size_t s = 0; s < host.size();) {
-        if (host.find('.', s) == std::string::npos) break;   // never the bare ending (com, uk ...)
-        if (g_blocklist.count(host.substr(s))) return true;
         size_t d = host.find('.', s);
-        if (d == std::string::npos) break;
+        if (d == std::string_view::npos) break;   // never the bare ending (com, uk ...)
+        std::string_view sub = host.substr(s);
+        if (std::binary_search(g_blockSorted.begin(), g_blockSorted.end(), sub)) return true;
         s = d + 1;
     }
     return false;
