@@ -193,7 +193,8 @@ struct App {
     bool creatingChrome = false;
     int active = 0, nextId = 1;
     std::atomic<bool> scan{ true };   // atomic: the IO thread reads it for /api/settings
-    int dropNeed = 0;                 // address bar suggestions open: toolbar height needed, CSS px (0 = closed)
+    int dropX0 = 0, dropX1 = 0;       // horizontal extent of that dropdown, CSS px (0, 0 = the whole width)
+    int dropNeed = 0;               // address bar suggestions open: toolbar height needed, CSS px (0 = closed)
     bool fsUser = false, fsElement = false, fullscreen = false;
     WINDOWPLACEMENT fsPrev{ sizeof(WINDOWPLACEMENT) };
     std::wstring hoverText, download;
@@ -477,7 +478,21 @@ static void Place(CefRefPtr<CefBrowser> b, const RECT& r, bool visible, bool rai
 
 static void Layout() {
     if (!g.hwnd) return;
-    if (g.chrome) Place(g.chrome, ChromeHostRect(), !g.fullscreen, g.dropNeed > 0);
+    if (g.chrome) {
+        Place(g.chrome, ChromeHostRect(), !g.fullscreen, g.dropNeed > 0);
+        // A dropdown that is narrower than the toolbar (the site panel): only the toolbar row and the panel
+        // itself belong to the toolbar window, so the page stays visible beside the panel.
+        if (HWND cw = g.chrome->GetHost()->GetWindowHandle()) {
+            RECT r = ChromeHostRect(), nav = ChromeRect();
+            if (g.dropNeed > 0 && g.dropX1 > g.dropX0 && !g.fullscreen) {
+                int w = r.right - r.left, navH = nav.bottom - nav.top, h = r.bottom - r.top;
+                HRGN a = CreateRectRgn(0, 0, w, navH), b = CreateRectRgn(std::max(0, S(g.dropX0)), navH, std::min(w, S(g.dropX1)), h);
+                CombineRgn(a, a, b, RGN_OR);
+                DeleteObject(b);
+                SetWindowRgn(cw, a, TRUE);
+            } else SetWindowRgn(cw, nullptr, TRUE);
+        }
+    }
     if (g.panel) Place(g.panel, PanelRect(), g.panelOpen && !g.fullscreen);
     RECT content = ContentRect();
     for (auto& t : g.tabs) Place(t->browser, content, t->id == g.active);
@@ -3790,8 +3805,16 @@ static void OnChromeCommand(const std::wstring& msg) {
     else if (cmd == L"home") ExecCmd(CMD_HOME);
     else if (cmd == L"dropdown") {
         // address bar suggestions: the toolbar height they need (CSS px, 0 = closed)
-        int n = std::max(0, std::min(_wtoi(arg.c_str()), 520));
-        if (n != g.dropNeed) { g.dropNeed = n; Layout(); }
+        // arguments: the height, then optionally where a narrower dropdown starts and ends
+        int n = std::max(0, std::min(_wtoi(arg.c_str()), 520)), x0 = 0, x1 = 0;
+        size_t p1 = arg.find(L'\n');
+        if (p1 != std::wstring::npos) {
+            size_t p2 = arg.find(L'\n', p1 + 1);
+            x0 = std::max(0, _wtoi(arg.c_str() + p1 + 1));
+            if (p2 != std::wstring::npos) x1 = std::max(0, _wtoi(arg.c_str() + p2 + 1));
+        }
+        if (n == 0) x0 = x1 = 0;
+        if (n != g.dropNeed || x0 != g.dropX0 || x1 != g.dropX1) { g.dropNeed = n; g.dropX0 = x0; g.dropX1 = x1; Layout(); }
     }
     else if (cmd == L"siteperm") {
         // "<key>\n<0|1|2>" for the page that is shown (never for an address the toolbar names): 0 ask, 1 allow, 2 block;

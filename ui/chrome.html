@@ -294,7 +294,7 @@ function render(){
 const LOCK_SHUT = '<svg viewBox="0 0 16 16" width="15" height="15"><rect x="3" y="7" width="10" height="7" fill="currentColor"/><path d="M5 7V5a3 3 0 016 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
 const LOCK_OPEN = '<svg viewBox="0 0 16 16" width="15" height="15"><rect x="3" y="7" width="10" height="7" fill="currentColor"/><path d="M5 7V5a3 3 0 015.8-1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
 const lock = $('#lock'), sitePanel = $('#site');
-let siteOpen = false, siteNeed = 0, siteOrigin = '', siteChanged = false;
+let siteKey = '', siteOpen = false, siteNeed = 0, siteOrigin = '', siteChanged = false;
 const siteShown = () => state.site && state.url && !state.url.startsWith(NEWTAB) ? state.site : null;
 
 function updateLock(){
@@ -312,6 +312,7 @@ function updateLock(){
 function closeSite(){
   if(!siteOpen) return;
   siteOpen = false; sitePanel.classList.remove('on'); sitePanel.textContent = '';
+  siteKey = '';
   if(siteNeed){ siteNeed = 0; send('dropdown', 0); }
 }
 function openSite(){
@@ -357,7 +358,9 @@ function renderSite(){
   sitePanel.style.left = r.left + 'px'; sitePanel.style.top = r.bottom + 'px'; sitePanel.style.width = Math.min(420, window.innerWidth - r.left - 8) + 'px';
   sitePanel.classList.add('on');
   const need = Math.ceil(sitePanel.getBoundingClientRect().bottom) + 8;
-  if(need !== siteNeed){ siteNeed = need; send('dropdown', need); }
+  const x0 = Math.floor(r.left), x1 = Math.ceil(r.left + parseFloat(sitePanel.style.width));
+  const key = need + ':' + x0 + ':' + x1;
+  if(key !== siteKey){ siteKey = key; siteNeed = need; send('dropdown', need, x0, x1); }
 }
 lock.onclick = () => { if(siteOpen) closeSite(); else openSite(); };
 document.addEventListener('mousedown', e => { if(siteOpen && !sitePanel.contains(e.target) && !lock.contains(e.target)) closeSite(); });
