@@ -4,180 +4,537 @@
 <meta charset="utf-8">
 <title>SETTINGS</title>
 <style>
-:root{--bg:#12062c;--bg2:#0a0420;--row:#1b0b3d;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0;--green:#35ffa0}
+:root{
+  --bg:#12062c;
+  --bg2:#0a0420;
+  --card:#190a38;
+  --row:#1b0b3d;
+  --tab:#2d1160;
+  --pink:#ff2e97;
+  --pink2:#ff7bc0;
+  --cyan:#00e5ff;
+  --yellow:#ffd600;
+  --muted:#8a6fc0;
+  --green:#35ffa0;
+  --line:#3a1a5e;
+  --text:#e8d8ff;
+}
 *{box-sizing:border-box}
-html,body{margin:0;min-height:100%;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
-main{max-width:760px;margin:0 auto;padding:28px 20px 60px}
-h1{margin:0;font:italic 900 40px Impact,"Arial Black",sans-serif;letter-spacing:3px;color:var(--cyan);text-shadow:3px 3px 0 var(--pink)}
-.sub{color:var(--yellow);letter-spacing:2px;margin:4px 0 8px}
-h2{font:bold 12px "Cascadia Mono","Consolas",monospace;color:var(--yellow);letter-spacing:2px;margin:26px 0 4px;
-  padding-bottom:4px;border-bottom:1px solid rgba(255,46,151,.5)}
-.row{display:flex;align-items:center;gap:16px;padding:12px 8px;border-bottom:1px solid rgba(138,111,192,.2);min-height:50px}
+html{scroll-behavior:smooth}
+html,body{
+  margin:0;
+  min-height:100%;
+  background:var(--bg);
+  color:var(--text);
+  font:13px/1.6 "Cascadia Mono","Consolas","Courier New",monospace;
+}
+body::after{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:50;
+  background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.15) 2px 3px);
+}
+a{color:var(--cyan);text-decoration:none}
+a:hover{color:var(--yellow);text-decoration:underline}
+
+/* Sticky top bar with search filter */
+.topbar{
+  position:sticky;
+  top:0;
+  z-index:30;
+  background:var(--bg);
+  border-bottom:1px solid var(--cyan);
+  box-shadow:0 4px 24px rgba(10,4,32,.85);
+}
+.top-row{
+  max-width:1100px;
+  margin:0 auto;
+  padding:10px 18px;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.brand{
+  color:var(--yellow);
+  font-weight:bold;
+  letter-spacing:1.5px;
+  white-space:nowrap;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.brand b{color:var(--pink)}
+.badge{
+  padding:1px 6px;
+  border:1px solid var(--green);
+  color:var(--green);
+  font-size:11px;
+  letter-spacing:1px;
+}
+.addr{
+  flex:1;
+  min-width:220px;
+  height:32px;
+  display:flex;
+  align-items:center;
+  border:1px solid var(--cyan);
+  background:var(--bg2);
+  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px));
+}
+.addr span{color:var(--pink);padding:0 6px 0 10px;user-select:none}
+.addr input{
+  flex:1;
+  height:100%;
+  background:none;
+  border:0;
+  outline:0;
+  color:var(--cyan);
+  font:12px "Cascadia Mono","Consolas",monospace;
+}
+.addr input::placeholder{color:#5e4a8f}
+.addr button{
+  height:100%;
+  border:0;
+  background:none;
+  color:var(--muted);
+  padding:0 10px;
+  cursor:pointer;
+  font:inherit;
+  display:none;
+}
+.addr button.show{display:block}
+.addr button:hover{color:var(--pink)}
+
+.hud-links{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hud-link{
+  height:30px;
+  padding:0 10px;
+  border:1px solid var(--muted);
+  color:var(--muted);
+  font:bold 11px "Cascadia Mono","Consolas",monospace;
+  letter-spacing:1px;
+  display:inline-flex;
+  align-items:center;
+  text-decoration:none;
+}
+.hud-link:hover{border-color:var(--cyan);color:var(--bg);background:var(--cyan);text-decoration:none}
+
+/* Layout */
+.wrap{
+  max-width:1100px;
+  margin:0 auto;
+  padding:24px 18px 72px;
+  display:grid;
+  grid-template-columns:236px 1fr;
+  gap:24px;
+}
+
+/* Index sidebar */
+aside{
+  position:sticky;
+  top:72px;
+  align-self:start;
+  background:var(--bg2);
+  border:1px solid var(--line);
+  border-top:2px solid var(--pink);
+  padding:14px;
+  clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,0 100%);
+}
+.toc-title{
+  color:var(--yellow);
+  font-size:11px;
+  font-weight:bold;
+  letter-spacing:2px;
+  margin-bottom:10px;
+  display:flex;
+  justify-content:space-between;
+}
+.toc-title span{color:var(--muted)}
+nav a{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:7px 9px;
+  margin-bottom:4px;
+  border:1px solid transparent;
+  color:var(--muted);
+  font-size:12px;
+  text-decoration:none;
+  transition:all .12s;
+}
+nav a .num{color:var(--yellow);font-size:11px;opacity:.85}
+nav a:hover{
+  color:var(--cyan);
+  background:rgba(0,229,255,.06);
+  border-color:rgba(0,229,255,.3);
+  text-decoration:none;
+}
+nav a.active{
+  background:var(--tab);
+  color:var(--pink2);
+  border-color:var(--pink);
+  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%);
+}
+nav a.dim{opacity:.38}
+.aside-stats{
+  margin-top:14px;
+  padding-top:12px;
+  border-top:1px solid var(--line);
+  font-size:11px;
+  color:var(--muted);
+  line-height:1.7;
+}
+.aside-stats b{color:var(--cyan);font-weight:normal}
+
+/* Main column */
+main{min-width:0}
+
+.hero{
+  position:relative;
+  overflow:hidden;
+  background:linear-gradient(135deg,#12062c 0%,#280e52 65%,#431363 100%);
+  border:1px solid var(--cyan);
+  border-bottom:2px solid var(--pink);
+  padding:22px 24px;
+  margin-bottom:20px;
+  clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px));
+}
+.hero h1{
+  margin:0;
+  font:italic 900 40px Impact,"Arial Black",sans-serif;
+  letter-spacing:3px;
+  color:var(--cyan);
+  text-shadow:3px 3px 0 var(--pink),0 0 16px rgba(0,229,255,.35);
+}
+.sub{color:var(--yellow);letter-spacing:2px;margin:6px 0 0;font-size:12px}
+
+.sec{
+  background:var(--card);
+  border:1px solid var(--line);
+  padding:16px 20px 10px;
+  margin-bottom:18px;
+  scroll-margin-top:70px;
+}
+.sec.hidden{display:none}
+h2.subhead.hidden,.about.hidden{display:none}
+h2{
+  font:bold 12px "Cascadia Mono","Consolas",monospace;
+  color:var(--yellow);
+  letter-spacing:2px;
+  margin:0 0 6px;
+  padding-bottom:6px;
+  border-bottom:1px solid rgba(255,46,151,.5);
+  scroll-margin-top:86px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+h2 .tag{font-size:11px;color:var(--muted);font-weight:normal;letter-spacing:1px}
+h2.subhead{margin-top:18px}
+
+.row{
+  display:flex;
+  align-items:center;
+  gap:16px;
+  padding:12px 8px;
+  border-bottom:1px solid rgba(138,111,192,.2);
+  min-height:50px;
+}
+.sec > .row:last-child{border-bottom:0}
 .row:hover{background:var(--row)}
+.row.hidden{display:none}
 .lab{flex:1;min-width:0}
 .lab b{display:block;color:var(--cyan);font-weight:bold}
-.lab span{display:block;color:var(--muted);margin-top:3px;font-size:12px}
+.lab span{display:block;color:var(--muted);margin-top:3px;font-size:12px;line-height:1.5}
+
 button,select,input{font:inherit}
 button{cursor:pointer;border:0}
-.tog{min-width:64px;height:28px;padding:0 10px;background:none;border:1px solid var(--muted);color:var(--muted);font-weight:bold;letter-spacing:1px}
-.tog.on{border-color:var(--green);color:var(--green)}
+.tog{
+  min-width:68px;
+  height:30px;
+  padding:0 11px;
+  background:var(--bg2);
+  border:1px solid var(--muted);
+  color:var(--muted);
+  font-weight:bold;
+  letter-spacing:1px;
+}
+.tog.on{border-color:var(--green);color:var(--green);box-shadow:0 0 10px rgba(53,255,160,.16)}
 .tog:hover:not(:disabled){background:var(--cyan);color:var(--bg);border-color:var(--cyan)}
 .tog:disabled{opacity:.4;cursor:default}
-select,.txt{height:32px;background:var(--bg2);color:var(--cyan);border:1px solid var(--cyan);padding:0 8px;outline:0;
-  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px))}
-select{min-width:180px;cursor:pointer}
+
+select,.txt{
+  height:32px;
+  background:var(--bg2);
+  color:var(--cyan);
+  border:1px solid var(--cyan);
+  padding:0 9px;
+  outline:0;
+  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px));
+}
+select{min-width:190px;cursor:pointer}
 select option{background:var(--bg2);color:var(--cyan)}
-.txt{width:300px}
+.txt{width:300px;max-width:100%}
 .txt::placeholder{color:#5a4a8a}
-.btn{height:32px;padding:0 14px;background:none;border:1px solid var(--pink);color:var(--pink);font-weight:bold}
-.btn:hover:not(:disabled){background:var(--pink);color:var(--bg)}
+.btn{
+  height:32px;
+  padding:0 14px;
+  background:none;
+  border:1px solid var(--pink);
+  color:var(--pink);
+  font-weight:bold;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  text-decoration:none;
+  white-space:nowrap;
+}
+.btn:hover:not(:disabled){background:var(--pink);color:var(--bg);text-decoration:none}
 .btn:disabled{opacity:.5;cursor:default}
 .pair{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .row.stack{flex-direction:column;align-items:stretch;gap:10px}
 .row.stack .pair{justify-content:flex-start}
-.err{color:var(--pink2);font-size:12px;min-height:16px;margin-top:3px}
-#saved{position:fixed;right:18px;bottom:16px;color:var(--bg);background:var(--green);padding:4px 12px;font-weight:bold;letter-spacing:1px;
-  opacity:0;transition:opacity .25s;pointer-events:none}
-#saved.show{opacity:1}
-.about{color:var(--muted);line-height:1.7;padding:10px 8px}
+.err{color:var(--pink2);font-size:12px;min-height:16px;margin-top:4px}
+
+.about{
+  color:var(--muted);
+  line-height:1.85;
+  padding:10px 8px 6px;
+}
 .about b{color:var(--cyan);font-weight:normal}
+
+.empty-search{
+  display:none;
+  border:1px dashed var(--pink);
+  background:var(--bg2);
+  padding:22px;
+  text-align:center;
+  color:var(--pink2);
+  margin-bottom:18px;
+}
+.empty-search.show{display:block}
+
+#saved{
+  position:fixed;
+  right:18px;
+  bottom:16px;
+  z-index:40;
+  color:var(--bg);
+  background:var(--green);
+  padding:5px 14px;
+  font-weight:bold;
+  letter-spacing:1px;
+  opacity:0;
+  transition:opacity .25s;
+  pointer-events:none;
+}
+#saved.show{opacity:1}
+
+@media (max-width:860px){
+  .wrap{grid-template-columns:1fr}
+  aside{position:static}
+  .row{flex-wrap:wrap}
+}
 </style>
 </head>
 <body>
-<main>
-  <h1>SETTINGS</h1>
-  <div class="sub">&gt; SYSTEM CONFIG // CHANGES APPLY AT ONCE</div>
 
-  <h2>SEARCH</h2>
-  <div class="row">
-    <div class="lab"><b>Search engine</b><span>Used when you type words instead of an address, in the address bar and on the new tab page.</span></div>
-    <select id="engine"></select>
-  </div>
-
-  <h2 id="default">DEFAULT BROWSER</h2>
-  <div class="row">
-    <div class="lab"><b>Open links from other programs in NeonNet</b><span id="defHint"></span></div>
-    <button class="btn" id="defaultBrowser">SET AS DEFAULT</button>
-  </div>
-
-  <h2>START</h2>
-  <div class="row">
-    <div class="lab"><b>Home page</b><span>Opened at start-up and by the home button. Empty means the NeonNet new tab page. New tabs always show the new tab page.</span>
-      <div class="err" id="homeErr"></div></div>
-    <div class="pair"><input class="txt" id="home" spellcheck="false" autocomplete="off" placeholder="https://... (empty = new tab page)">
-      <button class="btn" id="homeSave">SAVE</button></div>
-  </div>
-  <div class="row">
-    <div class="lab"><b>Site icons on tabs</b><span>Shows each site's own icon in its tab. The icon is fetched from the site, as the page itself would.</span></div>
-    <button class="tog" id="favicons">ON</button>
-  </div>
-  <div class="row">
-    <div class="lab"><b>Continue where you left off</b><span id="restoreHint"></span></div>
-    <button class="tog" id="restoreSession">OFF</button>
-  </div>
-
-  <h2 id="privacy">PRIVACY</h2>
-  <div class="row stack">
-    <div class="lab"><b>Clear browsing data</b>
-      <span>Deletes the data you tick, for the chosen period. Cookies and site data also sign you out of sites. The cache is always cleared completely. Single history entries can be removed on the history page.</span>
-      <div class="err" id="clrMsg"></div></div>
-    <div class="pair">
-      <select id="clrRange">
-        <option value="hour">Last hour</option>
-        <option value="day">Last 24 hours</option>
-        <option value="week">Last 7 days</option>
-        <option value="month">Last 4 weeks</option>
-        <option value="all" selected>All time</option>
-      </select>
-      <button class="tog on" id="clrCookies" title="Cookies and other site data (local storage, offline data, sign-ins)">COOKIES + SITE DATA</button>
-      <button class="tog on" id="clrCache" title="Cached images and files">CACHE</button>
-      <button class="tog on" id="clrHistory" title="The pages you visited">HISTORY</button>
-      <button class="btn" id="clrGo">CLEAR</button>
+<header class="topbar">
+  <div class="top-row">
+    <div class="brand">&#9632; <b>NEON</b>NET // SETTINGS <span class="badge" id="verBadge">CONFIG</span></div>
+    <div class="addr">
+      <span>&gt;&gt;</span>
+      <input id="filter" spellcheck="false" autocomplete="off" placeholder="filter settings, toggles, or keywords (Ctrl+K)">
+      <button id="clearFilter" title="Clear filter">&#10005;</button>
+    </div>
+    <div class="hud-links">
+      <a class="hud-link" href="https://neonnet.ui/extensions.html">EXTENSIONS</a>
+      <a class="hud-link" href="https://neonnet.ui/bookmarks.html">BOOKMARKS</a>
+      <a class="hud-link" href="https://neonnet.ui/history.html">HISTORY</a>
     </div>
   </div>
+</header>
 
-  <h2 id="passwords">PASSWORDS</h2>
-  <div class="row">
-    <div class="lab"><b>Offer to save passwords</b><span id="pwHint"></span></div>
-    <button class="tog" id="savePasswords">ON</button>
-  </div>
-  <div class="row">
-    <div class="lab"><b>Saved passwords</b><span>Locked with your Windows account. You can delete them, but not read them.</span></div>
-    <a class="btn" href="https://neonnet.ui/passwords.html">MANAGE</a>
-  </div>
+<div class="wrap">
+  <aside>
+    <div class="toc-title">INDEX <span>// SECTIONS</span></div>
+    <nav id="toc">
+      <a href="#sec-search" class="active"><span class="num">01</span>Search &amp; Default</a>
+      <a href="#sec-start"><span class="num">02</span>Startup &amp; Tabs</a>
+      <a href="#sec-privacy"><span class="num">03</span>Privacy &amp; Data</a>
+      <a href="#sec-access"><span class="num">04</span>Passwords &amp; Sites</a>
+      <a href="#sec-ext"><span class="num">05</span>Extensions &amp; Security</a>
+      <a href="#sec-scroll"><span class="num">06</span>Scrolling &amp; DevTools</a>
+      <a href="#sec-look"><span class="num">07</span>Downloads &amp; Look</a>
+      <a href="#sec-updates"><span class="num">08</span>Updates &amp; About</a>
+    </nav>
+    <div class="aside-stats">
+      <div><b>ENGINE</b> &rarr; <span id="statSearch">...</span></div>
+      <div><b>SCRIPTS</b> &rarr; <span id="statScripts">...</span></div>
+      <div><b>BLOCKED</b> &rarr; <span id="statBlocked">0</span></div>
+    </div>
+  </aside>
 
-  <h2 id="permissions">SITE PERMISSIONS</h2>
-  <div class="row">
-    <div class="lab"><b>Camera, microphone, location and more</b><span>NeonNet asks once when a site wants one of these and remembers the answer. Change it for the page you are on with the lock icon in the address bar, or for all sites here.</span></div>
-    <a class="btn" href="https://neonnet.ui/permissions.html">MANAGE</a>
-  </div>
+  <main>
+    <div class="hero">
+      <h1>SETTINGS</h1>
+      <div class="sub">&gt; SYSTEM CONFIG // CHANGES APPLY AT ONCE</div>
+    </div>
 
-  <h2 id="extensions">EXTENSIONS (USERSCRIPTS)</h2>
-  <div class="row">
-    <div class="lab"><b>Userscripts (.user.js)</b><span id="extHint"></span></div>
-    <a class="btn" href="https://neonnet.ui/extensions.html">MANAGE</a>
-  </div>
+    <div id="emptySearch" class="empty-search">
+      NO MATCHING SETTINGS FOR "<span id="emptyQuery"></span>" &mdash; CLEAR THE SEARCH BAR TO VIEW ALL OPTIONS.
+    </div>
 
-  <h2>SECURITY</h2>
-  <div class="row">
-    <div class="lab"><b>HTTPS-only mode</b><span>Opens every http:// address over https:// instead. If the site has no secure version, NeonNet asks before using plain http. Addresses on this computer or the local network are left alone.</span></div>
-    <button class="tog" id="httpsOnly">OFF</button>
-  </div>
+    <section class="sec" id="sec-search">
+      <h2>SEARCH <span class="tag">01 // ADDRESS BAR</span></h2>
+      <div class="row">
+        <div class="lab"><b>Search engine</b><span>Used when you type words instead of an address, in the address bar and on the new tab page.</span></div>
+        <select id="engine"></select>
+      </div>
 
-  <div class="row">
-    <div class="lab"><b>Block trackers and ads</b><span id="adHint"></span></div>
-    <button class="tog" id="blockAds">OFF</button>
-  </div>
+      <h2 class="subhead" id="default">DEFAULT BROWSER</h2>
+      <div class="row">
+        <div class="lab"><b>Open links from other programs in NeonNet</b><span id="defHint"></span></div>
+        <button class="btn" id="defaultBrowser">SET AS DEFAULT</button>
+      </div>
+    </section>
 
-  <h2>SCROLLING</h2>
-  <div class="row">
-    <div class="lab"><b>Smooth scrolling</b><span id="smHint">Mouse wheel and keyboard (arrows, space, page up and down, home, end) scroll with an easing animation, as the Smooth Scroll extension does. A touchpad is left alone, it is smooth already.</span></div>
-    <button class="tog" id="smoothScroll">ON</button>
-  </div>
-  <div class="row">
-    <div class="lab"><b>Scroll distance</b><span>How far one step of the mouse wheel moves the page.</span></div>
-    <select id="smoothStep"><option value="70">SHORT</option><option value="120">NORMAL</option><option value="200">LONG</option></select>
-  </div>
-  <div class="row">
-    <div class="lab"><b>Smoothness</b><span>How long the scrolling animation takes.</span></div>
-    <select id="smoothTime"><option value="250">SNAPPY</option><option value="400">SMOOTH</option><option value="700">VERY SMOOTH</option></select>
-  </div>
+    <section class="sec" id="sec-start">
+      <h2>START <span class="tag">02 // STARTUP &amp; TABS</span></h2>
+      <div class="row">
+        <div class="lab"><b>Home page</b><span>Opened at start-up and by the home button. Empty means the NeonNet new tab page. New tabs always show the new tab page.</span>
+          <div class="err" id="homeErr"></div></div>
+        <div class="pair"><input class="txt" id="home" spellcheck="false" autocomplete="off" placeholder="https://... (empty = new tab page)">
+          <button class="btn" id="homeSave">SAVE</button></div>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Site icons on tabs</b><span>Shows each site's own icon in its tab. The icon is fetched from the site, as the page itself would.</span></div>
+        <button class="tog" id="favicons">ON</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Continue where you left off</b><span id="restoreHint"></span></div>
+        <button class="tog" id="restoreSession">OFF</button>
+      </div>
+    </section>
 
-  <h2>DEVELOPER TOOLS</h2>
-  <div class="row">
-    <div class="lab"><b>Position of the developer tools (F12)</b><span>Docked in the NeonNet window below, right or left of the page, or in a window of their own. Applies the next time they open.</span></div>
-    <select id="devDock"><option value="0">BOTTOM</option><option value="1">RIGHT</option><option value="2">LEFT</option><option value="3">SEPARATE WINDOW</option></select>
-  </div>
+    <section class="sec" id="sec-privacy">
+      <h2 id="privacy">PRIVACY <span class="tag">03 // DATA</span></h2>
+      <div class="row stack">
+        <div class="lab"><b>Clear browsing data</b>
+          <span>Deletes the data you tick, for the chosen period. Cookies and site data also sign you out of sites. The cache is always cleared completely. Single history entries can be removed on the history page.</span>
+          <div class="err" id="clrMsg"></div></div>
+        <div class="pair">
+          <select id="clrRange">
+            <option value="hour">Last hour</option>
+            <option value="day">Last 24 hours</option>
+            <option value="week">Last 7 days</option>
+            <option value="month">Last 4 weeks</option>
+            <option value="all" selected>All time</option>
+          </select>
+          <button class="tog on" id="clrCookies" title="Cookies and other site data (local storage, offline data, sign-ins)">COOKIES + SITE DATA</button>
+          <button class="tog on" id="clrCache" title="Cached images and files">CACHE</button>
+          <button class="tog on" id="clrHistory" title="The pages you visited">HISTORY</button>
+          <button class="btn" id="clrGo">CLEAR</button>
+        </div>
+      </div>
+    </section>
 
-  <h2>DOWNLOADS</h2>
-  <div class="row">
-    <div class="lab"><b>Ask where to save each file</b><span id="dlHint"></span></div>
-    <button class="tog" id="askDownload">ON</button>
-  </div>
+    <section class="sec" id="sec-access">
+      <h2 id="passwords">PASSWORDS <span class="tag">04 // CREDENTIALS &amp; PERMISSIONS</span></h2>
+      <div class="row">
+        <div class="lab"><b>Offer to save passwords</b><span id="pwHint"></span></div>
+        <button class="tog" id="savePasswords">ON</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Saved passwords</b><span>Locked with your Windows account. You can delete them, but not read them.</span></div>
+        <a class="btn" href="https://neonnet.ui/passwords.html">MANAGE</a>
+      </div>
 
-  <h2>LOOK</h2>
-  <div class="row">
-    <div class="lab"><b>Bookmarks bar</b><span>Shows your bookmarks and folders in a bar under the address bar (Ctrl+Shift+B).</span></div>
-    <button class="tog" id="bookmarksBar">ON</button>
-  </div>
-  <div class="row">
-    <div class="lab"><b>Network speed in the status bar</b><span>Shows download (cyan) and upload (pink) speed at the bottom left. It is the speed of the whole computer over Ethernet, Wi-Fi and mobile data together, not of NeonNet alone.</span></div>
-    <button class="tog" id="netSpeed">ON</button>
-  </div>
-  <div class="row">
-    <div class="lab"><b>Scanlines</b><span>A thin CRT line effect over every page. Purely visual.</span></div>
-    <button class="tog" id="scan">ON</button>
-  </div>
+      <h2 class="subhead" id="permissions">SITE PERMISSIONS</h2>
+      <div class="row">
+        <div class="lab"><b>Camera, microphone, location and more</b><span>NeonNet asks once when a site wants one of these and remembers the answer. Change it for the page you are on with the lock icon in the address bar, or for all sites here.</span></div>
+        <a class="btn" href="https://neonnet.ui/permissions.html">MANAGE</a>
+      </div>
+    </section>
 
-  <h2>UPDATES</h2>
-  <div class="row">
-    <div class="lab"><b>Automatic updates</b><span id="updHint"></span></div>
-    <button class="tog" id="autoUpdate">ON</button>
-  </div>
+    <section class="sec" id="sec-ext">
+      <h2 id="extensions">EXTENSIONS (USERSCRIPTS) <span class="tag">05 // SCRIPTS &amp; SECURITY</span></h2>
+      <div class="row">
+        <div class="lab"><b>Userscripts (.user.js)</b><span id="extHint"></span></div>
+        <a class="btn" href="https://neonnet.ui/extensions.html">MANAGE</a>
+      </div>
 
-  <h2>ABOUT</h2>
-  <div class="about" id="about"></div>
-</main>
+      <h2 class="subhead">SECURITY</h2>
+      <div class="row">
+        <div class="lab"><b>HTTPS-only mode</b><span>Opens every http:// address over https:// instead. If the site has no secure version, NeonNet asks before using plain http. Addresses on this computer or the local network are left alone.</span></div>
+        <button class="tog" id="httpsOnly">OFF</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Block trackers and ads</b><span id="adHint"></span></div>
+        <button class="tog" id="blockAds">OFF</button>
+      </div>
+    </section>
+
+    <section class="sec" id="sec-scroll">
+      <h2>SCROLLING <span class="tag">06 // INPUT &amp; DEVTOOLS</span></h2>
+      <div class="row">
+        <div class="lab"><b>Smooth scrolling</b><span id="smHint">Mouse wheel and keyboard (arrows, space, page up and down, home, end) scroll with an easing animation, as the Smooth Scroll extension does. A touchpad is left alone, it is smooth already.</span></div>
+        <button class="tog" id="smoothScroll">ON</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Scroll distance</b><span>How far one step of the mouse wheel moves the page.</span></div>
+        <select id="smoothStep"><option value="70">SHORT</option><option value="120">NORMAL</option><option value="200">LONG</option></select>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Smoothness</b><span>How long the scrolling animation takes.</span></div>
+        <select id="smoothTime"><option value="250">SNAPPY</option><option value="400">SMOOTH</option><option value="700">VERY SMOOTH</option></select>
+      </div>
+
+      <h2 class="subhead">DEVELOPER TOOLS</h2>
+      <div class="row">
+        <div class="lab"><b>Position of the developer tools (F12)</b><span>Docked in the NeonNet window below, right or left of the page, or in a window of their own. Applies the next time they open.</span></div>
+        <select id="devDock"><option value="0">BOTTOM</option><option value="1">RIGHT</option><option value="2">LEFT</option><option value="3">SEPARATE WINDOW</option></select>
+      </div>
+    </section>
+
+    <section class="sec" id="sec-look">
+      <h2>DOWNLOADS <span class="tag">07 // FILES &amp; APPEARANCE</span></h2>
+      <div class="row">
+        <div class="lab"><b>Ask where to save each file</b><span id="dlHint"></span></div>
+        <button class="tog" id="askDownload">ON</button>
+      </div>
+
+      <h2 class="subhead">LOOK</h2>
+      <div class="row">
+        <div class="lab"><b>Bookmarks bar</b><span>Shows your bookmarks and folders in a bar under the address bar (Ctrl+Shift+B).</span></div>
+        <button class="tog" id="bookmarksBar">ON</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Network speed in the status bar</b><span>Shows download (cyan) and upload (pink) speed at the bottom left. It is the speed of the whole computer over Ethernet, Wi-Fi and mobile data together, not of NeonNet alone.</span></div>
+        <button class="tog" id="netSpeed">ON</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Scanlines</b><span>A thin CRT line effect over every page. Purely visual.</span></div>
+        <button class="tog" id="scan">ON</button>
+      </div>
+    </section>
+
+    <section class="sec" id="sec-updates">
+      <h2>UPDATES <span class="tag">08 // SYSTEM</span></h2>
+      <div class="row">
+        <div class="lab"><b>Automatic updates</b><span id="updHint"></span></div>
+        <button class="tog" id="autoUpdate">ON</button>
+      </div>
+
+      <h2 class="subhead">ABOUT</h2>
+      <div class="about" id="about"></div>
+    </section>
+  </main>
+</div>
+
 <div id="saved">SAVED</div>
 <script>
 const $ = s => document.querySelector(s);
@@ -191,6 +548,11 @@ async function load(){
   const sel = $('#engine'); sel.innerHTML = '';
   for(const e of cfg.engines){ const o = document.createElement('option'); o.value = e.id; o.textContent = e.name; sel.appendChild(o); }
   sel.value = cfg.search;
+  $('#verBadge').textContent = 'v' + cfg.version;
+  const eng = cfg.engines.find(e => e.id === cfg.search);
+  $('#statSearch').textContent = eng ? eng.name : cfg.search;
+  $('#statScripts').textContent = (cfg.scriptEnabled || 0) + '/' + (cfg.scriptTotal || 0);
+  $('#statBlocked').textContent = String(cfg.blocked || 0);
   $('#home').value = cfg.home || '';
   setTog('#askDownload', cfg.askDownload);
   $('#dlHint').textContent = cfg.askDownload ? 'A save dialog opens for every download.'
@@ -226,6 +588,7 @@ async function load(){
   line('NeonNet', 'v' + cfg.version);
   line('Chromium', cfg.chromium + ' (bundled)');
   line('Your data', '%LOCALAPPDATA%\\NeonNet');
+  if(filterInput.value.trim()) applyFilter();
 }
 
 async function set(key, value){
@@ -287,6 +650,86 @@ $('#clrGo').onclick = async () => {
 };
 $('#homeSave').onclick = saveHome;
 $('#home').addEventListener('keydown', e => { if(e.key === 'Enter') saveHome(); });
+
+// Settings search filter & index TOC
+const filterInput = $('#filter');
+const clearBtn = $('#clearFilter');
+const secs = Array.from(document.querySelectorAll('main section.sec'));
+const tocLinks = Array.from(document.querySelectorAll('#toc a'));
+const emptyBox = $('#emptySearch');
+const emptyQuery = $('#emptyQuery');
+
+function applyFilter(){
+  const q = filterInput.value.trim().toLowerCase();
+  clearBtn.classList.toggle('show', q.length > 0);
+  let visibleSecs = 0;
+  for(const sec of secs){
+    const toc = tocLinks.find(a => a.getAttribute('href') === '#' + sec.id);
+    if(!q){
+      sec.classList.remove('hidden');
+      sec.querySelectorAll('.row, h2.subhead, .about').forEach(el => el.classList.remove('hidden'));
+      if(toc) toc.classList.remove('dim');
+      visibleSecs++;
+      continue;
+    }
+    const secHeadText = Array.from(sec.querySelectorAll('h2')).map(h => h.textContent.toLowerCase()).join(' ');
+    const headHit = secHeadText.includes(q);
+    let hits = 0;
+    for(const r of sec.querySelectorAll('.row')){
+      const hit = headHit || r.textContent.toLowerCase().includes(q);
+      r.classList.toggle('hidden', !hit);
+      if(hit) hits++;
+    }
+    const about = sec.querySelector('.about');
+    if(about){
+      const aHit = headHit || about.textContent.toLowerCase().includes(q);
+      about.classList.toggle('hidden', !aHit);
+      if(aHit) hits++;
+    }
+    for(const sub of sec.querySelectorAll('h2.subhead')){
+      // Hide subheadings whose following rows/blocks are all hidden
+      let next = sub.nextElementSibling, subHasVisible = false;
+      while(next && !next.matches('h2')){
+        if(!next.classList.contains('hidden')){ subHasVisible = true; break; }
+        next = next.nextElementSibling;
+      }
+      sub.classList.toggle('hidden', !subHasVisible);
+    }
+    const show = hits > 0;
+    sec.classList.toggle('hidden', !show);
+    if(toc) toc.classList.toggle('dim', !show);
+    if(show) visibleSecs++;
+  }
+  emptyQuery.textContent = filterInput.value.trim();
+  emptyBox.classList.toggle('show', q.length > 0 && visibleSecs === 0);
+}
+
+filterInput.addEventListener('input', applyFilter);
+clearBtn.addEventListener('click', () => { filterInput.value = ''; applyFilter(); filterInput.focus(); });
+for(const a of tocLinks){
+  a.addEventListener('click', () => {
+    if(filterInput.value.trim()){ filterInput.value = ''; applyFilter(); }
+    tocLinks.forEach(x => x.classList.remove('active'));
+    a.classList.add('active');
+  });
+}
+document.addEventListener('keydown', e => {
+  if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){
+    e.preventDefault(); filterInput.focus(); filterInput.select();
+  } else if(e.key === 'Escape' && document.activeElement === filterInput && filterInput.value){
+    filterInput.value = ''; applyFilter();
+  }
+});
+const obs = new IntersectionObserver(entries => {
+  for(const entry of entries){
+    if(entry.isIntersecting){
+      const id = '#' + entry.target.id;
+      tocLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === id));
+    }
+  }
+}, { rootMargin: '-18% 0px -70% 0px' });
+secs.forEach(s => obs.observe(s));
+
 // The page may stay open while a setting changes elsewhere (the SCAN button), so refresh when shown.
 document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') load(); });
 load();
