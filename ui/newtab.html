@@ -20,7 +20,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:#e8d8f
   mask:linear-gradient(#000 0 50%,transparent 50% 53%,#000 53% 60%,transparent 60% 64%,#000 64% 70%,transparent 70% 75%,#000 75% 80%,transparent 80% 86%,#000 86%)}
 #floor{position:absolute;left:0;right:0;bottom:0;height:30%;background:var(--bg2);perspective:180px;perspective-origin:50% 0;overflow:hidden;
   border-top:2px solid var(--pink);box-shadow:0 -6px 24px rgba(255,46,151,.45)}
-#grid{position:absolute;left:-150%;right:-150%;top:0;height:300%;transform:rotateX(58deg);transform-origin:top;
+#grid{position:absolute;left:-150%;right:-150%;top:-48px;height:calc(300% + 48px);transform:rotateX(58deg) translate3d(0,0,0);transform-origin:50% 48px;
+  will-change:transform;
   background-image:
     linear-gradient(90deg,rgba(255,46,151,.9) 2px,transparent 2px),
     linear-gradient(0deg,rgba(255,46,151,.9) 2px,transparent 2px);
@@ -28,7 +29,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:#e8d8f
   animation:run 1.2s linear infinite}
 html.idle #grid{animation-play-state:paused}
 #floor::after{content:"";position:absolute;inset:0;background:linear-gradient(var(--bg2) 0%,rgba(10,4,32,.6) 18%,transparent 45%);pointer-events:none}
-@keyframes run{from{background-position:0 0,0 0}to{background-position:0 0,0 48px}}
+@keyframes run{from{transform:rotateX(58deg) translate3d(0,0,0)}to{transform:rotateX(58deg) translate3d(0,48px,0)}}
 #scan{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.16) 2px 3px)}
 #hud{position:absolute;top:14px;left:18px;right:18px;display:flex;justify-content:space-between;color:var(--muted);z-index:3}
 #hud b{color:var(--yellow);font-weight:normal}
