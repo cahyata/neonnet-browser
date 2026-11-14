@@ -15,6 +15,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 - **Anti-white-flash & dark child windows:** override Chromium child HWND background brushes and keep the Performance panel hidden until loaded so opening popups or panels no longer flashes white.
 - **Workspace & popup focus handling:** close open chrome popups (including Edit Workspace) when focus moves into a tab, and ensure global shortcuts (such as Command Palette) work reliably regardless of whether focus is in a tab or chrome.
 
+## [1.8.0] - 2026-11-14
+
+### Features
+- **Workspaces:** Opera GX-style workspaces and tab group switching (`327514e`).
+- **Force Dark Mode:** added Force Dark Mode setting using Chromium Blink Auto Dark Mode (`305761a`).
+- **YouTube Ad Skipper userscript:** bundled and auto-seeded on first run (`6f4f403`).
+- **Settings & internal UI overhaul:** added index sidebar, live search bar, and unified sticky HUD topbar across internal UI pages, redesigned Extensions page with filter pills, switch toggles, and modal editor, plus **Check for updates** in Settings and smooth scroll on UI pages.
+- **User guide & F1 Help:** added GitHub Pages user guide themed to NeonNet and `F1` help shortcut.
+
+### Performance & Fixes
+- **Runtime & New Tab optimizations:** optimized UI diffing, zero-alloc adblock lookup, GPU-composited transform for New Tab floor grid animation, auto-pause when idle/unfocused, and immediate resume on tab switch.
+- **PDFs, popups & modal polish:** kept PDFs and tab/popup dispositions inside NeonNet instead of spawning Chromium, dimmed tab content behind modal dialogs, and themed `F7` Caret Browsing.
+
 ## [1.7.0] - 2026-11-13
 
 ### Features
