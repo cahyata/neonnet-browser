@@ -82,6 +82,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 #scanb.on{border-color:var(--cyan);color:var(--cyan)}
 #perfb{height:28px;padding:0 8px;border:1px solid var(--muted);color:var(--muted)}
 #perfb.on{border-color:var(--cyan);color:var(--cyan)}
+#palb{height:28px;padding:0 8px;border:1px solid var(--muted);color:var(--muted);font-weight:bold}
+#palb:hover,#palb.on{border-color:var(--cyan);color:var(--cyan)}
 .tab.discarded{opacity:.55;font-style:italic}
 #menu{color:var(--cyan);font-size:16px;width:32px;height:28px}
 #menu:hover{background:var(--cyan);color:var(--bg)}
@@ -213,6 +215,90 @@ body.find #find{display:flex}
 #wsModal .wm-ft button:hover{background:var(--cyan);color:var(--bg)}
 #wsModal .wm-ft button.del{border-color:var(--pink);color:var(--pink);margin-right:auto}
 #wsModal .wm-ft button.del:hover{background:var(--pink);color:var(--bg)}
+
+/* command palette */
+#pal{position:absolute;z-index:24;display:none;background:var(--bg2);border:1px solid var(--cyan);border-top:2px solid var(--pink);
+  box-shadow:0 16px 36px rgba(0,0,0,.78);clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px))}
+#pal.on{display:block}
+#pal .pal-hd{display:flex;align-items:center;gap:8px;height:40px;padding:0 12px;border-bottom:1px solid rgba(0,229,255,.32);background:var(--bg)}
+#pal .pal-p{color:var(--pink);font-weight:bold;letter-spacing:1px;flex:none}
+#palIn{flex:1;min-width:0;height:100%;background:none;border:0;outline:0;color:var(--cyan);font:13px "Cascadia Mono","Consolas",monospace;user-select:text}
+#palIn::placeholder{color:#5a4a8a}
+#palIn::selection{background:var(--pink);color:var(--bg)}
+#pal .pal-k{color:var(--muted);font-size:10px;border:1px solid rgba(138,111,192,.45);padding:2px 6px;flex:none}
+#palList{max-height:360px;overflow-y:auto;padding:4px 0}
+#palList::-webkit-scrollbar{width:6px}
+#palList::-webkit-scrollbar-thumb{background:rgba(0,229,255,.35)}
+.pi{display:flex;align-items:center;gap:10px;padding:7px 12px;cursor:pointer;border-left:2px solid transparent}
+.pi:hover,.pi.sel{background:rgba(0,229,255,.14);border-left-color:var(--cyan)}
+.pi .pk{flex:none;min-width:34px;text-align:center;font-size:10px;font-weight:bold;padding:2px 5px;border:1px solid var(--muted);color:var(--muted)}
+.pi .pk.tab{border-color:var(--cyan);color:var(--cyan)}
+.pi .pk.cmd{border-color:var(--pink);color:var(--pink)}
+.pi .pk.ws{border-color:var(--yellow);color:var(--yellow)}
+.pi .pk.bm{border-color:#35ffa0;color:#35ffa0}
+.pi .pm{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.pi .pt{color:#e8d8ff;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pi.sel .pt{color:var(--cyan)}
+.pi .ps{color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pi .pr{flex:none;color:var(--muted);font-size:10px;border:1px solid rgba(138,111,192,.35);padding:1px 6px}
+.pi .pr.on{border-color:#35ffa0;color:#35ffa0}
+.pal-empty{padding:16px 12px;text-align:center;color:var(--muted);font-size:12px}
+.pal-ft{display:flex;gap:14px;padding:6px 12px;border-top:1px solid rgba(138,111,192,.25);color:var(--muted);font-size:10px;background:var(--bg)}
+
+/* built-in proxy / tunnel switcher (Opera GX style) */
+#vpnBtn{height:28px;padding:0 9px;border:1px solid var(--muted);color:var(--muted);font-size:11px;font-weight:bold;letter-spacing:.7px;
+  display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:none;background:var(--bg2);
+  clip-path:polygon(0 0,calc(100% - 6px) 0,100% 6px,100% 100%,0 100%)}
+#vpnBtn .vd{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:none}
+#vpnBtn:hover{border-color:var(--cyan);color:var(--cyan)}
+#vpnBtn.on{border-color:#35ffa0;color:#35ffa0;background:rgba(53,255,160,.1);box-shadow:0 0 12px rgba(53,255,160,.22)}
+#vpnBtn.on .vd{background:#35ffa0;box-shadow:0 0 6px #35ffa0}
+#vpnBtn.checking{border-color:var(--yellow);color:var(--yellow)}
+#vpnBtn.checking .vd{background:var(--yellow);box-shadow:0 0 6px var(--yellow)}
+#vpnBtn.err{border-color:var(--pink);color:var(--pink)}
+#vpnBtn.err .vd{background:var(--pink)}
+#vpnPop{position:absolute;z-index:23;display:none;width:336px;background:var(--bg2);border:1px solid var(--cyan);border-top:2px solid var(--pink);
+  box-shadow:0 12px 28px rgba(0,0,0,.72);padding:12px 14px;font-size:12px;color:#e8d8ff}
+#vpnPop.on{display:block}
+#vpnPop .vh{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+#vpnPop .vt{color:var(--yellow);font-weight:bold;letter-spacing:1px}
+#vpnPop .vx{color:var(--muted);padding:0 4px;font-size:13px}
+#vpnPop .vx:hover{color:var(--pink)}
+#vpnPop .vswitch{width:100%;height:34px;border:1px solid var(--muted);color:var(--muted);font-weight:bold;letter-spacing:1px;background:var(--bg);margin-bottom:8px}
+#vpnPop .vswitch:hover{border-color:var(--cyan);color:var(--cyan)}
+#vpnPop .vswitch.on{border-color:#35ffa0;color:var(--bg);background:#35ffa0}
+#vpnPop .vswitch.checking{border-color:var(--yellow);color:var(--yellow)}
+#vpnPop .verr{color:#ff7aa8;background:rgba(255,42,109,.12);border:1px solid rgba(255,42,109,.45);padding:6px 8px;font-size:11px;line-height:1.4;margin-bottom:8px}
+#vpnPop .vep{color:var(--cyan);font-size:11px;padding:6px 8px;border:1px solid rgba(0,229,255,.28);background:var(--bg);margin-bottom:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#vpnPop .vlbl{color:var(--muted);font-size:10px;letter-spacing:1.2px;margin:6px 0 4px}
+#vpnPop .vlist{display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto}
+#vpnPop .vp{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border:1px solid rgba(138,111,192,.35);text-align:left;color:#e8d8ff}
+#vpnPop .vp:hover{border-color:var(--cyan);color:var(--cyan)}
+#vpnPop .vp.on{border-color:#35ffa0;background:rgba(53,255,160,.1);color:#35ffa0}
+#vpnPop .vp .vn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:bold;font-size:11px}
+#vpnPop .vp .vs{color:var(--muted);font-size:10px;flex:none}
+#vpnPop .vwrow{display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:8px;border-top:1px solid rgba(138,111,192,.25);font-size:11px}
+#vpnPop .vwtog{height:24px;min-width:48px;padding:0 8px;border:1px solid var(--muted);color:var(--muted);font-weight:bold;font-size:10px}
+#vpnPop .vwtog.on{border-color:#35ffa0;color:#35ffa0}
+#vpnPop .vnote{color:var(--muted);font-size:10px;line-height:1.45;margin-top:8px}
+#vpnPop .vft{display:flex;justify-content:flex-end;margin-top:10px}
+#vpnPop .vft button{height:26px;padding:0 10px;border:1px solid var(--pink);color:var(--pink);font-weight:bold;font-size:11px}
+#vpnPop .vft button:hover{background:var(--pink);color:var(--bg)}
+#engBtn{height:22px;padding:0 7px;margin-right:4px;border:1px solid rgba(0,229,255,.35);background:rgba(0,229,255,.08);color:var(--cyan);font-size:10px;font-weight:bold;letter-spacing:.7px;display:inline-flex;align-items:center;gap:4px;flex:none;white-space:nowrap}
+#engBtn:hover,#engBtn.open{border-color:var(--pink);color:var(--pink);background:rgba(255,46,151,.12)}
+#engPop{position:absolute;z-index:23;display:none;width:260px;background:var(--bg2);border:1px solid var(--cyan);border-top:2px solid var(--pink);box-shadow:0 12px 28px rgba(0,0,0,.68);padding:8px}
+#engPop.on{display:block}
+#engPop .eh{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+#engPop .et{color:var(--yellow);font-weight:bold;font-size:11px;letter-spacing:1px}
+#engPop .elist{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto}
+#engPop .ep{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border:1px solid rgba(138,111,192,.35);text-align:left;color:#e8d8ff;font-size:11px}
+#engPop .ep:hover{border-color:var(--cyan);color:var(--cyan)}
+#engPop .ep.on{border-color:var(--pink);background:rgba(255,46,151,.12);color:var(--pink2)}
+#engPop .ep .en{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:bold}
+#engPop .ep .ec{color:var(--muted);font-size:9px;letter-spacing:.8px;flex:none}
+#engPop .eft{display:flex;justify-content:flex-end;margin-top:8px;padding-top:6px;border-top:1px solid rgba(138,111,192,.25)}
+#engPop .eft button{height:24px;padding:0 9px;border:1px solid var(--cyan);color:var(--cyan);font-weight:bold;font-size:10px;letter-spacing:.6px}
+#engPop .eft button:hover{background:var(--cyan);color:var(--bg)}
 </style>
 </head>
 <body>
@@ -234,8 +320,10 @@ body.find #find{display:flex}
   <button class="nb" id="fwd" title="Forward (Alt+Right)">[&#9654;]</button>
   <button class="nb" id="reload" title="Reload (F5)">[&#10227;]</button>
   <button class="nb" id="home" title="Home">[&#8962;]</button>
-  <div id="addr"><button id="lock" title="Site information and permissions"></button><span id="pr">&gt;&gt;</span><input id="url" spellcheck="false" autocomplete="off" placeholder="search the grid or enter address"><button id="star" title="Bookmark this page (Ctrl+D)">&#9734;</button></div>
+  <button id="vpnBtn" title="Built-in Proxy Tunnel"><span class="vd"></span><span id="vpnTxt">PROXY</span></button>
+  <div id="addr"><button id="lock" title="Site information and permissions"></button><span id="pr">&gt;&gt;</span><button id="engBtn" type="button" title="Search engine (click to switch)"><span id="engTxt">GOOGLE</span> &#9662;</button><input id="url" spellcheck="false" autocomplete="off" placeholder="search the grid or enter address"><button id="star" title="Bookmark this page (Ctrl+D)">&#9734;</button></div>
   <button id="go">GO</button>
+  <button id="palb" title="Command palette (Ctrl+Shift+P)">&gt;_</button>
   <button id="perfb" title="Performance panel (Ctrl+Shift+M)">PERF</button>
   <button id="scanb" title="Toggle scanlines">SCAN</button>
   <button id="menu" title="Menu">&#8801;</button>
@@ -259,6 +347,17 @@ body.find #find{display:flex}
 <div id="site"></div>
 <div id="bmdrop"></div>
 <div id="wsModal"></div>
+<div id="vpnPop"></div>
+<div id="engPop"></div>
+<div id="pal">
+  <div class="pal-hd">
+    <span class="pal-p">CMD&gt;&gt;</span>
+    <input id="palIn" spellcheck="false" autocomplete="off" placeholder="Search tabs, workspaces, bookmarks, history, or >commands...">
+    <span class="pal-k">ESC</span>
+  </div>
+  <div id="palList"></div>
+  <div class="pal-ft"><span>&#8593;&#8595; navigate</span><span>&#9166; run</span><span>&gt; commands only</span><span>Ctrl+Shift+P</span></div>
+</div>
 <script>
 const $ = s => document.querySelector(s);
 // Commands go to the host as requests to /cmd on this host (served by the app itself).
@@ -272,11 +371,35 @@ const send = (...a) => {
   const u = '/cmd?m=' + encodeURIComponent(a.join('\n'));
   queue = queue.then(() => fetch(u, {cache: 'no-store'})).catch(() => {});
 };
+let dropRaf = 0, dropTmr = 0, dropShown = false;
+function syncDrop(need, x0, x1){
+  cancelAnimationFrame(dropRaf); clearTimeout(dropTmr);
+  if(!need){ dropShown = false; send('dropdown', 0); return; }
+  let fired = false;
+  const fire = () => {
+    if(fired) return;
+    fired = true;
+    cancelAnimationFrame(dropRaf); clearTimeout(dropTmr);
+    dropShown = true;
+    if(x0 !== undefined && x1 !== undefined) send('dropdown', need, x0, x1);
+    else send('dropdown', need);
+  };
+  if(dropShown) dropRaf = requestAnimationFrame(fire);
+  else dropRaf = requestAnimationFrame(() => { dropRaf = requestAnimationFrame(fire); });
+  dropTmr = setTimeout(fire, 45);
+}
 const NEWTAB = 'https://neonnet.ui/newtab.html';
 let state = {tabs:[], active:0};
 let editing = false;
 let drag = null, pendingRender = false;   // tab being pressed or dragged: {id, x0, on, el, grab, w}
 
+function buildSearchUrl(tmpl, q){
+  const t = tmpl || 'https://www.google.com/search?q=';
+  const enc = encodeURIComponent(q);
+  if(t.includes('%s')) return t.replace(/%s/g, enc);
+  if(t.includes('{query}')) return t.replace(/\{query\}/g, enc);
+  return t + enc;
+}
 function toUrl(v){
   v = v.trim(); if(!v) return null;
   const nn = /^neonnet:\/\/([a-z0-9_-]*)\/?([?#].*)?$/i.exec(v);   // neonnet://settings -> the settings page
@@ -284,7 +407,7 @@ function toUrl(v){
   if(/^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^(about|data|edge|view-source):/i.test(v)) return v;
   if(/^localhost(:\d+)?(\/.*)?$/i.test(v) || /^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/.*)?$/.test(v)) return 'http://' + v;
   if(!/\s/.test(v) && /^[^\s\/]+\.[a-z]{2,}(:\d+)?([\/?#].*)?$/i.test(v)) return 'https://' + v;
-  return (state.search || 'https://www.google.com/search?q=') + encodeURIComponent(v);
+  return buildSearchUrl(state.search, v);
 }
 // NeonNet's own pages live at https://neonnet.ui/<name>.html; the address bar shows and
 // accepts the short form neonnet://<name>, like edge://settings.
@@ -408,6 +531,8 @@ function render(){
   if(state.find && !findWas){ fq.value = state.findText || ''; showCount(0, 0); }
   findWas = !!state.find;
   $('#fcase').classList.toggle('on', !!state.findCase);
+  updateVpnBtn();
+  updateEngBtn();
 }
 
 // --- site information and permissions: the lock icon at the left of the address bar ---
@@ -433,11 +558,11 @@ function closeSite(){
   if(!siteOpen) return;
   siteOpen = false; sitePanel.classList.remove('on'); sitePanel.textContent = '';
   siteKey = '';
-  if(siteNeed){ siteNeed = 0; send('dropdown', 0); }
+  if(siteNeed){ siteNeed = 0; syncDrop(0); }
 }
 function openSite(){
   const s = siteShown(); if(!s) return;
-  closeSug(); closeBmDrop(); siteOpen = true; siteOrigin = s.origin; siteChanged = false; renderSite();
+  closeSug(); closeBmDrop(); closePal(false); closeVpn(); closeEng(); siteOpen = true; siteOrigin = s.origin; siteChanged = false; renderSite();
 }
 function renderSite(){
   const s = siteShown(); if(!s){ closeSite(); return; }
@@ -480,7 +605,7 @@ function renderSite(){
   const need = Math.ceil(sitePanel.getBoundingClientRect().bottom) + 8;
   const x0 = Math.floor(r.left), x1 = Math.ceil(r.left + parseFloat(sitePanel.style.width));
   const key = need + ':' + x0 + ':' + x1;
-  if(key !== siteKey){ siteKey = key; siteNeed = need; send('dropdown', need, x0, x1); }
+  if(key !== siteKey){ siteKey = key; siteNeed = need; syncDrop(need, x0, x1); }
 }
 lock.onclick = () => { if(siteOpen) closeSite(); else openSite(); };
 document.addEventListener('mousedown', e => { if(siteOpen && !sitePanel.contains(e.target) && !lock.contains(e.target)) closeSite(); });
@@ -502,6 +627,8 @@ window.__nn = m => {
   else if(m.type === 'focusFind'){ fq.focus(); fq.select(); }
   else if(m.type === 'findResult'){ showCount(m.count, m.active); }
   else if(m.type === 'wsEdit'){ openWsModal(m.id || 0); }
+  else if(m.type === 'closeDrops'){ closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closeVpn(); closeEng(); closePal(false); }
+  else if(m.type === 'togglePalette'){ if(palOpen) closePal(true); else openPal(m.data || {}); }
 };
 
 // ---- drag to reorder tabs ---------------------------------------------------------------
@@ -589,14 +716,14 @@ function closeSug(){
   clearTimeout(sugTimer); sugReq++;
   if(!sugOpen) return;
   sugOpen = false; sugSel = -1; sugItems = []; sug.classList.remove('on'); sug.textContent = '';
-  if(sugNeed){ sugNeed = 0; send('dropdown', 0); }
+  if(sugNeed){ sugNeed = 0; syncDrop(0); }
 }
 function pick(i){
   const u = i < 0 ? toUrl(sugTyped) : sugItems[i].url;
   if(u){ closeSug(); editing = false; url.blur(); send('navigate', u); }
 }
 function renderSug(){
-  closeSite(); closeBmDrop();
+  closeSite(); closeBmDrop(); closePal(false); closeVpn(); closeEng();
   sug.textContent = '';
   const row = (cls, icon, title, sub, i) => {
     const d = document.createElement('div'); d.className = 'sg ' + cls + (i === sugSel ? ' sel' : '');
@@ -609,14 +736,14 @@ function renderSug(){
   };
   const typed = sugTyped.trim();
   const target = toUrl(typed);
-  const isSearch = target && target.startsWith(state.search || 'https://www.google.com/search?q=');
-  row('q', '>>', typed, isSearch ? 'search the web' : 'go to this address', -1);
+  const isSearch = target && target === buildSearchUrl(state.search, typed);
+  row('q', '>>', typed, isSearch ? ('search with ' + (state.searchName || 'search')) : 'go to this address', -1);
   sugItems.forEach((s, i) => row(s.bookmark ? 'bm' : '', s.bookmark ? '★' : '⏱', s.title || bareUrl(s.url), s.title ? bareUrl(s.url) : '', i));
   const r =$('#addr').getBoundingClientRect();
   sug.style.left = r.left + 'px'; sug.style.width = r.width + 'px'; sug.style.top = r.bottom + 'px';
   sug.classList.add('on'); sugOpen = true;
   const need = Math.ceil(sug.getBoundingClientRect().bottom) + 8;
-  if(need !== sugNeed){ sugNeed = need; send('dropdown', need, Math.floor(r.left), Math.ceil(r.right)); }   // clipped to the list: the page shows beside it
+  if(need !== sugNeed){ sugNeed = need; syncDrop(need, Math.floor(r.left), Math.ceil(r.right)); }   // clipped to the list: the page shows beside it
 }
 // "git" -> "hub.com/user" when the best suggestion starts with what was typed
 function completion(q, best){
@@ -660,7 +787,7 @@ function closeBmDrop(){
   bmOpen = false; bmDrop.classList.remove('on'); bmDrop.textContent = '';
   if(bmAnchor){ bmAnchor.classList.remove('open'); bmAnchor = null; }
   bmPathStack = [];
-  if(bmNeed){ bmNeed = 0; send('dropdown', 0); }
+  if(bmNeed){ bmNeed = 0; syncDrop(0); }
 }
 
 function makeBmBtn(item){
@@ -732,7 +859,7 @@ function renderBmBar(){
 }
 
 function showBmDropList(anchor, items, canBack){
-  closeSug(); closeSite();
+  closeSug(); closeSite(); closePal(false); closeVpn(); closeEng();
   if(bmAnchor && bmAnchor !== anchor) bmAnchor.classList.remove('open');
   bmAnchor = anchor; bmAnchor.classList.add('open');
   bmDrop.textContent = '';
@@ -776,7 +903,7 @@ function showBmDropList(anchor, items, canBack){
   bmDrop.classList.add('on'); bmOpen = true;
   const need = Math.ceil(bmDrop.getBoundingClientRect().bottom) + 8;
   bmNeed = need;
-  send('dropdown', need, Math.floor(left), Math.ceil(left + w));
+  syncDrop(need, Math.floor(left), Math.ceil(left + w));
 }
 
 function openBmFolder(anchor, stack){
@@ -815,11 +942,11 @@ function closeWsModal(){
   wsModalOpen = false;
   wsModal.classList.remove('on');
   wsModal.innerHTML = '';
-  send('dropdown', 0);
+  syncDrop(0);
 }
 
 function openWsModal(id){
-  closeSug(); closeSite(); closeBmDrop();
+  closeSug(); closeSite(); closeBmDrop(); closePal(false); closeVpn(); closeEng();
   const list = state.workspaces || [];
   const existing = id ? list.find(w => w.id === id) : null;
   let selIcon = existing ? existing.icon : WS_ICONS[list.length % WS_ICONS.length];
@@ -882,7 +1009,7 @@ function openWsModal(id){
   wsModalOpen = true;
   wsModal.classList.add('on');
   const need = Math.ceil(wsModal.getBoundingClientRect().bottom) + 8;
-  send('dropdown', need, Math.floor(left), Math.ceil(left + 292));
+  syncDrop(need, Math.floor(left), Math.ceil(left + 292));
   setTimeout(() => { inp.focus(); inp.select(); }, 0);
 }
 
@@ -893,9 +1020,446 @@ window.addEventListener('blur', closeWsModal);
 
 // The host resizes this window itself to show the list, so only a change of width closes it.
 let lastW = window.innerWidth;
-window.addEventListener('resize', () => { if(window.innerWidth !== lastW){ lastW = window.innerWidth; closeSug(); closeSite(); closeBmDrop(); closeWsModal(); layoutBmBar(); } });
+window.addEventListener('resize', () => { if(window.innerWidth !== lastW){ lastW = window.innerWidth; closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closePal(false); closeVpn(); closeEng(); layoutBmBar(); } });
 
-url.addEventListener('focus', () => { closeSite(); editing = true; setTimeout(() => url.select(), 0); });
+// ---- Built-in Proxy / Tunnel popover ---------------------------------------------------
+const vpnBtn = $('#vpnBtn'), vpnPop = $('#vpnPop');
+let vpnOpen = false, vpnNeed = 0;
+
+function activeProxy(){
+  const px = state.proxy || {enabled:false, checking:false, error:'', activeId:0, noWebRtcLeak:true, profiles:[]};
+  const list = px.profiles || [];
+  const cur = list.find(p => p.id === px.activeId) || list[0] || null;
+  return { px, list, cur };
+}
+
+function updateVpnBtn(){
+  const { px, cur } = activeProxy();
+  const on = !!(px.enabled && cur);
+  const chk = !!px.checking;
+  const hasErr = !!(!on && !chk && px.error);
+  vpnBtn.classList.toggle('on', on);
+  vpnBtn.classList.toggle('checking', chk);
+  vpnBtn.classList.toggle('err', hasErr);
+  $('#vpnTxt').textContent = chk ? 'PROXY...' : (on ? ('PROXY: ' + cur.name.slice(0, 10).toUpperCase()) : 'PROXY');
+  vpnBtn.title = chk
+    ? 'Checking proxy server...'
+    : on
+      ? ('Proxy tunnel ON (' + cur.scheme + '://' + cur.host + ':' + cur.port + ')')
+      : (hasErr ? px.error : 'Built-in Proxy Tunnel (OFF)');
+  if(vpnOpen) renderVpn();
+}
+
+function closeVpn(){
+  if(!vpnOpen) return;
+  vpnOpen = false; vpnPop.classList.remove('on'); vpnPop.textContent = '';
+  if(vpnNeed){ vpnNeed = 0; syncDrop(0); }
+}
+
+function renderVpn(){
+  const { px, list, cur } = activeProxy();
+  const on = !!(px.enabled && cur);
+  const chk = !!px.checking;
+  vpnPop.textContent = '';
+
+  const hd = document.createElement('div'); hd.className = 'vh';
+  const vt = document.createElement('span'); vt.className = 'vt'; vt.textContent = 'PROXY // TUNNEL';
+  const vx = document.createElement('button'); vx.className = 'vx'; vx.textContent = '\u2715'; vx.onclick = closeVpn;
+  hd.append(vt, vx);
+  vpnPop.appendChild(hd);
+
+  const sw = document.createElement('button');
+  sw.className = 'vswitch' + (chk ? ' checking' : (on ? ' on' : ''));
+  sw.textContent = chk
+    ? 'CHECKING SERVER... (CANCEL)'
+    : on
+      ? 'TUNNEL CONNECTED (CLICK TO DISCONNECT)'
+      : (cur ? 'CONNECT PROXY TUNNEL' : 'NO SERVER CONFIGURED');
+  sw.disabled = !cur && !chk;
+  sw.onclick = () => send('proxy.toggle', (on || chk) ? '0' : '1');
+  vpnPop.appendChild(sw);
+
+  if(px.error){
+    const err = document.createElement('div'); err.className = 'verr';
+    err.textContent = px.error;
+    vpnPop.appendChild(err);
+  }
+
+  const ep = document.createElement('div'); ep.className = 'vep';
+  ep.textContent = cur
+    ? (cur.scheme + '://' + cur.host + ':' + cur.port + (cur.hasAuth ? ' [AUTH]' : ''))
+    : 'No proxy server configured. Add a SOCKS5/HTTPS proxy or local SSH/Tor tunnel in Settings.';
+  vpnPop.appendChild(ep);
+
+  if(list.length){
+    const lbl = document.createElement('div'); lbl.className = 'vlbl'; lbl.textContent = 'SERVER PROFILES';
+    vpnPop.appendChild(lbl);
+    const box = document.createElement('div'); box.className = 'vlist';
+    list.forEach(p => {
+      const b = document.createElement('button');
+      b.className = 'vp' + (p.id === px.activeId ? ' on' : '');
+      const vn = document.createElement('span'); vn.className = 'vn'; vn.textContent = p.name;
+      const vs = document.createElement('span'); vs.className = 'vs'; vs.textContent = p.scheme.toUpperCase() + ' :' + p.port;
+      b.append(vn, vs);
+      b.onclick = () => send('proxy.select', p.id);
+      box.appendChild(b);
+    });
+    vpnPop.appendChild(box);
+  }
+
+  const wrow = document.createElement('div'); wrow.className = 'vwrow';
+  const wlab = document.createElement('span'); wlab.textContent = 'WebRTC IP Leak Guard';
+  const wtog = document.createElement('button'); wtog.className = 'vwtog' + (px.noWebRtcLeak ? ' on' : '');
+  wtog.textContent = px.noWebRtcLeak ? 'ON' : 'OFF';
+  wtog.onclick = () => send('proxy.webrtc', px.noWebRtcLeak ? '0' : '1');
+  wrow.append(wlab, wtog);
+  vpnPop.appendChild(wrow);
+
+  const note = document.createElement('div'); note.className = 'vnote';
+  note.textContent = 'Routes NeonNet browser traffic only. Other Windows apps keep their normal connection.';
+  vpnPop.appendChild(note);
+
+  const ft = document.createElement('div'); ft.className = 'vft';
+  const mgr = document.createElement('button'); mgr.textContent = 'MANAGE PROFILES';
+  mgr.onclick = () => { closeVpn(); send('opentab', NN_BASE + 'settings.html#proxy'); };
+  ft.appendChild(mgr);
+  vpnPop.appendChild(ft);
+
+  const r = vpnBtn.getBoundingClientRect();
+  const w = 336;
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+  vpnPop.style.left = left + 'px';
+  vpnPop.style.top = (r.bottom + 4) + 'px';
+  vpnPop.classList.add('on');
+  const need = Math.ceil(vpnPop.getBoundingClientRect().bottom) + 8;
+  if(need !== vpnNeed){ vpnNeed = need; syncDrop(need, Math.floor(left), Math.ceil(left + w)); }
+}
+
+vpnBtn.onclick = () => {
+  if(vpnOpen) closeVpn();
+  else { closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closePal(false); closeEng(); vpnOpen = true; renderVpn(); }
+};
+document.addEventListener('mousedown', e => { if(vpnOpen && !vpnPop.contains(e.target) && !vpnBtn.contains(e.target)) closeVpn(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && vpnOpen){ e.preventDefault(); closeVpn(); } });
+window.addEventListener('blur', closeVpn);
+
+// ---- Search Engine Selector ----------------------------------------------------------
+const engBtn = $('#engBtn'), engTxt = $('#engTxt'), engPop = $('#engPop');
+let engOpen = false, engNeed = 0;
+
+function updateEngBtn(){
+  const name = state.searchName || 'Google';
+  engTxt.textContent = name.toUpperCase();
+  engBtn.title = 'Search engine: ' + name + ' (click to switch)';
+  if(engOpen) renderEng();
+}
+function closeEng(){
+  if(!engOpen) return;
+  engOpen = false; engBtn.classList.remove('open');
+  engPop.classList.remove('on'); engPop.textContent = '';
+  if(engNeed){ engNeed = 0; syncDrop(0); }
+}
+function renderEng(){
+  engPop.textContent = '';
+  const hd = document.createElement('div'); hd.className = 'eh';
+  const tt = document.createElement('span'); tt.className = 'et'; tt.textContent = 'SEARCH ENGINE';
+  hd.appendChild(tt);
+  engPop.appendChild(hd);
+
+  const list = document.createElement('div'); list.className = 'elist';
+  const engines = Array.isArray(state.engines) ? state.engines : [];
+  for(const e of engines){
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ep' + (e.id === state.searchId ? ' on' : '');
+    const nm = document.createElement('span'); nm.className = 'en'; nm.textContent = e.name;
+    b.appendChild(nm);
+    if(e.custom){
+      const cc = document.createElement('span'); cc.className = 'ec'; cc.textContent = 'CUSTOM';
+      b.appendChild(cc);
+    }
+    b.onclick = () => { send('engine.select', e.id); closeEng(); url.focus(); };
+    list.appendChild(b);
+  }
+  engPop.appendChild(list);
+
+  const ft = document.createElement('div'); ft.className = 'eft';
+  const mgr = document.createElement('button'); mgr.type = 'button'; mgr.textContent = 'MANAGE / + ADD CUSTOM';
+  mgr.onclick = () => { closeEng(); send('opentab', NN_BASE + 'settings.html#sec-search'); };
+  ft.appendChild(mgr);
+  engPop.appendChild(ft);
+
+  const r = engBtn.getBoundingClientRect();
+  const w = 260;
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+  engPop.style.left = left + 'px';
+  engPop.style.top = (r.bottom + 6) + 'px';
+  engPop.classList.add('on');
+  engBtn.classList.add('open');
+  const need = Math.ceil(engPop.getBoundingClientRect().bottom) + 8;
+  if(need !== engNeed){ engNeed = need; syncDrop(need, Math.floor(left), Math.ceil(left + w)); }
+}
+engBtn.onclick = () => {
+  if(engOpen) closeEng();
+  else { closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closePal(false); closeVpn(); engOpen = true; renderEng(); }
+};
+document.addEventListener('mousedown', e => { if(engOpen && !engPop.contains(e.target) && !engBtn.contains(e.target)) closeEng(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && engOpen){ e.preventDefault(); closeEng(); } });
+window.addEventListener('blur', closeEng);
+
+// ---- Command Palette (Ctrl+Shift+P / Ctrl+Shift+K) -----------------------------------
+const pal = $('#pal'), palIn = $('#palIn'), palList = $('#palList');
+let palOpen = false, palData = {}, palItems = [], palSel = 0, palNeed = 0, palReq = 0, palTimer = 0, palSug = [], palOpenedAt = 0;
+
+function buildPalCommands(d){
+  const k = (id, fb) => (d.keys && id in d.keys) ? d.keys[id] : fb;
+  const cmds = [
+    { kind:'CMD', title:'New tab', sub:'Open a new tab in current workspace', aliases:'open tab baru', badge:k('newtab','Ctrl+T'), run:() => send('exec', 'newtab') },
+    { kind:'CMD', title:'Close current tab', sub:'Close the active tab', aliases:'tutup tab', badge:k('closetab','Ctrl+W'), run:() => send('exec', 'closetab') },
+    d.canReopen ? { kind:'CMD', title:'Reopen closed tab', sub:'Restore the most recently closed tab', aliases:'undo close restore tab', badge:k('reopen','Ctrl+Shift+T'), run:() => send('exec', 'reopen') } : null,
+    d.hasActive ? { kind:'CMD', title: d.activePinned ? 'Unpin current tab' : 'Pin current tab', sub:'Lock or unlock active tab on the left', aliases:'sematkan lock tab', badge: d.activePinned ? 'ON' : k('pin',''), badgeOn: !!d.activePinned, run:() => send('exec', 'pin') } : null,
+    d.hasActive ? { kind:'CMD', title: d.activeMuted ? 'Unmute current tab' : 'Mute current tab', sub:'Silence or restore audio on active tab', aliases:'silence audio sound suara bisu', badge: d.activeMuted ? 'MUTED' : k('mute',''), badgeOn: !!d.activeMuted, run:() => send('exec', 'mute') } : null,
+    d.canStar ? { kind:'CMD', title: d.starred ? 'Remove bookmark' : 'Bookmark this page', sub:'Save or remove current URL', aliases:'star favorite save page', badge:k('bookmark','Ctrl+D'), badgeOn: !!d.starred, run:() => send('exec', 'bookmark') } : null,
+    { kind:'CMD', title:'Toggle Force Dark Mode', sub:'Auto dark mode on light websites (Blink)', aliases:'dark theme night mode gelap', badge: d.forceDark ? 'ON' : (k('forcedark','') || 'OFF'), badgeOn: !!d.forceDark, run:() => send('exec', 'forcedark') },
+    { kind:'CMD', title:'Toggle Proxy Tunnel', sub: d.proxyName ? ('Profile: ' + d.proxyName) : 'Route NeonNet traffic via configured proxy', aliases:'vpn socks5 https tunnel proxy switch', badge: d.proxyOn ? 'ON' : (k('proxy','') || 'OFF'), badgeOn: !!d.proxyOn, run:() => send('exec', 'proxy') },
+    { kind:'CMD', title:'Toggle Block trackers & ads', sub:'EasyList / EasyPrivacy filter', aliases:'adblock adblocker privacy ublock filter iklan', badge: d.blockAds ? 'ON' : (k('blockads','') || 'OFF'), badgeOn: !!d.blockAds, run:() => send('exec', 'blockads') },
+    { kind:'CMD', title:'Toggle Scanlines', sub:'CRT visual overlay effect', aliases:'crt retro effect', badge: d.scan ? 'ON' : (k('scan','') || 'OFF'), badgeOn: !!d.scan, run:() => send('exec', 'scan') },
+    { kind:'CMD', title:'Toggle Bookmarks bar', sub:'Show or hide bookmarks strip', aliases:'favorites strip', badge:k('bookmarks_bar','Ctrl+Shift+B'), badgeOn: !!d.bookmarksBar, run:() => send('exec', 'bookmarks_bar') },
+    { kind:'CMD', title:'Toggle Performance panel', sub:'CPU, RAM limiter & network throttling', aliases:'ram cpu memory limiter network throttle fps', badge:k('perf','Ctrl+Shift+M'), badgeOn: !!d.perf, run:() => send('exec', 'perf') },
+    { kind:'CMD', title:'New workspace', sub:'Create a new workspace group', aliases:'create workspace group tab group', badge:'', run:() => setTimeout(() => openWsModal(0), 20) },
+    { kind:'CMD', title: d.incognito ? 'New incognito tab' : 'New incognito window', sub:'Browse without saving history or cookies', aliases:'private browsing secret mode samaran', badge:k('incognito','Ctrl+Shift+N'), run:() => send('exec', 'incognito') },
+    { kind:'CMD', title:'Settings', sub:'Search, DNS/DoH, theme accent, keybindings, proxy, security', aliases:'preferences options config pengaturan setelan', badge:k('settings','Ctrl+,'), run:() => send('exec', 'settings') },
+    { kind:'CMD', title:'Settings: Theme Accent & Colors', sub:'Change primary & secondary neon accent colors across NeonNet', aliases:'theme accent color neon pink cyan palette warna tema', badge:'OPEN', run:() => send('opentab', NN_BASE + 'settings.html#theme') },
+    { kind:'CMD', title:'Settings: Custom Keybindings', sub:'View and customize keyboard shortcuts', aliases:'shortcuts keybindings hotkeys keys tombol pintasan keyboard', badge:'OPEN', run:() => send('opentab', NN_BASE + 'settings.html#keybindings') },
+    { kind:'CMD', title:'Settings: DNS-over-HTTPS (DoH)', sub:'Encrypted DNS (Cloudflare, Google, Quad9, AdGuard, Custom)', aliases:'dns doh secure dns nameserver isp resolver', badge:'OPEN', run:() => send('opentab', NN_BASE + 'settings.html#doh') },
+    { kind:'CMD', title:'Settings: Proxy Tunnel', sub:'SOCKS5 / HTTPS proxy profiles, WebRTC leak guard', aliases:'vpn proxy socks5 http tunnel webrtc leak', badge:'OPEN', run:() => send('opentab', NN_BASE + 'settings.html#proxy') },
+    { kind:'CMD', title:'Settings: Search Engine', sub:'Default search engine & address bar', aliases:'google duckduckgo bing brave startpage default browser', badge:'OPEN', run:() => send('opentab', NN_BASE + 'settings.html#sec-search') },
+    { kind:'CMD', title:'Settings: Startup & Tabs', sub:'Restore session, new tab behavior, home page', aliases:'startup home session restore tabs', badge:'OPEN', run:() => send('opentab', NN_BASE + 'settings.html#sec-start') },
+    { kind:'CMD', title:'Settings: Privacy & Clear Data', sub:'Clear browsing data, cache, cookies, tracking protection', aliases:'clear cache cookies history hapus data privasi', badge:'OPEN', run:() => send('opentab', NN_BASE + 'settings.html#privacy') },
+    { kind:'CMD', title:'Settings: Passwords', sub:'Saved logins & password autofill', aliases:'password manager credentials login autofill sandi', badge:'OPEN', run:() => send('opentab', NN_BASE + 'settings.html#passwords') },
+    { kind:'CMD', title:'Settings: Site Permissions', sub:'Camera, microphone, notifications, location', aliases:'camera mic notification geolocation permissions izin', badge:'OPEN', run:() => send('opentab', NN_BASE + 'settings.html#permissions') },
+    { kind:'CMD', title:'Settings: Security & HTTPS-Only', sub:'HTTPS-only mode, ad blocker, DoH, proxy', aliases:'security ssl https only mode keamanan', badge:'OPEN', run:() => send('opentab', NN_BASE + 'settings.html#sec-ext') },
+    { kind:'CMD', title:'Settings: Scrolling & DevTools', sub:'Smooth scrolling, wheel distance, developer tools', aliases:'smooth scroll wheel animation devtools', badge:'OPEN', run:() => send('opentab', NN_BASE + 'settings.html#sec-scroll') },
+    { kind:'CMD', title:'Settings: Downloads & Appearance', sub:'Download folder, theme accent, dark mode, scanlines, look', aliases:'download folder theme appearance dark mode tampilan', badge:'OPEN', run:() => send('opentab', NN_BASE + 'settings.html#sec-look') },
+    { kind:'CMD', title:'Saved Passwords Manager', sub:'View, copy, or remove saved logins', aliases:'passwords vault credentials logins sandi', badge:'OPEN', run:() => send('opentab', NN_BASE + 'passwords.html') },
+    { kind:'CMD', title:'Bookmarks manager', sub:'Browse and organize saved bookmarks', aliases:'favorites saved links', badge:k('bookmarks','Ctrl+Shift+O'), run:() => send('exec', 'bookmarks') },
+    !d.incognito ? { kind:'CMD', title:'History', sub:'View browsing history', aliases:'riwayat visited pages recent', badge:k('history','Ctrl+H'), run:() => send('exec', 'history') } : null,
+    { kind:'CMD', title:'Downloads', sub:'Manage downloaded files', aliases:'unduhan files', badge:k('downloads','Ctrl+J'), run:() => send('exec', 'downloads') },
+    { kind:'CMD', title:'Extensions (Userscripts)', sub:'Manage .user.js scripts', aliases:'tampermonkey greasemonkey userscript plugins addons', badge:k('extensions','Ctrl+Shift+E'), run:() => send('exec', 'extensions') },
+    { kind:'CMD', title:'Find in page', sub:'Search text on current page', aliases:'search text cari', badge:k('find','Ctrl+F'), run:() => send('exec', 'find') },
+    { kind:'CMD', title:'Developer tools', sub:'Inspect page & console', aliases:'devtools inspect console network elements', badge:k('devtools','F12'), run:() => send('exec', 'devtools') },
+    { kind:'CMD', title:'Caret browsing', sub:'Navigate page text with cursor keys', aliases:'cursor keyboard text navigation', badge:k('caret','F7'), run:() => send('exec', 'caret') },
+    { kind:'CMD', title:'Toggle Fullscreen', sub:'Expand window to fill display', aliases:'layar penuh maximize', badge:k('fullscreen','F11'), run:() => send('exec', 'fullscreen') },
+    { kind:'CMD', title:'Zoom in', sub:'Increase page zoom', aliases:'scale size text perbesar', badge:k('zoomin','Ctrl++'), run:() => send('exec', 'zoomin') },
+    { kind:'CMD', title:'Zoom out', sub:'Decrease page zoom', aliases:'scale size text perkecil', badge:k('zoomout','Ctrl+-'), run:() => send('exec', 'zoomout') },
+    { kind:'CMD', title:'Reset zoom', sub:'Reset page zoom to 100%', aliases:'scale size text normal', badge:k('zoomreset','Ctrl+0'), run:() => send('exec', 'zoomreset') },
+    { kind:'CMD', title:'Print page', sub:'Open print dialog', aliases:'pdf cetak', badge:k('print','Ctrl+P'), run:() => send('exec', 'print') },
+    !d.incognito ? { kind:'CMD', title:'Check for updates', sub:'Check GitHub for newer NeonNet release', aliases:'upgrade version new release pembaruan', badge:'', run:() => send('exec', 'update_check') } : null,
+    { kind:'CMD', title:'User guide', sub:'Open NeonNet documentation', aliases:'help docs manual bantuan', badge:k('help','F1'), run:() => send('exec', 'help') },
+    { kind:'CMD', title:'About NeonNet', sub:'Show version & build information', aliases:'version build info tentang', badge:'', run:() => send('exec', 'about') },
+  ];
+  return cmds.filter(Boolean);
+}
+
+function palScoreToken(tok, t){
+  if(t.startsWith(tok)) return 4;
+  if((' ' + t).includes(' ' + tok)) return 3;
+  if(t.includes(tok)) return 2;
+  let ti = 0;
+  for(let qi = 0; qi < tok.length; qi++){
+    ti = t.indexOf(tok[qi], ti);
+    if(ti < 0) return 0;
+    ti++;
+  }
+  return 1;
+}
+
+function palScore(q, text){
+  if(!q) return 1;
+  const t = (text || '').toLowerCase();
+  const toks = q.split(/\s+/).filter(Boolean);
+  if(toks.length <= 1) return palScoreToken(q, t);
+  let sum = 0;
+  for(const tok of toks){
+    const s = palScoreToken(tok, t);
+    if(!s) return 0;
+    sum += s;
+  }
+  return sum / toks.length;
+}
+
+function layoutPal(){
+  if(!palOpen) return;
+  const barEl = state.find ? $('#find') : state.bookmarksBar ? $('#bmbar') : $('#nav');
+  const top = Math.ceil(barEl.getBoundingClientRect().bottom) + 10;
+  const w = Math.min(600, Math.max(280, window.innerWidth - 32));
+  const left = Math.max(8, Math.round((window.innerWidth - w) / 2));
+  pal.style.left = left + 'px';
+  pal.style.top = top + 'px';
+  pal.style.width = w + 'px';
+  const need = Math.min(556, Math.ceil(pal.getBoundingClientRect().bottom) + 10);
+  if(need !== palNeed){ palNeed = need; syncDrop(need, Math.floor(left), Math.ceil(left + w)); }
+}
+
+function renderPal(){
+  if(!palOpen) return;
+  const raw = palIn.value.trim();
+  const cmdOnly = raw.startsWith('>');
+  const q = (cmdOnly ? raw.slice(1) : raw).trim().toLowerCase();
+  const out = [];
+
+  if(!cmdOnly){
+    const tabs = palData.tabs || [];
+    const tabMatches = [];
+    for(const t of tabs){
+      const sc = palScore(q, (t.title || '') + ' ' + (t.url || '') + ' ' + (t.wsName || ''));
+      if(!sc) continue;
+      const flags = [];
+      if(t.wsName) flags.push(t.wsName);
+      if(t.pinned) flags.push('PIN');
+      if(t.muted) flags.push('MUTED');
+      else if(t.audible) flags.push('AUDIO');
+      tabMatches.push({
+        score: sc + (t.active ? 0.5 : 0),
+        kind:'TAB', cls:'tab', title: t.title || 'New tab', sub: shownUrl(t.url) || 'neonnet://newtab',
+        badge: t.active ? 'ACTIVE' : flags.join(' · '), badgeOn: t.active,
+        run: () => send('select', t.id)
+      });
+    }
+    tabMatches.sort((a, b) => b.score - a.score);
+    out.push(...tabMatches.slice(0, q ? 8 : 5));
+
+    for(const w of (state.workspaces || [])){
+      const sc = palScore(q, w.name + ' workspace');
+      if(!sc || (!q && w.id === state.activeWs)) continue;
+      out.push({
+        kind:'WS', cls:'ws', title: 'Workspace: ' + w.name, sub: (w.count || 0) + ' tab' + (w.count === 1 ? '' : 's'),
+        badge: w.id === state.activeWs ? 'CURRENT' : 'SWITCH', badgeOn: w.id === state.activeWs,
+        run: () => send('wsswitch', w.id)
+      });
+    }
+  }
+
+  const cmdMatches = [];
+  for(const c of buildPalCommands(palData)){
+    const scAll = palScore(q, c.title + ' ' + c.sub + ' ' + (c.aliases || ''));
+    if(!scAll) continue;
+    const scTitle = q ? palScore(q, c.title) * 1.2 : 1;
+    cmdMatches.push({ score: Math.max(scTitle, scAll), kind:'CMD', cls:'cmd', title: c.title, sub: c.sub, badge: c.badge, badgeOn: c.badgeOn, run: c.run });
+  }
+  cmdMatches.sort((a, b) => b.score - a.score);
+  out.push(...cmdMatches.slice(0, cmdOnly ? 24 : (q ? 12 : 7)));
+
+  if(!cmdOnly && q.length >= 2){
+    for(const s of palSug){
+      out.push({
+        kind: s.bookmark ? 'BM' : 'HIS', cls: s.bookmark ? 'bm' : 'his',
+        title: s.title || bareUrl(s.url), sub: bareUrl(s.url), badge: 'OPEN',
+        run: () => send('navigate', s.url)
+      });
+    }
+  }
+
+  if(!cmdOnly && q && !/^>/.test(raw)){
+    const u = toUrl(raw);
+    if(u) out.push({ kind:'WEB', cls:'tab', title: raw, sub: u, badge:'GO', run: () => send('navigate', u) });
+  }
+
+  palItems = out;
+  if(palSel >= palItems.length) palSel = Math.max(0, palItems.length - 1);
+  palList.textContent = '';
+  if(!palItems.length){
+    const em = document.createElement('div'); em.className = 'pal-empty'; em.textContent = 'NO MATCHING TABS OR COMMANDS';
+    palList.appendChild(em);
+  } else {
+    palItems.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'pi' + (i === palSel ? ' sel' : '');
+      const pk = document.createElement('span'); pk.className = 'pk ' + it.cls; pk.textContent = it.kind;
+      const pm = document.createElement('div'); pm.className = 'pm';
+      const pt = document.createElement('div'); pt.className = 'pt'; pt.textContent = it.title;
+      const ps = document.createElement('div'); ps.className = 'ps'; ps.textContent = it.sub || '';
+      pm.append(pt, ps);
+      row.append(pk, pm);
+      if(it.badge){
+        const pr = document.createElement('span'); pr.className = 'pr' + (it.badgeOn ? ' on' : ''); pr.textContent = it.badge;
+        row.appendChild(pr);
+      }
+      row.onmousedown = e => { e.preventDefault(); execPal(i); };
+      palList.appendChild(row);
+    });
+  }
+  layoutPal();
+  const selEl = palList.children[palSel];
+  if(selEl && selEl.scrollIntoView) selEl.scrollIntoView({block:'nearest'});
+}
+
+function closePal(focusPg){
+  clearTimeout(palTimer); palReq++;
+  if(!palOpen) return;
+  palOpen = false; palItems = []; palSug = []; palSel = 0;
+  pal.classList.remove('on'); palList.textContent = ''; palIn.value = '';
+  $('#palb').classList.remove('on');
+  if(palNeed){ palNeed = 0; syncDrop(0); }
+  if(focusPg) send('focusPage');
+}
+
+function execPal(i){
+  const it = palItems[i];
+  if(!it) return;
+  closePal(false);
+  it.run();
+}
+
+function openPal(data){
+  closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closeVpn(); closeEng();
+  palData = data || {};
+  palSug = []; palSel = 0;
+  palIn.value = '';
+  palOpen = true;
+  palOpenedAt = performance.now();
+  pal.classList.add('on');
+  $('#palb').classList.add('on');
+  renderPal();
+  palIn.focus(); palIn.select();
+  setTimeout(() => { if(palOpen){ palIn.focus(); palIn.select(); } }, 0);
+}
+
+palIn.addEventListener('input', () => {
+  palSel = 0; clearTimeout(palTimer); palSug = [];
+  renderPal();
+  const raw = palIn.value.trim();
+  if(!raw || raw.startsWith('>') || raw.length < 2) return;
+  const my = ++palReq;
+  palTimer = setTimeout(() => {
+    fetch('/suggest?q=' + encodeURIComponent(raw), {cache:'no-store'}).then(r => r.json()).then(list => {
+      if(!palOpen || my !== palReq) return;
+      palSug = Array.isArray(list) ? list : [];
+      renderPal();
+    }).catch(() => {});
+  }, 55);
+});
+
+palIn.addEventListener('keydown', e => {
+  if(e.key === 'ArrowDown'){ e.preventDefault(); if(palItems.length){ palSel = (palSel + 1) % palItems.length; renderPal(); } }
+  else if(e.key === 'ArrowUp'){ e.preventDefault(); if(palItems.length){ palSel = (palSel - 1 + palItems.length) % palItems.length; renderPal(); } }
+  else if(e.key === 'Enter'){ e.preventDefault(); execPal(palSel); }
+  else if(e.key === 'Escape'){ e.preventDefault(); closePal(true); }
+});
+
+$('#palb').onclick = () => { if(palOpen) closePal(true); else send('palette'); };
+document.addEventListener('mousedown', e => { if(palOpen && !pal.contains(e.target) && !$('#palb').contains(e.target)) closePal(false); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && palOpen){ e.preventDefault(); closePal(true); } });
+window.addEventListener('blur', () => {
+  if(!palOpen) return;
+  if(performance.now() - palOpenedAt < 250){
+    setTimeout(() => { if(palOpen && document.hasFocus()){ palIn.focus(); palIn.select(); } }, 20);
+    return;
+  }
+  closePal(false);
+});
+
+url.addEventListener('focus', () => { closeSite(); closeEng(); editing = true; setTimeout(() => url.select(), 0); });
 url.addEventListener('blur', () => { editing = false; closeSug(); url.value = shownUrl(state.url); });
 url.addEventListener('keydown', e => {
   if(e.key === 'Enter'){ e.preventDefault(); go(); }
