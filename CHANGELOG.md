@@ -2,6 +2,19 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] - 2026-11-14
+
+### Features
+- **Theme Accent:** choose or customize the neon accent color in **Settings**, synced across the browser chrome and internal UI pages.
+- **Custom Keybindings:** view and remap keyboard shortcuts in **Settings**, applied across browser chrome, tabs, and DevTools.
+- **New Tab Scratchpad & Speed Dial:** persistent local quick-notes scratchpad and customizable Speed Dial tiles on `neonnet://newtab`.
+- **Custom Search Engines & Address Bar Engine Selector:** add, edit, and remove custom search engines (`%s` / `{query}`) in **Settings**, and switch the active search engine directly from the address bar dropdown.
+- **Command Palette Alias Indexing:** expanded keyword aliases (such as `dns`, settings, and action terms) for faster command and settings discovery.
+
+### Fixes
+- **Anti-white-flash & dark child windows:** override Chromium child HWND background brushes and keep the Performance panel hidden until loaded so opening popups or panels no longer flashes white.
+- **Workspace & popup focus handling:** close open chrome popups (including Edit Workspace) when focus moves into a tab, and ensure global shortcuts (such as Command Palette) work reliably regardless of whether focus is in a tab or chrome.
+
 ## [1.7.0] - 2026-11-13
 
 ### Features
