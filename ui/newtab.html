@@ -4,59 +4,109 @@
 <meta charset="utf-8">
 <title>NEW TAB</title>
 <style>
-:root{--bg:#12062c;--bg2:#0a0420;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0}
+:root{--bg:#12062c;--bg2:#0a0420;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0;--green:#35ffa0}
 :root.incog{--pink:#35ffa0;--pink2:#9dffd0}
-#ghost{display:none;width:min(620px,100%);margin-top:16px;padding:12px 16px;border:1px solid var(--pink);background:rgba(10,4,32,.92);
-  color:#e8d8ff;line-height:1.6;font-size:12px}
+#ghost{display:none;width:min(940px,100%);margin-top:14px;padding:10px 14px;border:1px solid var(--pink);background:rgba(10,4,32,.92);
+  color:#e8d8ff;line-height:1.55;font-size:12px}
 #ghost b{color:var(--pink)}
 :root.incog #ghost{display:block}
 *{box-sizing:border-box}
-html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
-#sky{position:absolute;inset:0 0 30% 0;background:linear-gradient(#12062c 0%,#2a0f55 55%,#5a1670 100%);overflow:hidden}
+html,body{margin:0;height:100%;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
+body{overflow-x:hidden;overflow-y:auto}
+#sky{position:fixed;inset:0 0 30% 0;background:linear-gradient(#12062c 0%,#2a0f55 55%,color-mix(in srgb,var(--pink) 24%,#12062c) 100%);overflow:hidden;z-index:0}
 #sun{position:absolute;left:50%;bottom:-80px;width:220px;height:220px;margin-left:-110px;border-radius:50%;
-  filter:drop-shadow(0 0 24px rgba(255,46,151,.55));
-  background:linear-gradient(#ffd600 0%,#ff9a3c 45%,#ff2e97 100%);
+  filter:drop-shadow(0 0 24px color-mix(in srgb,var(--pink) 55%,transparent));
+  background:linear-gradient(var(--yellow) 0%,#ff9a3c 45%,var(--pink) 100%);
   -webkit-mask:linear-gradient(#000 0 50%,transparent 50% 53%,#000 53% 60%,transparent 60% 64%,#000 64% 70%,transparent 70% 75%,#000 75% 80%,transparent 80% 86%,#000 86%);
   mask:linear-gradient(#000 0 50%,transparent 50% 53%,#000 53% 60%,transparent 60% 64%,#000 64% 70%,transparent 70% 75%,#000 75% 80%,transparent 80% 86%,#000 86%)}
-#floor{position:absolute;left:0;right:0;bottom:0;height:30%;background:var(--bg2);perspective:180px;perspective-origin:50% 0;overflow:hidden;
-  border-top:2px solid var(--pink);box-shadow:0 -6px 24px rgba(255,46,151,.45)}
+#floor{position:fixed;left:0;right:0;bottom:0;height:30%;background:var(--bg2);perspective:180px;perspective-origin:50% 0;overflow:hidden;z-index:0;
+  border-top:2px solid var(--pink);box-shadow:0 -6px 24px color-mix(in srgb,var(--pink) 45%,transparent)}
 #grid{position:absolute;left:-150%;right:-150%;top:-48px;height:calc(300% + 48px);transform:rotateX(58deg) translate3d(0,0,0);transform-origin:50% 48px;
   will-change:transform;
   background-image:
-    linear-gradient(90deg,rgba(255,46,151,.9) 2px,transparent 2px),
-    linear-gradient(0deg,rgba(255,46,151,.9) 2px,transparent 2px);
+    linear-gradient(90deg,color-mix(in srgb,var(--pink) 90%,transparent) 2px,transparent 2px),
+    linear-gradient(0deg,color-mix(in srgb,var(--pink) 90%,transparent) 2px,transparent 2px);
   background-size:48px 48px;
   animation:run 1.2s linear infinite}
 html.idle #grid{animation-play-state:paused}
 @media (prefers-reduced-motion:reduce){#grid{animation:none}}
 #floor::after{content:"";position:absolute;inset:0;background:linear-gradient(var(--bg2) 0%,rgba(10,4,32,.6) 18%,transparent 45%);pointer-events:none}
 @keyframes run{from{transform:rotateX(58deg) translate3d(0,0,0)}to{transform:rotateX(58deg) translate3d(0,48px,0)}}
-#scan{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.16) 2px 3px)}
-#hud{position:absolute;top:14px;left:18px;right:18px;display:flex;justify-content:space-between;color:var(--muted);z-index:3}
+#scan{position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.16) 2px 3px);z-index:4}
+#hud{position:relative;display:flex;justify-content:space-between;padding:12px 18px 0;color:var(--muted);z-index:2}
 #hud b{color:var(--yellow);font-weight:normal}
 #clock{color:var(--cyan)}
-main{position:absolute;left:0;right:0;top:9%;display:flex;flex-direction:column;align-items:center;z-index:2;padding:0 16px}
-h1{margin:0;font:italic 900 clamp(30px,6vw,64px) Impact,"Arial Black",sans-serif;letter-spacing:4px;color:var(--cyan);
-  text-shadow:3px 3px 0 var(--pink),0 0 18px rgba(0,229,255,.55)}
-.sub{margin:8px 0 20px;color:var(--yellow);letter-spacing:3px}
-form{width:min(620px,100%);display:flex;border:1px solid var(--cyan);background:rgba(10,4,32,.92);
+main{position:relative;display:flex;flex-direction:column;align-items:center;z-index:2;padding:20px 18px 28px}
+h1{margin:0;font:italic 900 clamp(28px,5.2vw,58px) Impact,"Arial Black",sans-serif;letter-spacing:4px;color:var(--cyan);
+  text-shadow:3px 3px 0 var(--pink),0 0 18px color-mix(in srgb,var(--cyan) 55%,transparent)}
+.sub{margin:6px 0 16px;color:var(--yellow);letter-spacing:3px}
+form{width:min(640px,100%);display:flex;border:1px solid var(--cyan);background:rgba(10,4,32,.92);
   clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px))}
 form span{color:var(--pink);padding:0 8px 0 14px;align-self:center}
-#q{flex:1;height:46px;background:none;border:0;outline:0;color:var(--cyan);font:15px "Cascadia Mono","Consolas",monospace}
+#q{flex:1;height:44px;background:none;border:0;outline:0;color:var(--cyan);font:15px "Cascadia Mono","Consolas",monospace}
 #q::placeholder{color:#5a4a8a}
 form button{border:0;background:var(--pink);color:var(--bg);font:bold 14px "Cascadia Mono","Consolas",monospace;padding:0 22px;cursor:pointer}
 form button:hover{background:var(--cyan)}
-#links{display:grid;grid-template-columns:repeat(3,minmax(0,170px));gap:10px;margin-top:18px}
-#links a{display:block;padding:9px 12px;border:1px solid var(--cyan);color:var(--cyan);background:rgba(10,4,32,.85);text-decoration:none;
+
+#board{width:min(940px,100%);display:grid;grid-template-columns:1.35fr 1fr;gap:14px;margin-top:18px;align-items:stretch}
+.panel{background:rgba(10,4,32,.88);border:1px solid rgba(138,111,192,.45);border-top:2px solid var(--cyan);padding:12px 14px;
+  display:flex;flex-direction:column;min-width:0}
+.panel.pad-panel{border-top-color:var(--pink)}
+.ph{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.ptit{color:var(--yellow);font-size:11px;font-weight:bold;letter-spacing:1.5px;white-space:nowrap}
+.pacts{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pbtn{height:22px;padding:0 8px;border:1px solid rgba(138,111,192,.55);background:var(--bg2);color:var(--cyan);font:inherit;font-size:10px;
+  letter-spacing:.8px;cursor:pointer}
+.pbtn:hover{border-color:var(--cyan);background:var(--cyan);color:var(--bg)}
+.pbtn.on{border-color:var(--pink);color:var(--bg);background:var(--pink)}
+.pbtn.dim{color:var(--muted)}
+.pbtn.dim:hover{border-color:var(--pink);background:var(--pink);color:var(--bg)}
+.pstat{font-size:10px;color:var(--green);letter-spacing:.8px}
+
+#links{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.dial-tile{position:relative;display:flex;flex-direction:column;border:1px solid var(--cyan);background:rgba(18,6,44,.86);
   clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
-#links a span{color:var(--yellow);margin-right:8px}
-#links a:hover{background:var(--cyan);color:var(--bg)}
-#links a:hover span{color:var(--bg)}
-#links a{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-#more{margin-top:14px;display:flex;gap:18px}
+.dial-link{display:block;padding:9px 10px;color:var(--cyan);text-decoration:none;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px}
+.dial-link span{color:var(--yellow);margin-right:7px}
+.dial-tile:hover{background:var(--cyan)}
+.dial-tile:hover .dial-link,.dial-tile:hover .dial-link span{color:var(--bg)}
+.dial-ctl{display:none;gap:3px;padding:0 6px 6px;justify-content:flex-end}
+body.editing .dial-ctl{display:flex}
+body.editing .dial-tile:hover{background:rgba(18,6,44,.95)}
+body.editing .dial-tile:hover .dial-link{color:var(--cyan)}
+body.editing .dial-tile:hover .dial-link span{color:var(--yellow)}
+.dial-ctl button{border:1px solid rgba(138,111,192,.6);background:var(--bg2);color:#e8d8ff;font:inherit;font-size:10px;padding:1px 5px;cursor:pointer}
+.dial-ctl button:hover{border-color:var(--pink);color:var(--pink)}
+.dial-empty{grid-column:1 / -1;padding:18px;text-align:center;border:1px dashed var(--muted);color:var(--muted);font-size:12px}
+
+#note{flex:1;min-height:142px;width:100%;resize:vertical;background:rgba(18,6,44,.75);border:1px solid rgba(138,111,192,.45);
+  color:#e8d8ff;padding:10px;font:12px/1.55 "Cascadia Mono","Consolas",monospace;outline:0}
+#note:focus{border-color:var(--pink)}
+#note::placeholder{color:var(--muted)}
+
+#more{margin-top:16px;display:flex;gap:18px;flex-wrap:wrap;justify-content:center}
 #more a{color:var(--muted);text-decoration:none;letter-spacing:1px}
 #more a:hover{color:var(--yellow)}
-@media (max-width:620px){#links{grid-template-columns:repeat(2,minmax(0,170px))}}
+
+#dialModal{position:fixed;inset:0;z-index:10;display:none;align-items:center;justify-content:center;background:rgba(5,2,14,.72)}
+#dialModal.on{display:flex}
+.dbox{width:min(380px,calc(100vw - 32px));background:var(--bg2);border:1px solid var(--cyan);border-top:2px solid var(--pink);
+  padding:16px;box-shadow:0 16px 40px rgba(0,0,0,.8)}
+.dbox h3{margin:0 0 12px;color:var(--yellow);font-size:13px;letter-spacing:1.5px}
+.dbox label{display:block;color:var(--muted);font-size:11px;margin:8px 0 4px}
+.dbox input{width:100%;height:34px;padding:0 10px;background:var(--bg);border:1px solid rgba(138,111,192,.55);color:var(--cyan);
+  font:inherit;outline:0}
+.dbox input:focus{border-color:var(--cyan)}
+.derr{min-height:16px;color:var(--pink2);font-size:11px;margin-top:6px}
+.dacts{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.dacts button{height:30px;padding:0 14px;border:1px solid var(--cyan);background:var(--bg);color:var(--cyan);font:inherit;font-size:11px;font-weight:bold;cursor:pointer}
+.dacts button.prim{background:var(--pink);border-color:var(--pink);color:var(--bg)}
+.dacts button:hover{opacity:.9}
+
+@media (max-width:780px){
+  #board{grid-template-columns:1fr}
+  #links{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 </style>
 </head>
 <body>
@@ -71,68 +121,104 @@ form button:hover{background:var(--cyan)}
     <input id="q" spellcheck="false" placeholder="search or enter address" autofocus>
     <button>GO</button>
   </form>
-  <div id="links">
-    <a href="https://www.youtube.com"><span>01</span>YOUTUBE</a>
-    <a href="https://github.com"><span>02</span>GITHUB</a>
-    <a href="https://en.wikipedia.org"><span>03</span>WIKIPEDIA</a>
-    <a href="https://www.reddit.com"><span>04</span>REDDIT</a>
-    <a href="https://mail.google.com"><span>05</span>GMAIL</a>
-    <a href="https://www.google.com/maps"><span>06</span>MAPS</a>
-  </div>
+
+  <section id="board">
+    <div class="panel" id="dialCard">
+      <div class="ph">
+        <span class="ptit">// SPEED DIAL</span>
+        <div class="pacts">
+          <button class="pbtn" type="button" id="dialAdd">+ ADD</button>
+          <button class="pbtn" type="button" id="dialEdit">EDIT</button>
+          <button class="pbtn dim" type="button" id="dialFromBm" style="display:none">FROM BOOKMARKS</button>
+          <button class="pbtn dim" type="button" id="dialReset" style="display:none">RESET</button>
+        </div>
+      </div>
+      <div id="links"></div>
+    </div>
+
+    <div class="panel pad-panel" id="padCard">
+      <div class="ph">
+        <span class="ptit">// QUICK NOTES</span>
+        <div class="pacts">
+          <span class="pstat" id="noteStat">LOCAL</span>
+          <button class="pbtn" type="button" id="noteCopy">COPY</button>
+          <button class="pbtn dim" type="button" id="noteClear">CLEAR</button>
+        </div>
+      </div>
+      <textarea id="note" spellcheck="false" placeholder="Paste temporary links, snippets, or quick notes here... (auto-saved locally)"></textarea>
+    </div>
+  </section>
+
   <div id="ghost">
     <b>&gt; GHOST MODE</b><br>
     NeonNet does not save your history, cookies or site data from this window, and forgets them when it closes.
-    Files you download and bookmarks stay where they are.<br>
+    Files you download and bookmarks stay where they are. Notes typed here stay in this incognito session only.<br>
     Websites, your network and your internet provider can still see where you go.
   </div>
   <div id="more"><a href="https://neonnet.ui/bookmarks.html">&#9733; BOOKMARKS</a><a href="https://neonnet.ui/history.html">&#9201; HISTORY</a><a href="https://neonnet.ui/downloads.html">&#11015; DOWNLOADS</a><a href="https://neonnet.ui/settings.html">&#9881; SETTINGS</a></div>
 </main>
+
+<div id="dialModal">
+  <div class="dbox">
+    <h3 id="dmTitle">ADD SPEED DIAL</h3>
+    <label for="dmName">TITLE</label>
+    <input id="dmName" maxlength="60" placeholder="e.g. GitHub">
+    <label for="dmUrl">URL</label>
+    <input id="dmUrl" spellcheck="false" autocomplete="off" placeholder="https://github.com">
+    <div class="derr" id="dmErr"></div>
+    <div class="dacts">
+      <button type="button" id="dmCancel">CANCEL</button>
+      <button type="button" class="prim" id="dmSave">SAVE</button>
+    </div>
+  </div>
+</div>
+
 <div id="scan"></div>
 <script>
+const $ = s => document.querySelector(s);
 let searchBase = 'https://www.google.com/search?q=';
 fetch('/api/settings', {cache:'no-store'}).then(r => r.json()).then(s => {
-  if(/^https:\/\//.test(s.searchUrl)) searchBase = s.searchUrl;
+  if(/^https?:\/\//.test(s.searchUrl)) searchBase = s.searchUrl;
   if(s.incognito){
     document.documentElement.classList.add('incog');
     document.querySelector('h1').textContent = 'GHOST MODE';
     document.title = 'INCOGNITO';
   }
 }).catch(() => {});
+
 function toUrl(v){
   v = v.trim(); if(!v) return null;
   if(/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return v;
   if(/^localhost(:\d+)?(\/.*)?$/i.test(v) || /^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/.*)?$/.test(v)) return 'http://' + v;
   if(!/\s/.test(v) && /^[^\s\/]+\.[a-z]{2,}(:\d+)?([\/?#].*)?$/i.test(v)) return 'https://' + v;
-  return searchBase + encodeURIComponent(v);
+  const enc = encodeURIComponent(v);
+  if(searchBase.includes('%s')) return searchBase.replace(/%s/g, enc);
+  if(searchBase.includes('{query}')) return searchBase.replace(/\{query\}/g, enc);
+  return searchBase + enc;
 }
-document.getElementById('f').addEventListener('submit', e => {
+
+$('#f').addEventListener('submit', e => {
   e.preventDefault();
-  const u = toUrl(document.getElementById('q').value);
+  const u = toUrl($('#q').value);
   if(u) location.href = u;
 });
+
 let lastClock = '';
 function tick(){
   const d = new Date();
   const s = d.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short'}).toUpperCase() + '  ' +
     d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-  if (s !== lastClock) {
-    lastClock = s;
-    document.getElementById('clock').textContent = s;
-  }
+  if (s !== lastClock) { lastClock = s; $('#clock').textContent = s; }
 }
 let clockTimer = 0, idleTimer = 0, userIdle = false, lastAct = 0;
-function applyIdle(){
-  document.documentElement.classList.toggle('idle', document.hidden || userIdle);
-}
+function applyIdle(){ document.documentElement.classList.toggle('idle', document.hidden || userIdle); }
 function wakeGrid(e){
   const now = performance.now();
   if (e && e.type === 'pointermove' && !userIdle && now - lastAct < 500) return;
   lastAct = now;
   if (userIdle) { userIdle = false; applyIdle(); }
   clearTimeout(idleTimer);
-  if (!document.hidden) {
-    idleTimer = setTimeout(() => { userIdle = true; applyIdle(); }, 3500);
-  }
+  if (!document.hidden) idleTimer = setTimeout(() => { userIdle = true; applyIdle(); }, 3500);
 }
 function syncVis(){
   if (document.hidden) {
@@ -145,6 +231,7 @@ function syncVis(){
     userIdle = false;
     applyIdle();
     wakeGrid();
+    loadNewTab(true);
   }
 }
 document.addEventListener('visibilitychange', syncVis);
@@ -152,20 +239,186 @@ window.addEventListener('focus', wakeGrid);
 for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel']) {
   window.addEventListener(ev, wakeGrid, {passive: true});
 }
-syncVis();
 
-// Once there are bookmarks, the newest nine replace the default quick links.
-fetch('/api/bookmarks', {cache:'no-store'}).then(r => r.json()).then(list => {
-  const items = list.filter(b => !b.folder && /^(https?:|file:)/i.test(b.url)).reverse().slice(0, 9);
-  if(!items.length) return;
-  const box = document.getElementById('links'); box.innerHTML = '';
-  items.forEach((b, i) => {
-    const a = document.createElement('a'); a.href = b.url; a.title = b.title + '\n' + b.url;
+// ---- Speed Dial & Quick Notes ----------------------------------------------------------
+let dials = [], editDials = false, editIdx = -1, isIncog = false;
+let noteDirty = false, noteTimer = 0, lastSavedNote = '';
+const noteEl = $('#note'), noteStat = $('#noteStat');
+
+function setNoteStatus(txt){ noteStat.textContent = txt; }
+
+function renderDials(){
+  const box = $('#links'); box.textContent = '';
+  if(!dials.length){
+    const em = document.createElement('div'); em.className = 'dial-empty';
+    em.textContent = 'No speed dial shortcuts. Click + ADD above.';
+    box.appendChild(em);
+    return;
+  }
+  dials.forEach((d, i) => {
+    const tile = document.createElement('div'); tile.className = 'dial-tile';
+    const a = document.createElement('a'); a.className = 'dial-link'; a.href = d.url; a.title = d.title + '\n' + d.url;
     const n = document.createElement('span'); n.textContent = String(i + 1).padStart(2, '0');
-    a.append(n, document.createTextNode((b.title || b.url).toUpperCase()));
-    box.appendChild(a);
+    a.append(n, document.createTextNode((d.title || d.url).toUpperCase()));
+    tile.appendChild(a);
+
+    const ctl = document.createElement('div'); ctl.className = 'dial-ctl';
+    const mk = (txt, title, fn) => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = txt; b.title = title;
+      b.onclick = e => { e.preventDefault(); e.stopPropagation(); fn(); };
+      return b;
+    };
+    if(i > 0) ctl.appendChild(mk('\u25C0', 'Move left', () => moveDial(i, -1)));
+    if(i + 1 < dials.length) ctl.appendChild(mk('\u25B6', 'Move right', () => moveDial(i, 1)));
+    ctl.appendChild(mk('\u270E', 'Edit', () => openDialModal(i)));
+    ctl.appendChild(mk('\u2715', 'Remove', () => removeDial(i)));
+    tile.appendChild(ctl);
+    box.appendChild(tile);
   });
-}).catch(() => {});
+}
+
+async function saveDials(next){
+  try {
+    const r = await fetch('/api/newtab/dials', { method:'POST', body: JSON.stringify({ dials: next }), cache:'no-store' });
+    const j = await r.json();
+    if(!r.ok) return j.error || 'Could not save dials.';
+    dials = next;
+    renderDials();
+    return '';
+  } catch(e){ return 'Could not save dials.'; }
+}
+
+function moveDial(i, dir){
+  const j = i + dir;
+  if(j < 0 || j >= dials.length) return;
+  const next = dials.slice();
+  const tmp = next[i]; next[i] = next[j]; next[j] = tmp;
+  saveDials(next);
+}
+
+function removeDial(i){
+  const next = dials.slice();
+  next.splice(i, 1);
+  saveDials(next);
+}
+
+function openDialModal(idx){
+  editIdx = idx;
+  const it = idx >= 0 ? dials[idx] : null;
+  $('#dmTitle').textContent = it ? 'EDIT SPEED DIAL' : 'ADD SPEED DIAL';
+  $('#dmName').value = it ? it.title : '';
+  $('#dmUrl').value = it ? it.url : '';
+  $('#dmErr').textContent = '';
+  $('#dialModal').classList.add('on');
+  $('#dmName').focus();
+}
+function closeDialModal(){ $('#dialModal').classList.remove('on'); }
+
+function normDialUrl(raw){
+  let u = raw.trim();
+  if(!u) return '';
+  if(!/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) u = 'https://' + u;
+  return u;
+}
+
+$('#dmCancel').onclick = closeDialModal;
+$('#dialModal').addEventListener('click', e => { if(e.target === $('#dialModal')) closeDialModal(); });
+$('#dmSave').onclick = async () => {
+  const title = $('#dmName').value.trim();
+  const url = normDialUrl($('#dmUrl').value);
+  if(!/^https?:\/\/|^file:\/\/\//i.test(url)){ $('#dmErr').textContent = 'Enter a valid http://, https://, or file:/// URL.'; return; }
+  const next = dials.slice();
+  const entry = { title: title || url.replace(/^https?:\/\//i, '').split('/')[0], url };
+  if(editIdx >= 0) next[editIdx] = entry;
+  else {
+    if(next.length >= 18){ $('#dmErr').textContent = 'Maximum 18 speed dial tiles reached.'; return; }
+    next.push(entry);
+  }
+  const err = await saveDials(next);
+  if(err){ $('#dmErr').textContent = err; return; }
+  closeDialModal();
+};
+['#dmName', '#dmUrl'].forEach(sel => $(sel).addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); $('#dmSave').click(); } }));
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && $('#dialModal').classList.contains('on')) closeDialModal(); });
+
+$('#dialAdd').onclick = () => openDialModal(-1);
+$('#dialEdit').onclick = () => {
+  editDials = !editDials;
+  document.body.classList.toggle('editing', editDials);
+  $('#dialEdit').classList.toggle('on', editDials);
+  $('#dialEdit').textContent = editDials ? 'DONE' : 'EDIT';
+  $('#dialFromBm').style.display = editDials ? '' : 'none';
+  $('#dialReset').style.display = editDials ? '' : 'none';
+};
+$('#dialReset').onclick = async () => {
+  try {
+    const j = await (await fetch('/api/newtab/reset', {method:'POST', cache:'no-store'})).json();
+    dials = j.dials || [];
+    renderDials();
+  } catch(e){}
+};
+$('#dialFromBm').onclick = async () => {
+  try {
+    const list = await (await fetch('/api/bookmarks', {cache:'no-store'})).json();
+    const items = list.filter(b => !b.folder && /^(https?:|file:)/i.test(b.url)).reverse().slice(0, 9)
+      .map(b => ({ title: (b.title || b.url).slice(0, 60), url: b.url }));
+    if(items.length) await saveDials(items);
+  } catch(e){}
+};
+
+async function flushNote(){
+  clearTimeout(noteTimer); noteTimer = 0;
+  const val = noteEl.value;
+  if(!noteDirty && val === lastSavedNote) return;
+  noteDirty = false;
+  setNoteStatus(isIncog ? 'SESSION' : 'SAVING...');
+  try {
+    const r = await fetch('/api/newtab/note', { method:'POST', body: JSON.stringify({ note: val }), cache:'no-store' });
+    if(r.ok){ lastSavedNote = val; setNoteStatus(isIncog ? 'SESSION' : 'SAVED'); }
+    else setNoteStatus('ERROR');
+  } catch(e){ setNoteStatus('ERROR'); }
+}
+
+noteEl.addEventListener('input', () => {
+  noteDirty = true;
+  setNoteStatus(isIncog ? 'SESSION*' : 'TYPING...');
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(flushNote, 350);
+});
+noteEl.addEventListener('blur', flushNote);
+window.addEventListener('pagehide', flushNote);
+
+$('#noteCopy').onclick = async () => {
+  if(!noteEl.value) return;
+  try {
+    await navigator.clipboard.writeText(noteEl.value);
+    setNoteStatus('COPIED');
+    setTimeout(() => setNoteStatus(isIncog ? 'SESSION' : 'SAVED'), 1200);
+  } catch(e){}
+};
+$('#noteClear').onclick = () => {
+  if(!noteEl.value) return;
+  noteEl.value = '';
+  noteDirty = true;
+  flushNote();
+};
+
+async function loadNewTab(fromVis){
+  try {
+    const j = await (await fetch('/api/newtab', {cache:'no-store'})).json();
+    isIncog = !!j.incognito;
+    dials = j.dials || [];
+    renderDials();
+    if(!fromVis || (document.activeElement !== noteEl && !noteDirty)){
+      noteEl.value = j.note || '';
+      lastSavedNote = noteEl.value;
+      setNoteStatus(isIncog ? 'SESSION' : 'SAVED');
+    }
+  } catch(e){}
+}
+
+syncVis();
+loadNewTab(false);
 </script>
 </body>
 </html>

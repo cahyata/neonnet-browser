@@ -299,6 +299,30 @@ select option{background:var(--bg2);color:var(--cyan)}
 .row.stack{flex-direction:column;align-items:stretch;gap:10px}
 .row.stack .pair{justify-content:flex-start}
 .err{color:var(--pink2);font-size:12px;min-height:16px;margin-top:4px}
+.px-list{display:flex;flex-direction:column;gap:8px;width:100%;margin-top:4px}
+.px-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid rgba(138,111,192,.4);background:var(--bg2)}
+.px-item.on{border-color:var(--green);box-shadow:0 0 12px rgba(53,255,160,.12)}
+.px-meta{flex:1;min-width:0}
+.px-meta b{color:var(--cyan);font-size:13px}
+.px-meta span{display:block;color:var(--muted);font-size:11px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.px-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;width:100%}
+.px-grid .txt,.px-grid select{width:100%;min-width:0}
+.theme-swatches{display:flex;flex-wrap:wrap;gap:8px;width:100%}
+.swatch{display:inline-flex;align-items:center;gap:7px;padding:6px 10px;border:1px solid rgba(138,111,192,.45);background:var(--bg2);
+  color:var(--text);font:inherit;font-size:11px;cursor:pointer;letter-spacing:.4px}
+.swatch:hover{border-color:var(--cyan);color:var(--cyan)}
+.swatch.on{border-color:var(--pink);color:var(--pink2);box-shadow:0 0 10px rgba(255,46,151,.25)}
+.swatch-dots{display:inline-flex;gap:3px;align-items:center}
+.swatch-dot{width:10px;height:10px;display:inline-block;border:1px solid rgba(255,255,255,.25)}
+.color-pick{width:34px;height:28px;padding:1px;border:1px solid var(--line);background:var(--bg2);cursor:pointer}
+.kb-list{display:flex;flex-direction:column;gap:6px;width:100%}
+.kb-group{color:var(--yellow);font-size:11px;letter-spacing:1.4px;margin:10px 0 2px;text-transform:uppercase}
+.kb-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid rgba(138,111,192,.32);background:var(--bg2)}
+.kb-row.rec{border-color:var(--yellow);box-shadow:0 0 10px rgba(255,214,0,.22)}
+.kb-name{flex:1;min-width:0;color:var(--text);font-size:12px}
+.kb-key{min-width:110px;text-align:center;padding:4px 8px;border:1px solid var(--line);background:var(--bg);color:var(--cyan);font-size:11px;letter-spacing:.5px}
+.kb-key.empty{color:var(--muted)}
+.kb-row.rec .kb-key{border-color:var(--yellow);color:var(--yellow)}
 
 .about{
   color:var(--muted);
@@ -372,7 +396,8 @@ select option{background:var(--bg2);color:var(--cyan)}
       <a href="#sec-ext"><span class="num">05</span>Extensions &amp; Security</a>
       <a href="#sec-scroll"><span class="num">06</span>Scrolling &amp; DevTools</a>
       <a href="#sec-look"><span class="num">07</span>Downloads &amp; Look</a>
-      <a href="#sec-updates"><span class="num">08</span>Updates &amp; About</a>
+      <a href="#sec-keys"><span class="num">08</span>Keybindings</a>
+      <a href="#sec-updates"><span class="num">09</span>Updates &amp; About</a>
     </nav>
     <div class="aside-stats">
       <div><b>ENGINE</b> &rarr; <span id="statSearch">...</span></div>
@@ -396,6 +421,22 @@ select option{background:var(--bg2);color:var(--cyan)}
       <div class="row">
         <div class="lab"><b>Search engine</b><span>Used when you type words instead of an address, in the address bar and on the new tab page.</span></div>
         <select id="engine"></select>
+      </div>
+      <div class="row stack">
+        <div class="lab"><b>Custom search engines</b><span>Add your own search URLs using <code>%s</code> or <code>{query}</code> where the search query goes (or a trailing query parameter like <code>?q=</code>).</span></div>
+        <div class="px-list" id="engList"></div>
+        <div class="pair"><button class="btn" id="engAddBtn">+ ADD ENGINE</button></div>
+      </div>
+      <div class="row stack" id="engForm" style="display:none">
+        <div class="lab"><b id="engFormTitle">ADD CUSTOM SEARCH ENGINE</b><div class="err" id="engErr"></div></div>
+        <div class="px-grid">
+          <input class="txt" id="engName" maxlength="32" placeholder="Name (e.g. Wikipedia, Perplexity)">
+          <input class="txt" id="engUrl" spellcheck="false" autocomplete="off" placeholder="https://en.wikipedia.org/w/index.php?search=%s" style="grid-column:span 2">
+        </div>
+        <div class="pair">
+          <button class="btn" id="engSave">SAVE ENGINE</button>
+          <button class="tog" id="engCancel">CANCEL</button>
+        </div>
       </div>
 
       <h2 class="subhead" id="default">DEFAULT BROWSER</h2>
@@ -479,6 +520,61 @@ select option{background:var(--bg2);color:var(--cyan)}
         <div class="lab"><b>Block trackers and ads</b><span id="adHint"></span></div>
         <button class="tog" id="blockAds">OFF</button>
       </div>
+      <div class="row" id="doh">
+        <div class="lab"><b>DNS-over-HTTPS (DoH)</b><span id="dohModeHint">Encrypts domain name lookups over HTTPS instead of sending plain DNS queries to your ISP or local network.</span></div>
+        <select id="dohMode">
+          <option value="automatic">AUTOMATIC (OS / UPGRADE)</option>
+          <option value="secure">SECURE (ALWAYS DOH)</option>
+          <option value="off">OFF (SYSTEM DNS)</option>
+        </select>
+      </div>
+      <div class="row" id="dohProvRow">
+        <div class="lab"><b>DoH provider</b><span id="dohProvHint">Used when DNS-over-HTTPS is set to Secure.</span></div>
+        <select id="dohProvider"></select>
+      </div>
+      <div class="row" id="dohCustomRow" style="display:none">
+        <div class="lab"><b>Custom DoH template URL</b><span>Must start with https:// (for example, https://dns.example.com/dns-query).</span><div class="err" id="dohErr"></div></div>
+        <div class="pair"><input class="txt" id="dohCustom" spellcheck="false" autocomplete="off" placeholder="https://dns.example.com/dns-query"><button class="btn" id="dohCustomSave">SAVE</button></div>
+      </div>
+
+      <h2 class="subhead" id="proxy">PROXY TUNNEL</h2>
+      <div class="row">
+        <div class="lab"><b>Built-in Proxy Tunnel</b><span>Routes only NeonNet browser traffic through your selected SOCKS5 or HTTPS proxy server (other Windows apps stay on your normal network). NeonNet tests TCP reachability before enabling so a dead proxy won't cut your internet.</span><div class="err" id="proxyStatus" style="margin-top:4px"></div></div>
+        <button class="tog" id="proxyEnabled">OFF</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Prevent WebRTC IP leaks</b><span>Sets Chromium WebRTC IP handling to disable non-proxied UDP while the proxy tunnel is active.</span></div>
+        <button class="tog" id="proxyNoWebRtc">ON</button>
+      </div>
+      <div class="row stack">
+        <div class="lab"><b>Proxy server profiles</b><span id="proxyHint">Add an external SOCKS5/HTTPS proxy server or a local tunnel (SSH -D 1080, Tor 9050, Clash/V2Ray). Saved passwords are encrypted with Windows DPAPI.</span></div>
+        <div class="px-list" id="proxyList"></div>
+        <div class="pair"><button class="btn" id="proxyAddBtn">+ ADD PROFILE</button></div>
+      </div>
+      <div class="row stack" id="proxyForm" style="display:none">
+        <div class="lab"><b id="proxyFormTitle">ADD PROXY PROFILE</b><div class="err" id="proxyErr"></div></div>
+        <div class="pair">
+          <button class="tog" type="button" id="pxPresetSsh">PRESET: SSH -D 1080</button>
+          <button class="tog" type="button" id="pxPresetTor">PRESET: TOR 9050</button>
+        </div>
+        <div class="px-grid">
+          <input class="txt" id="pxName" maxlength="40" placeholder="Name (e.g. Singapore VPS)">
+          <select id="pxScheme">
+            <option value="socks5">SOCKS5</option>
+            <option value="https">HTTPS</option>
+            <option value="http">HTTP</option>
+          </select>
+          <input class="txt" id="pxHost" spellcheck="false" autocomplete="off" placeholder="Host or IP (e.g. 127.0.0.1)">
+          <input class="txt" id="pxPort" type="number" min="1" max="65535" placeholder="Port (e.g. 1080)">
+          <input class="txt" id="pxUser" spellcheck="false" autocomplete="off" placeholder="Username (optional)">
+          <input class="txt" id="pxPass" type="password" autocomplete="new-password" placeholder="Password (optional)">
+        </div>
+        <input class="txt" id="pxBypass" style="width:100%" spellcheck="false" autocomplete="off" placeholder="Extra bypass list, semicolon-separated (optional, e.g. *.local;10.0.0.0/8)">
+        <div class="pair">
+          <button class="btn" id="pxSave">SAVE PROFILE</button>
+          <button class="tog" id="pxCancel">CANCEL</button>
+        </div>
+      </div>
     </section>
 
     <section class="sec" id="sec-scroll">
@@ -527,10 +623,36 @@ select option{background:var(--bg2);color:var(--cyan)}
         <div class="lab"><b>Scanlines</b><span>A thin CRT line effect over every page. Purely visual.</span></div>
         <button class="tog" id="scan">ON</button>
       </div>
+      <h2 class="subhead" id="theme">THEME ACCENT</h2>
+      <div class="row stack">
+        <div class="lab"><b>Neon accent preset</b><span id="themeHint">Changes the primary &amp; secondary neon colors across the toolbar, window border, settings, and New Tab page.</span></div>
+        <div class="theme-swatches" id="themeSwatches"></div>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Custom neon colors</b><span>Pick any primary (borders, active tabs, highlights) and secondary (links, controls) hex colors.</span></div>
+        <div class="pair">
+          <label style="font-size:11px;color:var(--muted)">PRIMARY</label>
+          <input class="color-pick" type="color" id="accentPink" value="#ff2e97">
+          <label style="font-size:11px;color:var(--muted)">SECONDARY</label>
+          <input class="color-pick" type="color" id="accentCyan" value="#00e5ff">
+          <button class="tog" id="themeReset">DEFAULT</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" id="sec-keys">
+      <h2 id="keybindings">KEYBINDINGS <span class="tag">08 // SHORTCUTS</span></h2>
+      <div class="row stack">
+        <div class="lab"><b>Custom keyboard shortcuts</b><span>Click REBIND, then press any Ctrl/Alt shortcut or F1&ndash;F12 key. Press Esc to cancel.</span><div class="err" id="kbErr"></div></div>
+        <div class="pair">
+          <button class="tog" id="kbResetAll">RESET ALL TO DEFAULTS</button>
+        </div>
+        <div class="kb-list" id="kbList"></div>
+      </div>
     </section>
 
     <section class="sec" id="sec-updates">
-      <h2>UPDATES <span class="tag">08 // SYSTEM</span></h2>
+      <h2>UPDATES <span class="tag">09 // SYSTEM</span></h2>
       <div class="row">
         <div class="lab"><b>Check for updates</b><span id="updStatus">Check GitHub for a newer release.</span></div>
         <button class="btn" id="checkUpdate">CHECK NOW</button>
@@ -557,8 +679,9 @@ function setTog(id, on){ const b = $(id); b.classList.toggle('on', !!on); b.text
 async function load(){
   try { cfg = await (await fetch('/api/settings', {cache:'no-store'})).json(); } catch(e){ return; }
   const sel = $('#engine'); sel.innerHTML = '';
-  for(const e of cfg.engines){ const o = document.createElement('option'); o.value = e.id; o.textContent = e.name; sel.appendChild(o); }
+  for(const e of cfg.engines){ const o = document.createElement('option'); o.value = e.id; o.textContent = e.custom ? (e.name + ' (Custom)') : e.name; sel.appendChild(o); }
   sel.value = cfg.search;
+  renderCustomEngines(cfg);
   $('#verBadge').textContent = 'v' + cfg.version;
   const eng = cfg.engines.find(e => e.id === cfg.search);
   $('#statSearch').textContent = eng ? eng.name : cfg.search;
@@ -585,6 +708,21 @@ async function load(){
   $('#extHint').textContent = (cfg.scriptEnabled || 0) + ' enabled (' + (cfg.scriptTotal || 0) + ' installed). NeonNet runs .user.js userscripts (like Tampermonkey / Greasy Fork) instead of Chrome Web Store (.crx) extensions, which depend on Chrome\'s own toolbar and window UI.' + (cfg.incognito ? ' Incognito windows run existing scripts read-only.' : '');
   setTog('#blockAds', cfg.blockAds);
   $('#adHint').textContent = 'Cancels requests to well-known advertising and tracking sites, only when another site asks for them. Uses the EasyList, EasyPrivacy and Peter Lowe lists (about 82 000 sites). Reload a page after changing it. ' + (cfg.blocked ? cfg.blocked + ' requests blocked since NeonNet started.' : '');
+  const dSel = $('#dohProvider'); dSel.innerHTML = '';
+  for(const p of (cfg.dohProviders || [])){ const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; dSel.appendChild(o); }
+  $('#dohMode').value = cfg.dohMode || 'automatic';
+  dSel.value = cfg.dohProvider || 'cloudflare';
+  $('#dohCustom').value = cfg.dohCustom || '';
+  const isSecure = $('#dohMode').value === 'secure';
+  const isCustom = dSel.value === 'custom';
+  dSel.disabled = !isSecure;
+  $('#dohCustomRow').style.display = (isSecure && isCustom) ? '' : 'none';
+  const activeProv = (cfg.dohProviders || []).find(p => p.id === dSel.value);
+  $('#dohProvHint').textContent = !isSecure
+    ? 'Set DNS-over-HTTPS to Secure above to force a specific DoH resolver.'
+    : isCustom
+      ? (cfg.dohCustom ? 'Active resolver: ' + cfg.dohCustom : 'Enter a custom https:// DoH endpoint below; falls back to Automatic until saved.')
+      : ('Active resolver: ' + (activeProv && activeProv.tmpl ? activeProv.tmpl : ''));
   setTog('#restoreSession', cfg.restoreSession);
   $('#restoreHint').textContent = cfg.restoreSession
     ? 'All tabs of the last session come back at start-up. They load when you click them. Pinned tabs always come back.'
@@ -601,8 +739,311 @@ async function load(){
   line('NeonNet', 'v' + cfg.version);
   line('Chromium', cfg.chromium + ' (bundled)');
   line('Your data', '%LOCALAPPDATA%\\NeonNet');
+  renderTheme(cfg);
+  await loadProxy();
+  await loadKeybindings();
   if(filterInput.value.trim()) applyFilter();
 }
+
+function renderTheme(cfg){
+  const box = $('#themeSwatches');
+  if(!box) return;
+  box.textContent = '';
+  for(const p of (cfg.accentPresets || [])){
+    const b = document.createElement('button');
+    b.className = 'swatch' + (cfg.accentPreset === p.id ? ' on' : '');
+    const dots = document.createElement('span'); dots.className = 'swatch-dots';
+    const d1 = document.createElement('span'); d1.className = 'swatch-dot'; d1.style.background = p.pink;
+    const d2 = document.createElement('span'); d2.className = 'swatch-dot'; d2.style.background = p.cyan;
+    dots.append(d1, d2);
+    b.append(dots, document.createTextNode(p.name.toUpperCase()));
+    b.onclick = async () => { await set('accentPreset', p.id); load(); };
+    box.appendChild(b);
+  }
+  $('#accentPink').value = cfg.accentPink || '#ff2e97';
+  $('#accentCyan').value = cfg.accentCyan || '#00e5ff';
+}
+
+$('#accentPink').onchange = async () => { await set('accentPink', $('#accentPink').value); load(); };
+$('#accentCyan').onchange = async () => { await set('accentCyan', $('#accentCyan').value); load(); };
+$('#themeReset').onclick = async () => { await set('accentPreset', 'synthwave'); load(); };
+
+let kbItems = [], kbRecId = '', kbIncog = false;
+async function setKbCapture(on){
+  try { await fetch('/api/keybindings/capture?on=' + (on ? '1' : '0'), {cache:'no-store'}); } catch(e){}
+}
+function stopKbRecord(){
+  if(!kbRecId) return;
+  kbRecId = '';
+  setKbCapture(false);
+  renderKeybindings();
+}
+function eventToCombo(e){
+  const modOnly = ['Control','Shift','Alt','Meta','AltGraph'].includes(e.key);
+  if(modOnly) return null;
+  if(e.metaKey) return null;
+  let k = '';
+  if(e.code && /^Key([A-Z])$/.test(e.code)) k = e.code.slice(3);
+  else if(e.code && /^Digit([0-9])$/.test(e.code)) k = e.code.slice(5);
+  else if(e.code && /^Numpad([0-9])$/.test(e.code)) k = e.code.slice(6);
+  else if(/^F([1-9]|1[0-2])$/.test(e.key)) k = e.key;
+  else if(e.key === 'Tab') k = 'Tab';
+  else if(e.key === 'ArrowLeft') k = 'Left';
+  else if(e.key === 'ArrowRight') k = 'Right';
+  else if(e.key === 'ArrowUp') k = 'Up';
+  else if(e.key === 'ArrowDown') k = 'Down';
+  else if(e.key === 'Home') k = 'Home';
+  else if(e.key === 'End') k = 'End';
+  else if(e.key === 'PageUp') k = 'PageUp';
+  else if(e.key === 'PageDown') k = 'PageDown';
+  else if(e.key === 'Insert') k = 'Insert';
+  else if(e.key === 'Delete') k = 'Delete';
+  else if(e.key === 'Backspace') k = 'Backspace';
+  else if(e.key === 'Enter') k = 'Enter';
+  else if(e.key === ' ' || e.code === 'Space') k = 'Space';
+  else if(e.code === 'Comma' || e.key === ',') k = ',';
+  else if(e.code === 'Period' || e.key === '.') k = '.';
+  else if(e.code === 'Equal' || e.code === 'NumpadAdd' || e.key === '+' || e.key === '=') k = '+';
+  else if(e.code === 'Minus' || e.code === 'NumpadSubtract' || e.key === '-') k = '-';
+  else if(e.code === 'Slash' || e.key === '/') k = '/';
+  else if(e.code === 'Semicolon' || e.key === ';') k = ';';
+  else if(e.code === 'Quote' || e.key === "'") k = "'";
+  else if(e.code === 'BracketLeft' || e.key === '[') k = '[';
+  else if(e.code === 'BracketRight' || e.key === ']') k = ']';
+  else if(e.code === 'Backslash' || e.key === '\\') k = '\\';
+  else if(e.code === 'Backquote' || e.key === '`') k = '`';
+  else return '';
+  const isFunc = /^F\d+$/.test(k);
+  if(!e.ctrlKey && !e.altKey && !isFunc) return '';
+  const parts = [];
+  if(e.ctrlKey) parts.push('Ctrl');
+  if(e.altKey) parts.push('Alt');
+  if(e.shiftKey) parts.push('Shift');
+  parts.push(k);
+  return parts.join('+');
+}
+async function saveKeybind(id, combo){
+  $('#kbErr').textContent = '';
+  try {
+    const r = await fetch('/api/keybindings/set', { method:'POST', body: JSON.stringify({ id, combo }), cache:'no-store' });
+    const j = await r.json();
+    if(!r.ok){ $('#kbErr').textContent = j.error || 'Invalid shortcut.'; return false; }
+    kbItems = j.items || kbItems;
+    flash();
+    return true;
+  } catch(e){ $('#kbErr').textContent = 'Could not save shortcut.'; return false; }
+}
+function renderKeybindings(){
+  const box = $('#kbList');
+  if(!box) return;
+  box.textContent = '';
+  $('#kbResetAll').disabled = kbIncog;
+  let lastGroup = '';
+  for(const it of kbItems){
+    if(it.group !== lastGroup){
+      lastGroup = it.group;
+      const g = document.createElement('div'); g.className = 'kb-group'; g.textContent = lastGroup;
+      box.appendChild(g);
+    }
+    const isRec = kbRecId === it.id;
+    const row = document.createElement('div'); row.className = 'kb-row' + (isRec ? ' rec' : '');
+    const nm = document.createElement('div'); nm.className = 'kb-name'; nm.textContent = it.label;
+    const key = document.createElement('div'); key.className = 'kb-key' + (!it.combo && !isRec ? ' empty' : '');
+    key.textContent = isRec ? 'PRESS KEYS...' : (it.combo || 'UNBOUND');
+    const acts = document.createElement('div'); acts.className = 'pair';
+    const recBtn = document.createElement('button'); recBtn.className = 'btn';
+    recBtn.textContent = isRec ? 'CANCEL' : 'REBIND';
+    recBtn.disabled = kbIncog;
+    recBtn.onclick = async () => {
+      $('#kbErr').textContent = '';
+      if(isRec){ stopKbRecord(); return; }
+      kbRecId = it.id;
+      await setKbCapture(true);
+      renderKeybindings();
+    };
+    acts.appendChild(recBtn);
+    if(it.combo){
+      const clrBtn = document.createElement('button'); clrBtn.className = 'tog'; clrBtn.textContent = 'CLEAR';
+      clrBtn.disabled = kbIncog;
+      clrBtn.onclick = async () => { stopKbRecord(); if(await saveKeybind(it.id, '')) renderKeybindings(); };
+      acts.appendChild(clrBtn);
+    }
+    if(it.combo !== it.def){
+      const rstBtn = document.createElement('button'); rstBtn.className = 'tog'; rstBtn.textContent = 'RESET';
+      rstBtn.disabled = kbIncog;
+      rstBtn.onclick = async () => {
+        stopKbRecord();
+        const j = await (await fetch('/api/keybindings/reset?id=' + encodeURIComponent(it.id), {method:'POST', cache:'no-store'})).json();
+        kbItems = j.items || kbItems;
+        flash(); renderKeybindings();
+      };
+      acts.appendChild(rstBtn);
+    }
+    row.append(nm, key, acts);
+    box.appendChild(row);
+  }
+}
+async function loadKeybindings(){
+  try {
+    const j = await (await fetch('/api/keybindings', {cache:'no-store'})).json();
+    kbIncog = !!j.incognito;
+    kbItems = j.items || [];
+    if(kbIncog) $('#kbErr').textContent = 'Incognito windows cannot modify saved keybindings.';
+    renderKeybindings();
+  } catch(e){}
+}
+$('#kbResetAll').onclick = async () => {
+  stopKbRecord();
+  $('#kbErr').textContent = '';
+  try {
+    const j = await (await fetch('/api/keybindings/reset', {method:'POST', cache:'no-store'})).json();
+    kbItems = j.items || kbItems;
+    flash(); renderKeybindings();
+  } catch(e){}
+};
+window.addEventListener('blur', stopKbRecord);
+document.addEventListener('visibilitychange', () => { if(document.hidden) stopKbRecord(); });
+document.addEventListener('keydown', async e => {
+  if(!kbRecId) return;
+  e.preventDefault(); e.stopPropagation();
+  if(e.key === 'Escape'){ stopKbRecord(); return; }
+  const combo = eventToCombo(e);
+  if(combo === null) return;
+  if(!combo){ $('#kbErr').textContent = 'Use Ctrl or Alt + key, or F1-F12.'; return; }
+  const id = kbRecId;
+  stopKbRecord();
+  await saveKeybind(id, combo);
+  renderKeybindings();
+}, true);
+
+let proxyCfg = null, pxEditId = 0, pxKeepPass = false, pxPollTimer = 0;
+function setProxyStatus(msg, ok){
+  const el = $('#proxyStatus');
+  el.textContent = msg || '';
+  el.style.color = ok ? '#35ffa0' : '';
+}
+async function loadProxy(){
+  try { proxyCfg = await (await fetch('/api/proxy', {cache:'no-store'})).json(); } catch(e){ return; }
+  setTog('#proxyEnabled', proxyCfg.enabled);
+  if(proxyCfg.checking) $('#proxyEnabled').textContent = 'CHK';
+  $('#proxyEnabled').disabled = !(proxyCfg.profiles && proxyCfg.profiles.length) && !proxyCfg.checking;
+  if(proxyCfg.checking) setProxyStatus('Checking proxy reachability...', true);
+  else if(proxyCfg.error) setProxyStatus(proxyCfg.error, false);
+  else setProxyStatus('', false);
+  if(proxyCfg.checking && !pxPollTimer){
+    pxPollTimer = setTimeout(async () => { pxPollTimer = 0; await loadProxy(); }, 250);
+  }
+  setTog('#proxyNoWebRtc', proxyCfg.noWebRtcLeak);
+  $('#proxyAddBtn').disabled = !!proxyCfg.incognito;
+  if(proxyCfg.incognito) $('#proxyHint').textContent = 'Incognito windows can toggle and switch saved proxy profiles for this session, but cannot edit or delete saved profiles.';
+  const box = $('#proxyList'); box.textContent = '';
+  const list = proxyCfg.profiles || [];
+  if(!list.length){
+    const em = document.createElement('div'); em.style.color = 'var(--muted)'; em.style.fontSize = '12px';
+    em.textContent = 'No proxy profiles saved yet. Click + ADD PROFILE to configure one.';
+    box.appendChild(em);
+    return;
+  }
+  for(const p of list){
+    const active = p.id === proxyCfg.activeId;
+    const item = document.createElement('div'); item.className = 'px-item' + (active ? ' on' : '');
+    const meta = document.createElement('div'); meta.className = 'px-meta';
+    const b = document.createElement('b'); b.textContent = p.name + (active ? (proxyCfg.enabled ? ' [ACTIVE]' : ' [SELECTED]') : '');
+    const sp = document.createElement('span');
+    sp.textContent = p.scheme + '://' + p.host + ':' + p.port + (p.user || p.hasPass ? ' · Auth' : '') + (p.bypass ? ' · Bypass: ' + p.bypass : '');
+    meta.append(b, sp);
+    const acts = document.createElement('div'); acts.className = 'pair';
+    const testBtn = document.createElement('button'); testBtn.className = 'btn'; testBtn.textContent = 'TEST';
+    testBtn.onclick = async () => {
+      testBtn.disabled = true; testBtn.textContent = '...';
+      try {
+        const r = await (await fetch('/api/proxy/test?id=' + p.id, {cache:'no-store'})).json();
+        setProxyStatus(r.ok ? (p.name + ' reachable (' + r.ms + ' ms)') : (r.error || 'Unreachable'), !!r.ok);
+      } catch(e){ setProxyStatus('Test failed.', false); }
+      testBtn.disabled = false; testBtn.textContent = 'TEST';
+    };
+    const useBtn = document.createElement('button'); useBtn.className = 'tog' + (active ? ' on' : '');
+    useBtn.textContent = active ? 'SELECTED' : 'SELECT';
+    useBtn.onclick = async () => { await fetch('/api/proxy/select?id=' + p.id, {cache:'no-store'}); flash(); loadProxy(); };
+    acts.append(testBtn, useBtn);
+    if(!proxyCfg.incognito){
+      const edBtn = document.createElement('button'); edBtn.className = 'btn'; edBtn.textContent = 'EDIT';
+      edBtn.onclick = () => openProxyForm(p);
+      const delBtn = document.createElement('button'); delBtn.className = 'tog'; delBtn.textContent = 'DEL';
+      delBtn.onclick = async () => { await fetch('/api/proxy/delete?id=' + p.id, {cache:'no-store'}); flash(); loadProxy(); };
+      acts.append(edBtn, delBtn);
+    }
+    item.append(meta, acts);
+    box.appendChild(item);
+  }
+}
+
+function openProxyForm(p){
+  pxEditId = p ? p.id : 0;
+  pxKeepPass = !!(p && p.hasPass);
+  $('#proxyFormTitle').textContent = p ? ('EDIT PROFILE: ' + p.name) : 'ADD PROXY PROFILE';
+  $('#pxName').value = p ? p.name : '';
+  $('#pxScheme').value = p ? p.scheme : 'socks5';
+  $('#pxHost').value = p ? p.host : '';
+  $('#pxPort').value = p ? String(p.port) : '';
+  $('#pxUser').value = p ? (p.user || '') : '';
+  $('#pxPass').value = '';
+  $('#pxPass').placeholder = pxKeepPass ? 'Password (leave blank to keep current)' : 'Password (optional)';
+  $('#pxBypass').value = p ? (p.bypass || '') : '';
+  $('#proxyErr').textContent = '';
+  $('#proxyForm').style.display = '';
+  $('#pxName').focus();
+}
+
+$('#pxPresetSsh').onclick = () => {
+  $('#pxName').value = 'SSH / Local SOCKS5';
+  $('#pxScheme').value = 'socks5';
+  $('#pxHost').value = '127.0.0.1';
+  $('#pxPort').value = '1080';
+  $('#proxyErr').textContent = 'Requires an active SSH tunnel (e.g. ssh -D 1080 user@vps) or local SOCKS5 client.';
+};
+$('#pxPresetTor').onclick = () => {
+  $('#pxName').value = 'Tor Local Proxy';
+  $('#pxScheme').value = 'socks5';
+  $('#pxHost').value = '127.0.0.1';
+  $('#pxPort').value = '9050';
+  $('#proxyErr').textContent = 'Requires Tor service running locally on port 9050.';
+};
+
+$('#proxyAddBtn').onclick = () => openProxyForm(null);
+$('#pxCancel').onclick = () => { $('#proxyForm').style.display = 'none'; };
+$('#pxPass').addEventListener('input', () => { if($('#pxPass').value) pxKeepPass = false; });
+$('#pxSave').onclick = async () => {
+  const payload = {
+    id: pxEditId,
+    name: $('#pxName').value.trim(),
+    scheme: $('#pxScheme').value,
+    host: $('#pxHost').value.trim(),
+    port: Number($('#pxPort').value) || 0,
+    user: $('#pxUser').value.trim(),
+    pass: $('#pxPass').value,
+    keepPass: pxKeepPass && !$('#pxPass').value,
+    bypass: $('#pxBypass').value.trim()
+  };
+  try {
+    const r = await fetch('/api/proxy/save', { method:'POST', body: JSON.stringify(payload), cache:'no-store' });
+    const j = await r.json();
+    if(!r.ok){ $('#proxyErr').textContent = j.error || 'Could not save profile.'; return; }
+    $('#proxyForm').style.display = 'none';
+    flash();
+    await loadProxy();
+  } catch(e){ $('#proxyErr').textContent = 'Could not save profile.'; }
+};
+$('#proxyEnabled').onclick = async () => {
+  const next = !$('#proxyEnabled').classList.contains('on');
+  await fetch('/api/proxy/toggle?enabled=' + (next ? 1 : 0), {cache:'no-store'});
+  flash(); loadProxy();
+};
+$('#proxyNoWebRtc').onclick = async () => {
+  const next = !$('#proxyNoWebRtc').classList.contains('on');
+  await fetch('/api/proxy/webrtc?on=' + (next ? 1 : 0), {cache:'no-store'});
+  flash(); loadProxy();
+};
 
 async function set(key, value){
   try {
@@ -612,6 +1053,62 @@ async function set(key, value){
   } catch(e){ return false; }
 }
 
+let engEditId = '';
+function renderCustomEngines(c){
+  const box = $('#engList'); if(!box) return;
+  box.innerHTML = '';
+  const customs = (c.engines || []).filter(e => e.custom);
+  if(!customs.length){
+    const empty = document.createElement('div'); empty.className = 'px-empty';
+    empty.textContent = 'No custom search engines added yet.';
+    box.appendChild(empty);
+    return;
+  }
+  for(const e of customs){
+    const item = document.createElement('div');
+    const active = c.search === e.id;
+    item.className = 'px-item' + (active ? ' active' : '');
+    const meta = document.createElement('div'); meta.className = 'px-meta';
+    const b = document.createElement('b'); b.textContent = e.name;
+    const sp = document.createElement('span'); sp.textContent = e.url || '';
+    meta.append(b, sp);
+    const acts = document.createElement('div'); acts.className = 'pair';
+    const useBtn = document.createElement('button'); useBtn.className = 'tog' + (active ? ' on' : '');
+    useBtn.textContent = active ? 'ACTIVE' : 'USE';
+    useBtn.onclick = async () => { await set('search', e.id); load(); };
+    const edBtn = document.createElement('button'); edBtn.className = 'btn'; edBtn.textContent = 'EDIT';
+    edBtn.onclick = () => openEngForm(e);
+    const delBtn = document.createElement('button'); delBtn.className = 'tog'; delBtn.textContent = 'DEL';
+    delBtn.onclick = async () => {
+      await fetch('/api/engines/delete?id=' + encodeURIComponent(e.id), {cache:'no-store'});
+      flash(); load();
+    };
+    acts.append(useBtn, edBtn, delBtn);
+    item.append(meta, acts);
+    box.appendChild(item);
+  }
+}
+function openEngForm(e){
+  engEditId = e ? e.id : '';
+  $('#engFormTitle').textContent = e ? ('EDIT ENGINE: ' + e.name) : 'ADD CUSTOM SEARCH ENGINE';
+  $('#engName').value = e ? e.name : '';
+  $('#engUrl').value = e ? (e.url || '') : '';
+  $('#engErr').textContent = '';
+  $('#engForm').style.display = '';
+  $('#engName').focus();
+}
+$('#engAddBtn').onclick = () => openEngForm(null);
+$('#engCancel').onclick = () => { $('#engForm').style.display = 'none'; };
+$('#engSave').onclick = async () => {
+  const payload = { id: engEditId, name: $('#engName').value.trim(), url: $('#engUrl').value.trim() };
+  try {
+    const r = await fetch('/api/engines/save', { method:'POST', body: JSON.stringify(payload), cache:'no-store' });
+    const j = await r.json();
+    if(!r.ok){ $('#engErr').textContent = j.error || 'Could not save search engine.'; return; }
+    $('#engForm').style.display = 'none';
+    flash(); load();
+  } catch(e){ $('#engErr').textContent = 'Request failed.'; }
+};
 $('#engine').onchange = async () => { await set('search', $('#engine').value); load(); };
 $('#defaultBrowser').onclick = async () => { await set('defaultBrowser', '1'); };
 let updPoll = 0, lastUpdState = 'idle';
@@ -659,7 +1156,16 @@ $('#checkUpdate').onclick = async () => {
   const act = lastUpdState === 'ready' ? 'restart' : lastUpdState === 'available' ? 'download' : '1';
   if(await set('checkUpdate', act)) load();
 };
-for(const k of ['smoothStep', 'smoothTime', 'devDock']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
+for(const k of ['smoothStep', 'smoothTime', 'devDock', 'dohMode', 'dohProvider']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
+async function saveDohCustom(){
+  const v = $('#dohCustom').value.trim();
+  if(v && (!/^https:\/\/[^\s]+$/i.test(v) || v.length >= 300)){ $('#dohErr').textContent = 'Must be a valid https:// URL without spaces.'; return; }
+  $('#dohErr').textContent = '';
+  if(!(await set('dohCustom', v))) $('#dohErr').textContent = 'That DoH URL was not accepted.';
+  else load();
+}
+$('#dohCustomSave').onclick = saveDohCustom;
+$('#dohCustom').addEventListener('keydown', e => { if(e.key === 'Enter') saveDohCustom(); });
 for(const [id, key] of [['#askDownload','askDownload'], ['#forceDark','forceDark'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#bookmarksBar','bookmarksBar'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds']]){
   $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };
 }
@@ -725,13 +1231,24 @@ function applyFilter(){
     const toc = tocLinks.find(a => a.getAttribute('href') === '#' + sec.id);
     if(!q){
       sec.classList.remove('hidden');
-      sec.querySelectorAll('.row, h2.subhead, .about').forEach(el => el.classList.remove('hidden'));
+      sec.querySelectorAll('.row, h2.subhead, .about, .kb-row, .kb-group').forEach(el => el.classList.remove('hidden'));
       if(toc) toc.classList.remove('dim');
       visibleSecs++;
       continue;
     }
     const secHeadText = Array.from(sec.querySelectorAll('h2')).map(h => h.textContent.toLowerCase()).join(' ');
     const headHit = secHeadText.includes(q);
+    if(sec.id === 'sec-keys'){
+      sec.querySelectorAll('.kb-row').forEach(kr => kr.classList.toggle('hidden', !(headHit || kr.textContent.toLowerCase().includes(q))));
+      sec.querySelectorAll('.kb-group').forEach(kg => {
+        let nx = kg.nextElementSibling, hasVis = false;
+        while(nx && !nx.classList.contains('kb-group')){
+          if(!nx.classList.contains('hidden')){ hasVis = true; break; }
+          nx = nx.nextElementSibling;
+        }
+        kg.classList.toggle('hidden', !hasVis);
+      });
+    }
     let hits = 0;
     for(const r of sec.querySelectorAll('.row')){
       const hit = headHit || r.textContent.toLowerCase().includes(q);

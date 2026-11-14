@@ -9,6 +9,9 @@
 // (tabs, address bar) is a CEF browser showing ui/chrome.html; each tab is a
 // CEF browser created as a child window below it.
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -22,6 +25,7 @@
 #include <set>
 #include <unordered_set>
 #include <mutex>
+#include <thread>
 #include <wincrypt.h>
 #pragma comment(lib, "crypt32.lib")
 #include <iphlpapi.h>
@@ -36,6 +40,7 @@
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
 #include "include/cef_parser.h"
+#include "include/cef_preference.h"
 #include "include/cef_sandbox_win.h"
 #include "include/cef_scheme.h"
 #include "include/cef_v8.h"
@@ -99,6 +104,8 @@ static const UINT WM_APP_CLEARDATA = WM_APP + 10;   // lParam = new ClearReq (fr
 static const UINT WM_APP_DIALOG = WM_APP + 12;      // lParam = new DlgReq (a page dialog, permission prompt or sign-in to show in the NeonNet theme)
 static const UINT WM_APP_DEVOPEN = WM_APP + 13;     // wParam = tab id: open its developer tools again (after a change of their position)
 static const UINT WM_APP_CLEARSITES = WM_APP + 11;  // lParam = new ClearSites (cookies are done, site data is next)
+static const UINT WM_APP_PROXY = WM_APP + 14;       // apply proxy & WebRTC prefs after /api/proxy/* changes
+static const UINT WM_APP_THEME = WM_APP + 15;       // refresh chrome/tabs after theme accent or keybinding change
 
 static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5,
                       TIMER_ALERT = 6, TIMER_TEMP = 7, TIMER_PERF = 8, TIMER_TRIM = 9, TIMER_AUDIO = 10,
@@ -111,7 +118,8 @@ enum Cmd {
     CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
     CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE,
     CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_BOOKMARKS_BAR, CMD_HISTORY,
-    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS, CMD_EXTENSIONS, CMD_HELP, CMD_CARET
+    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS, CMD_EXTENSIONS, CMD_HELP, CMD_CARET,
+    CMD_PALETTE, CMD_PIN_TAB, CMD_MUTE_TAB, CMD_FORCEDARK, CMD_PROXY_TOGGLE
 };
 enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW };
 
@@ -199,7 +207,7 @@ struct App {
     // performance panel
     CefRefPtr<CefBrowser> panel;
     std::atomic<int> panelId{ 0 };
-    bool panelOpen = false, creatingPanel = false;
+    bool panelOpen = false, creatingPanel = false, panelReady = false;
     perf::Snapshot perfSnap;
     unsigned long long perfTotal = 0, perfBrowser = 0;   // bytes: all processes, the browser process alone
     double perfCpu = 0;
@@ -281,6 +289,10 @@ struct App {
     std::map<std::wstring, ULONGLONG> tempOpened;
     std::wstring pendingPlayerUrl;   // media URL to download as a temporary copy for the system player
     std::wstring pendingSaveUrl;     // media URL the user chose to save: no second question
+    // DNS-over-HTTPS (DoH) settings (registry DohMode, DohProvider, DohCustom)
+    std::wstring dohMode = L"automatic";
+    std::wstring dohProvider = L"cloudflare";
+    std::wstring dohCustom;
     // recently closed tabs, newest last
     std::vector<ClosedTab> closed;
 };
@@ -299,7 +311,11 @@ static void SyncUpdSnap(const wchar_t* result = nullptr, const std::wstring& err
     g_updSnap.version = g.updVersion;
     if (result) { g_updSnap.result = result; g_updSnap.error = err; }
 }
-static COLORREF Accent() { return g.incognito ? C_GREEN : C_PINK; }   // window frame, status bar line, menu marks
+static std::atomic<DWORD> g_accentCol{ C_PINK };
+static std::atomic<DWORD> g_cyanCol{ C_CYAN };
+static std::atomic<bool> g_kbCapturing{ false };
+static COLORREF Accent() { return g.incognito ? C_GREEN : (COLORREF)g_accentCol.load(); }   // window frame, status bar line, menu marks
+static COLORREF SecondaryAccent() { return (COLORREF)g_cyanCol.load(); }
 
 // Search engines for text typed in the address bar. `id` is what is saved in the registry.
 struct SearchEngine { const wchar_t* id; const wchar_t* name; const wchar_t* url; };
@@ -314,6 +330,52 @@ static const int SEARCH_ENGINE_COUNT = (int)(sizeof(SEARCH_ENGINES) / sizeof(SEA
 static const SearchEngine& CurrentEngine() {
     int i = g.engine.load();
     return SEARCH_ENGINES[i >= 0 && i < SEARCH_ENGINE_COUNT ? i : 0];
+}
+
+// DNS-over-HTTPS (DoH) preset providers. `id` is saved in the registry.
+struct DohProvider { const wchar_t* id; const wchar_t* name; const wchar_t* tmpl; };
+static const DohProvider DOH_PROVIDERS[] = {
+    { L"cloudflare", L"Cloudflare (1.1.1.1)",       L"https://cloudflare-dns.com/dns-query" },
+    { L"google",     L"Google (8.8.8.8)",           L"https://dns.google/dns-query" },
+    { L"quad9",      L"Quad9 (Security)",           L"https://dns.quad9.net/dns-query" },
+    { L"adguard",    L"AdGuard DNS (Ad-blocking)",  L"https://dns.adguard-dns.com/dns-query" },
+    { L"opendns",    L"Cisco OpenDNS",              L"https://doh.opendns.com/dns-query" },
+    { L"custom",     L"Custom URL",                 L"" },
+};
+static const int DOH_PROVIDER_COUNT = (int)(sizeof(DOH_PROVIDERS) / sizeof(DOH_PROVIDERS[0]));
+
+static std::wstring ResolveDohTemplate(const std::wstring& provider, const std::wstring& custom) {
+    if (provider == L"custom") return custom;
+    for (int i = 0; i < DOH_PROVIDER_COUNT; i++) {
+        if (provider == DOH_PROVIDERS[i].id) return DOH_PROVIDERS[i].tmpl;
+    }
+    return DOH_PROVIDERS[0].tmpl;
+}
+
+static bool ValidDohCustomUrl(const std::wstring& url) {
+    if (url.empty()) return true;
+    if (url.size() >= 300 || url.rfind(L"https://", 0) != 0) return false;
+    if (url.size() <= 8) return false;
+    for (wchar_t c : url) {
+        if (c <= 0x20 || c == 0x7f) return false;
+    }
+    return true;
+}
+
+static void ApplyDohPrefs() {
+    CefRefPtr<CefPreferenceManager> pm = CefPreferenceManager::GetGlobalPreferenceManager();
+    if (!pm) return;
+    std::wstring mode = g.dohMode;
+    if (mode != L"off" && mode != L"automatic" && mode != L"secure") mode = L"automatic";
+    std::wstring tmpl = (mode == L"secure") ? ResolveDohTemplate(g.dohProvider, g.dohCustom) : L"";
+    if (mode == L"secure" && tmpl.empty()) mode = L"automatic";
+    CefRefPtr<CefValue> mv = CefValue::Create();
+    mv->SetString(mode);
+    CefRefPtr<CefValue> tv = CefValue::Create();
+    tv->SetString(tmpl);
+    CefString err;
+    pm->SetPreference("dns_over_https.mode", mv, err);
+    pm->SetPreference("dns_over_https.templates", tv, err);
 }
 
 // ---------------------------------------------------------------------------
@@ -476,14 +538,14 @@ static RECT ChromeRect() {
     RECT rc; GetClientRect(g.hwnd, &rc); int b = Frame();
     return { b, b, rc.right - b, b + S(CHROME_DIP + (g.bookmarksBar ? BM_BAR_DIP : 0) + (g.findOpen ? FIND_DIP : 0)) };
 }
-// The toolbar browser grows downwards over the page while the address bar suggestions are
-// open, and is raised above the page for it. ContentRect() does not change, so the page
-// underneath is not re-laid out.
+// The toolbar browser always covers the full interior height, clipped by SetWindowRgn to
+// either the toolbar rows alone or toolbar + active dropdown/palette card. Keeping its HWND
+// full-height prevents SwapChain resize flashes (white bars) when popups open.
 static RECT ChromeHostRect() {
     RECT r = ChromeRect();
-    if (g.dropNeed > 0 && !g.fullscreen) {
+    if (!g.fullscreen) {
         RECT rc; GetClientRect(g.hwnd, &rc);
-        r.bottom = std::min((int)rc.bottom - Frame(), std::max((int)r.bottom, (int)r.top + S(g.dropNeed)));
+        r.bottom = std::max(r.bottom, rc.bottom - Frame() - S(STATUS_DIP));
     }
     return r;
 }
@@ -516,6 +578,80 @@ static void UpdateRegion() {
     SetWindowRgn(g.hwnd, CreatePolygonRgn(pts, 6, WINDING), TRUE);
 }
 
+static HBRUSH BgBrush() {
+    static HBRUSH br = CreateSolidBrush(C_BG);
+    return br;
+}
+
+static LRESULT CALLBACK DarkChildProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    WNDPROC orig = (WNDPROC)GetPropW(hwnd, L"NN_OrigProc");
+    if (msg == WM_ERASEBKGND) {
+        HDC hdc = (HDC)wp;
+        RECT rc;
+        if (hdc && GetClipBox(hdc, &rc) != ERROR) FillRect(hdc, &rc, BgBrush());
+        else if (hdc) { GetClientRect(hwnd, &rc); FillRect(hdc, &rc, BgBrush()); }
+        return 1;
+    }
+    if (msg == WM_NCDESTROY) {
+        RemovePropW(hwnd, L"NN_OrigProc");
+        return orig ? CallWindowProcW(orig, hwnd, msg, wp, lp) : 0;
+    }
+    return orig ? CallWindowProcW(orig, hwnd, msg, wp, lp) : DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static void DarkenHwnd(HWND h) {
+    if (!h) return;
+    DWORD pid = 0;
+    DWORD tid = GetWindowThreadProcessId(h, &pid);
+    if (pid != GetCurrentProcessId()) return;
+    if ((HBRUSH)GetClassLongPtrW(h, GCLP_HBRBACKGROUND) != BgBrush()) {
+        SetClassLongPtrW(h, GCLP_HBRBACKGROUND, (LONG_PTR)BgBrush());
+    }
+    if (tid == GetCurrentThreadId() && !GetPropW(h, L"NN_OrigProc")) {
+        WNDPROC cur = (WNDPROC)GetWindowLongPtrW(h, GWLP_WNDPROC);
+        if (cur && cur != DarkChildProc) {
+            SetPropW(h, L"NN_OrigProc", (HANDLE)cur);
+            SetWindowLongPtrW(h, GWLP_WNDPROC, (LONG_PTR)DarkChildProc);
+        }
+    }
+}
+
+static BOOL CALLBACK DarkenEnumProc(HWND h, LPARAM) {
+    DarkenHwnd(h);
+    return TRUE;
+}
+
+static void DarkenBrowserWindow(HWND root) {
+    if (!root) return;
+    DarkenHwnd(root);
+    EnumChildWindows(root, DarkenEnumProc, 0);
+}
+
+static void UpdateChromeRegion() {
+    if (!g.chrome || g.fullscreen) return;
+    HWND cw = g.chrome->GetHost()->GetWindowHandle();
+    if (!cw) return;
+    DarkenBrowserWindow(cw);
+    RECT r = ChromeHostRect(), nav = ChromeRect();
+    int w = r.right - r.left, navH = nav.bottom - nav.top, h = r.bottom - r.top;
+    if (w <= 0 || h <= 0) return;
+    if (g.dropNeed > 0) {
+        SetWindowPos(cw, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        int dropH = std::min(h, std::max(navH, S(g.dropNeed)));
+        if (g.dropX1 > g.dropX0) {
+            HRGN a = CreateRectRgn(0, 0, w, navH);
+            HRGN b = CreateRectRgn(std::max(0, S(g.dropX0)), navH, std::min(w, S(g.dropX1)), dropH);
+            CombineRgn(a, a, b, RGN_OR);
+            DeleteObject(b);
+            SetWindowRgn(cw, a, TRUE);
+        } else {
+            SetWindowRgn(cw, CreateRectRgn(0, 0, w, dropH), TRUE);
+        }
+    } else {
+        SetWindowRgn(cw, CreateRectRgn(0, 0, w, navH), TRUE);
+    }
+}
+
 static void Place(CefRefPtr<CefBrowser> b, const RECT& r, bool visible, bool raise = false, bool bottom = false) {
     if (!b) return;
     HWND w = b->GetHost()->GetWindowHandle();
@@ -523,8 +659,9 @@ static void Place(CefRefPtr<CefBrowser> b, const RECT& r, bool visible, bool rai
     bool wasVisible = IsWindowVisible(w) != FALSE;
     if (!visible && !wasVisible) return;   // hidden background tab already hidden: skip SetWindowPos
     if (visible) {
-        SetWindowPos(w, bottom ? HWND_BOTTOM : raise ? HWND_TOP : nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top,
-                     ((raise || bottom) ? 0 : SWP_NOZORDER) | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        DarkenBrowserWindow(w);
+        UINT flags = ((raise || bottom) ? 0 : SWP_NOZORDER) | SWP_NOACTIVATE | SWP_NOCOPYBITS | (wasVisible ? 0 : SWP_SHOWWINDOW);
+        SetWindowPos(w, bottom ? HWND_BOTTOM : raise ? HWND_TOP : nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top, flags);
         if (!wasVisible) b->GetHost()->WasHidden(false);
     } else {
         ShowWindow(w, SW_HIDE);
@@ -535,21 +672,15 @@ static void Place(CefRefPtr<CefBrowser> b, const RECT& r, bool visible, bool rai
 static void Layout() {
     if (!g.hwnd) return;
     if (g.chrome) {
-        Place(g.chrome, ChromeHostRect(), !g.fullscreen, g.dropNeed > 0);
-        // A dropdown that is narrower than the toolbar (the site panel): only the toolbar row and the panel
-        // itself belong to the toolbar window, so the page stays visible beside the panel.
-        if (HWND cw = g.chrome->GetHost()->GetWindowHandle()) {
-            RECT r = ChromeHostRect(), nav = ChromeRect();
-            if (g.dropNeed > 0 && g.dropX1 > g.dropX0 && !g.fullscreen) {
-                int w = r.right - r.left, navH = nav.bottom - nav.top, h = r.bottom - r.top;
-                HRGN a = CreateRectRgn(0, 0, w, navH), b = CreateRectRgn(std::max(0, S(g.dropX0)), navH, std::min(w, S(g.dropX1)), h);
-                CombineRgn(a, a, b, RGN_OR);
-                DeleteObject(b);
-                SetWindowRgn(cw, a, TRUE);
-            } else SetWindowRgn(cw, nullptr, TRUE);
+        Place(g.chrome, ChromeHostRect(), !g.fullscreen, true);
+        UpdateChromeRegion();
+    }
+    if (g.panel) {
+        Place(g.panel, PanelRect(), g.panelOpen && !g.fullscreen);
+        if (HWND pw = g.panel->GetHost()->GetWindowHandle()) {
+            SetWindowRgn(pw, (g.panelOpen && !g.fullscreen && !g.panelReady) ? CreateRectRgn(0, 0, 0, 0) : nullptr, FALSE);
         }
     }
-    if (g.panel) Place(g.panel, PanelRect(), g.panelOpen && !g.fullscreen);
     RECT content = ContentRect();
     for (auto& t : g.tabs) {
         RECT pr = content;
@@ -684,6 +815,12 @@ static void LoadWorkspaces() {
     EnsureDefaultWorkspaces();
 }
 
+static std::wstring ProxyStateJson();
+
+static std::wstring ThemeStateJson();
+static std::wstring KeybindsMapJson();
+static void CurrentEngineInfo(std::wstring& idOut, std::wstring& nameOut, std::wstring& urlOut);
+static std::string EnginesJsonArray(bool includeUrl);
 static void SendState() {
     EnsureDefaultWorkspaces();
     Tab* a = Active();
@@ -737,18 +874,51 @@ static void SendState() {
     j += std::wstring(L",\"find\":") + (g.findOpen ? L"true" : L"false");
     j += std::wstring(L",\"findCase\":") + (g.findCase ? L"true" : L"false");
     j += L",\"findText\":" + JsonStr(g.findText);
-    j += L",\"search\":" + JsonStr(CurrentEngine().url);
+    {
+        std::wstring seId, seName, seUrl;
+        CurrentEngineInfo(seId, seName, seUrl);
+        j += L",\"search\":" + JsonStr(seUrl);
+        j += L",\"searchId\":" + JsonStr(seId);
+        j += L",\"searchName\":" + JsonStr(seName);
+        j += L",\"engines\":" + Wide(EnginesJsonArray(false));
+    }
     j += L",\"site\":" + SiteJson(cur);
+    j += L",\"proxy\":" + ProxyStateJson();
+    j += L",\"theme\":" + ThemeStateJson();
+    j += L",\"keys\":" + KeybindsMapJson();
     j += L"}";
     if (j == g.lastStateJson) return;
     g.lastStateJson = j;
     RunInChrome(L"window.__nn&&window.__nn(" + j + L")");
 }
 
-static void FocusPage() { if (Tab* a = Active()) if (a->browser) a->browser->GetHost()->SetFocus(true); }
+static void FocusPage() {
+    if (Tab* a = Active()) if (a->browser) {
+        if (HWND pw = a->browser->GetHost()->GetWindowHandle()) ::SetFocus(pw);
+        a->browser->GetHost()->SetFocus(true);
+    }
+}
+static BOOL CALLBACK FocusRwhProc(HWND h, LPARAM lp) {
+    wchar_t cls[64]{};
+    GetClassNameW(h, cls, 64);
+    if (wcscmp(cls, L"Chrome_RenderWidgetHostHWND") == 0) {
+        *(HWND*)lp = h;
+        return FALSE;
+    }
+    return TRUE;
+}
+static void FocusChrome() {
+    if (!g.chrome) return;
+    if (HWND cw = g.chrome->GetHost()->GetWindowHandle()) {
+        HWND rwh = nullptr;
+        EnumChildWindows(cw, FocusRwhProc, (LPARAM)&rwh);
+        ::SetFocus(rwh ? rwh : cw);
+    }
+    g.chrome->GetHost()->SetFocus(true);
+}
 static void FocusUrl() {
     if (!g.chrome) return;
-    g.chrome->GetHost()->SetFocus(true);
+    FocusChrome();
     RunInChrome(L"window.__nn&&window.__nn({type:'focusUrl'})");
 }
 
@@ -776,7 +946,7 @@ static void OpenFind() {
     g.findOpen = true;
     if (!was) { Layout(); SendState(); }
     if (g.chrome) {
-        g.chrome->GetHost()->SetFocus(true);
+        FocusChrome();
         RunInChrome(L"window.__nn&&window.__nn({type:'focusFind'})");
     }
     if (!was && !g.findText.empty()) DoFind(true);
@@ -1052,6 +1222,1136 @@ static void PwClear() { std::lock_guard<std::mutex> lk(g_pwMu); g_pw.clear(); Pw
 static size_t PwCount() { std::lock_guard<std::mutex> lk(g_pwMu); return g_pw.size(); }
 static std::string PwJsonList();   // below, next to JsonUtf8
 
+static std::string PwJsonList();   // below, next to JsonUtf8
+
+// ---------------------------------------------------------------------------
+// Built-in Proxy / Tunnel switcher (Opera GX-style per-browser routing)
+// Profiles live in %LOCALAPPDATA%\NeonNet\proxies.dat with DPAPI-encrypted
+// passwords (Windows user-scoped). Applies only inside NeonNet via CEF's
+// "proxy" and "webrtc.ip_handling_policy" preferences.
+
+struct ProxyProfile {
+    int id = 0;
+    std::wstring name, scheme, host, user, bypass;
+    int port = 1080;
+    std::string passBlob;
+};
+static std::mutex g_proxyMu;
+static std::vector<ProxyProfile> g_proxyList;
+static int g_proxyNextId = 1;
+static bool g_proxyEnabled = false;
+static int g_proxyActiveId = 1;
+static bool g_proxyNoWebRtcLeak = true;
+static bool g_proxyChecking = false;
+static std::wstring g_proxyError;
+static uint64_t g_proxyCheckGen = 0;
+static ULONGLONG g_proxyAuthLastTick = 0;
+static int g_proxyAuthBurst = 0;
+static std::wstring g_proxyAuthKey;
+
+static std::wstring ProxyPath() { return KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME + L"\\proxies.dat"; }
+
+static bool ValidProxyField(const std::wstring& s, size_t maxLen) {
+    if (s.size() > maxLen) return false;
+    for (wchar_t c : s) if (c < 0x20 || c == 0x7f || c == L'\t' || c == L'\r' || c == L'\n') return false;
+    return true;
+}
+
+static bool ValidProxyHost(const std::wstring& h) {
+    if (h.empty() || h.size() > 253) return false;
+    for (wchar_t c : h) {
+        if (c <= 0x20 || c == 0x7f || c == L'/' || c == L'\\' || c == L'@' || c == L'?' || c == L'#') return false;
+    }
+    return true;
+}
+
+static void ProxySaveLocked() {
+    if (g.incognito) return;
+    std::string text = "NEONNET-PROXIES 1\n";
+    for (const auto& p : g_proxyList) {
+        std::string hdr;
+        std::string meta = Utf8(p.name) + "\x1f" + Utf8(p.scheme) + "\x1f" + Utf8(p.host) + "\x1f" +
+                           std::to_string(p.port) + "\x1f" + Utf8(p.user) + "\x1f" + Utf8(p.bypass);
+        if (DpProtect(meta, hdr)) text += "P\t" + std::to_string(p.id) + "\t" + B64(hdr) + "\t" + B64(p.passBlob) + "\n";
+    }
+    std::wstring path = ProxyPath(), tmp = path + L".tmp";
+    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD w = 0;
+    bool ok = WriteFile(h, text.data(), (DWORD)text.size(), &w, nullptr) && w == text.size();
+    CloseHandle(h);
+    if (!ok || !MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str());
+}
+
+static void ProxySeedDefaultsLocked() {
+    g_proxyList.clear();
+    g_proxyNextId = 1;
+}
+
+static void ProxyLoad() {
+    std::lock_guard<std::mutex> lk(g_proxyMu);
+    g_proxyList.clear();
+    g_proxyNextId = 1;
+    g_proxyEnabled = RegGetDword(L"ProxyEnabled", 0) != 0;
+    g_proxyActiveId = (int)RegGetDword(L"ProxyActiveId", 1);
+    g_proxyNoWebRtcLeak = RegGetDword(L"ProxyNoWebRtcLeak", 1) != 0;
+
+    HANDLE h = CreateFileW(ProxyPath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        ProxySeedDefaultsLocked();
+        ProxySaveLocked();
+        return;
+    }
+    DWORD size = GetFileSize(h, nullptr), got = 0;
+    std::string data;
+    if (size > 0 && size < 4 * 1024 * 1024) {
+        data.resize(size);
+        if (!ReadFile(h, &data[0], size, &got, nullptr) || got != size) data.clear();
+    }
+    CloseHandle(h);
+    size_t pos = data.find('\n');
+    if (pos != std::string::npos && data.compare(0, pos, "NEONNET-PROXIES 1") == 0) {
+        for (++pos; pos < data.size();) {
+            size_t e = data.find('\n', pos);
+            if (e == std::string::npos) e = data.size();
+            std::string line = data.substr(pos, e - pos);
+            pos = e + 1;
+            std::vector<std::string> f;
+            for (size_t s = 0;;) { size_t t = line.find('\t', s); f.push_back(line.substr(s, t == std::string::npos ? std::string::npos : t - s)); if (t == std::string::npos) break; s = t + 1; }
+            std::string hdr, meta;
+            if (f.size() == 4 && f[0] == "P" && UnB64(f[2], hdr) && DpUnprotect(hdr, meta)) {
+                std::vector<std::string> m;
+                for (size_t s = 0;;) { size_t t = meta.find('\x1f', s); m.push_back(meta.substr(s, t == std::string::npos ? std::string::npos : t - s)); if (t == std::string::npos) break; s = t + 1; }
+                if (m.size() == 6) {
+                    ProxyProfile p;
+                    p.id = std::max(1, atoi(f[1].c_str()));
+                    p.name = Wide(m[0]); p.scheme = Wide(m[1]); p.host = Wide(m[2]);
+                    p.port = atoi(m[3].c_str()); p.user = Wide(m[4]); p.bypass = Wide(m[5]);
+                    UnB64(f[3], p.passBlob);
+                    if ((p.scheme == L"socks5" || p.scheme == L"https" || p.scheme == L"http") &&
+                        ValidProxyHost(p.host) && p.port >= 1 && p.port <= 65535 && !p.name.empty()) {
+                        g_proxyNextId = std::max(g_proxyNextId, p.id + 1);
+                        g_proxyList.push_back(std::move(p));
+                    }
+                }
+            }
+            if (g_proxyList.size() >= 64) break;
+        }
+    }
+    if (g_proxyList.empty()) {
+        g_proxyEnabled = false;
+    } else {
+        bool found = false;
+        for (const auto& p : g_proxyList) if (p.id == g_proxyActiveId) found = true;
+        if (!found) g_proxyActiveId = g_proxyList.front().id;
+    }
+}
+
+static void ApplyProxyPrefs() {
+    bool enabled = false, noLeak = true, haveProf = false;
+    ProxyProfile active;
+    {
+        std::lock_guard<std::mutex> lk(g_proxyMu);
+        enabled = g_proxyEnabled;
+        noLeak = g_proxyNoWebRtcLeak;
+        for (const auto& p : g_proxyList) {
+            if (p.id == g_proxyActiveId) { active = p; haveProf = true; break; }
+        }
+        if (!haveProf && !g_proxyList.empty()) {
+            active = g_proxyList.front();
+            g_proxyActiveId = active.id;
+            haveProf = true;
+        }
+        if (!haveProf) enabled = false;
+    }
+    CefRefPtr<CefDictionaryValue> pd = CefDictionaryValue::Create();
+    if (enabled && haveProf) {
+        std::wstring host = active.host.find(L':') != std::wstring::npos ? (L"[" + active.host + L"]") : active.host;
+        std::wstring srv = active.scheme + L"://" + host + L":" + std::to_wstring(active.port);
+        std::wstring bypass = L"<local>;localhost;127.0.0.1;::1;neonnet.ui;chrome.neonnet.ui";
+        if (!active.bypass.empty()) bypass += L";" + active.bypass;
+        pd->SetString("mode", "fixed_servers");
+        pd->SetString("server", srv);
+        pd->SetString("bypass_list", bypass);
+    } else {
+        pd->SetString("mode", "system");
+    }
+    CefRefPtr<CefValue> pv = CefValue::Create();
+    pv->SetDictionary(pd);
+    CefRefPtr<CefValue> wv = CefValue::Create();
+    wv->SetString((enabled && noLeak) ? "disable_non_proxied_udp" : "default");
+
+    auto applyTo = [&](CefRefPtr<CefRequestContext> ctx) {
+        if (!ctx) return;
+        CefString err;
+        ctx->SetPreference("proxy", pv, err);
+        ctx->SetPreference("webrtc.ip_handling_policy", wv, err);
+    };
+    applyTo(CefRequestContext::GetGlobalContext());
+    if (g.incognito && g.reqCtx) applyTo(g.reqCtx);
+}
+
+static bool ProxyTcpReachable(const std::wstring& host, int port, int timeoutMs) {
+    static std::once_flag wsaOnce;
+    std::call_once(wsaOnce, [] { WSADATA w; WSAStartup(MAKEWORD(2, 2), &w); });
+    ADDRINFOW hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    ADDRINFOW* res = nullptr;
+    std::wstring portStr = std::to_wstring(port);
+    if (GetAddrInfoW(host.c_str(), portStr.c_str(), &hints, &res) != 0 || !res) return false;
+    bool ok = false;
+    for (ADDRINFOW* p = res; p && !ok; p = p->ai_next) {
+        SOCKET s = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        if (s == INVALID_SOCKET) continue;
+        u_long nb = 1;
+        ioctlsocket(s, FIONBIO, &nb);
+        int rc = connect(s, p->ai_addr, (int)p->ai_addrlen);
+        if (rc == 0) {
+            ok = true;
+        } else if (WSAGetLastError() == WSAEWOULDBLOCK) {
+            fd_set wfds, efds;
+            FD_ZERO(&wfds); FD_ZERO(&efds);
+            FD_SET(s, &wfds); FD_SET(s, &efds);
+            timeval tv{ timeoutMs / 1000, (timeoutMs % 1000) * 1000 };
+            if (select(0, nullptr, &wfds, &efds, &tv) > 0 && FD_ISSET(s, &wfds)) {
+                int err = 0; int elen = sizeof(err);
+                if (getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&err, &elen) == 0 && err == 0) ok = true;
+            }
+        }
+        closesocket(s);
+    }
+    FreeAddrInfoW(res);
+    return ok;
+}
+
+static void ProxyBeginEnableAsync(int targetId) {
+    std::wstring host;
+    int port = 0;
+    uint64_t gen = 0;
+    {
+        std::lock_guard<std::mutex> lk(g_proxyMu);
+        if (g_proxyList.empty()) {
+            g_proxyEnabled = false;
+            g_proxyChecking = false;
+            g_proxyError = L"No proxy server configured. Add a profile in Settings.";
+            if (g.hwnd) PostMessageW(g.hwnd, WM_APP_PROXY, 2, 0);
+            return;
+        }
+        int id = targetId > 0 ? targetId : g_proxyActiveId;
+        const ProxyProfile* act = &g_proxyList.front();
+        for (const auto& p : g_proxyList) if (p.id == id) { act = &p; break; }
+        g_proxyActiveId = act->id;
+        host = act->host;
+        port = act->port;
+        g_proxyChecking = true;
+        g_proxyError.clear();
+        gen = ++g_proxyCheckGen;
+    }
+    if (g.hwnd) PostMessageW(g.hwnd, WM_APP_PROXY, 0, 0);
+    std::thread([host, port, gen]() {
+        bool ok = ProxyTcpReachable(host, port, 1500);
+        {
+            std::lock_guard<std::mutex> lk(g_proxyMu);
+            if (gen != g_proxyCheckGen) return;
+            g_proxyChecking = false;
+            if (ok) {
+                g_proxyEnabled = true;
+                g_proxyError.clear();
+                g_proxyAuthBurst = 0;
+            } else {
+                g_proxyEnabled = false;
+                g_proxyError = L"Cannot reach " + host + L":" + std::to_wstring(port) +
+                               L" — make sure your proxy/SSH/Tor service is running.";
+            }
+        }
+        if (!g.incognito) {
+            DWORD v = ok ? 1 : 0;
+            RegSetBin(L"ProxyEnabled", REG_DWORD, &v, sizeof(v));
+        }
+        if (g.hwnd) PostMessageW(g.hwnd, WM_APP_PROXY, ok ? 1 : 2, 0);
+    }).detach();
+}
+
+static std::wstring ProxyStateJson() {
+    std::lock_guard<std::mutex> lk(g_proxyMu);
+    std::wstring o = std::wstring(L"{\"enabled\":") + (g_proxyEnabled && !g_proxyList.empty() ? L"true" : L"false") +
+                     L",\"checking\":" + (g_proxyChecking ? L"true" : L"false") +
+                     L",\"error\":" + JsonStr(g_proxyError) +
+                     L",\"activeId\":" + std::to_wstring(g_proxyActiveId) +
+                     L",\"noWebRtcLeak\":" + (g_proxyNoWebRtcLeak ? L"true" : L"false") + L",\"profiles\":[";
+    for (size_t i = 0; i < g_proxyList.size(); i++) {
+        const auto& p = g_proxyList[i];
+        if (i) o += L",";
+        o += L"{\"id\":" + std::to_wstring(p.id) + L",\"name\":" + JsonStr(p.name) +
+             L",\"scheme\":" + JsonStr(p.scheme) + L",\"host\":" + JsonStr(p.host) +
+             L",\"port\":" + std::to_wstring(p.port) +
+             L",\"hasAuth\":" + (!p.user.empty() || !p.passBlob.empty() ? L"true" : L"false") + L"}";
+    }
+    return o + L"]}";
+}
+
+static bool ProxySetEnabled(int mode) {
+    bool wantOn = false;
+    {
+        std::lock_guard<std::mutex> lk(g_proxyMu);
+        if (g_proxyList.empty()) wantOn = false;
+        else wantOn = (mode < 0) ? !(g_proxyEnabled || g_proxyChecking) : (mode != 0);
+        if (!wantOn) {
+            ++g_proxyCheckGen;
+            g_proxyChecking = false;
+            g_proxyEnabled = false;
+            g_proxyError.clear();
+            g_proxyAuthBurst = 0;
+        }
+    }
+    if (wantOn) {
+        ProxyBeginEnableAsync(0);
+        return true;
+    }
+    DWORD v = 0;
+    if (!g.incognito) RegSetBin(L"ProxyEnabled", REG_DWORD, &v, sizeof(v));
+    return false;
+}
+
+static bool ProxySelect(int id) {
+    bool recheck = false;
+    {
+        std::lock_guard<std::mutex> lk(g_proxyMu);
+        for (const auto& p : g_proxyList) {
+            if (p.id == id) { g_proxyActiveId = id; g_proxyAuthBurst = 0; g_proxyError.clear(); break; }
+        }
+        recheck = (g_proxyEnabled || g_proxyChecking) && !g_proxyList.empty();
+    }
+    DWORD v = (DWORD)g_proxyActiveId;
+    if (!g.incognito) RegSetBin(L"ProxyActiveId", REG_DWORD, &v, sizeof(v));
+    if (recheck) {
+        ProxyBeginEnableAsync(id);
+        return true;
+    }
+    return false;
+}
+
+static void ProxySetWebRtc(bool on) {
+    {
+        std::lock_guard<std::mutex> lk(g_proxyMu);
+        g_proxyNoWebRtcLeak = on;
+    }
+    DWORD v = on ? 1 : 0;
+    if (!g.incognito) RegSetBin(L"ProxyNoWebRtcLeak", REG_DWORD, &v, sizeof(v));
+}
+
+static bool ProxyAuthLookup(const std::wstring& host, int port, std::wstring& userOut, std::wstring& passOut) {
+    std::lock_guard<std::mutex> lk(g_proxyMu);
+    if (!g_proxyEnabled) return false;
+    ProxyProfile* act = nullptr;
+    for (auto& p : g_proxyList) if (p.id == g_proxyActiveId) { act = &p; break; }
+    if (!act || (act->user.empty() && act->passBlob.empty())) return false;
+    std::wstring lowReq = host, lowCfg = act->host;
+    for (auto& c : lowReq) c = (wchar_t)towlower(c);
+    for (auto& c : lowCfg) c = (wchar_t)towlower(c);
+    if (lowReq != lowCfg || (port > 0 && port != act->port)) return false;
+
+    std::wstring key = lowReq + L":" + std::to_wstring(port);
+    ULONGLONG now = GetTickCount64();
+    if (key == g_proxyAuthKey && now - g_proxyAuthLastTick < 3000) {
+        if (++g_proxyAuthBurst > 2) return false;
+    } else {
+        g_proxyAuthKey = key;
+        g_proxyAuthLastTick = now;
+        g_proxyAuthBurst = 1;
+    }
+    std::string plain;
+    if (!act->passBlob.empty() && !DpUnprotect(act->passBlob, plain)) return false;
+    userOut = act->user;
+    passOut = Wide(plain);
+    if (!plain.empty()) SecureZeroMemory(&plain[0], plain.size());
+    return true;
+}
+
+static std::string ProxyJsonList();   // below, next to JsonUtf8
+static std::string JsonUtf8(const std::wstring& w);
+static std::wstring RegGetString(const wchar_t* name);
+
+// ---------------------------------------------------------------------------
+// Theme Accent (customizable neon primary/secondary colors across UI & window frame)
+
+struct ThemePreset {
+    const wchar_t* id;
+    const wchar_t* name;
+    const wchar_t* pink;
+    const wchar_t* cyan;
+    COLORREF pinkCol;
+    COLORREF cyanCol;
+};
+static const ThemePreset THEME_PRESETS[] = {
+    { L"synthwave",   L"Synthwave (Default)", L"#ff2e97", L"#00e5ff", RGB(0xff, 0x2e, 0x97), RGB(0x00, 0xe5, 0xff) },
+    { L"cybergreen",  L"Cyber Matrix",        L"#35ffa0", L"#00e5ff", RGB(0x35, 0xff, 0xa0), RGB(0x00, 0xe5, 0xff) },
+    { L"plasma",      L"Electric Cyan",       L"#00e5ff", L"#b967ff", RGB(0x00, 0xe5, 0xff), RGB(0xb9, 0x67, 0xff) },
+    { L"amber",       L"Solar Amber",         L"#ff9a3c", L"#ffd600", RGB(0xff, 0x9a, 0x3c), RGB(0xff, 0xd6, 0x00) },
+    { L"crimson",     L"Crimson Edge",        L"#ff3355", L"#00e5ff", RGB(0xff, 0x33, 0x55), RGB(0x00, 0xe5, 0xff) },
+    { L"ultraviolet", L"Ultraviolet",         L"#c74cff", L"#00e5ff", RGB(0xc7, 0x4c, 0xff), RGB(0x00, 0xe5, 0xff) },
+};
+static const int THEME_PRESET_COUNT = (int)(sizeof(THEME_PRESETS) / sizeof(THEME_PRESETS[0]));
+
+static std::mutex g_themeMu;
+static std::wstring g_themePreset = L"synthwave";
+static std::wstring g_themePink = L"#ff2e97";
+static std::wstring g_themeCyan = L"#00e5ff";
+
+static bool ParseHexColor(const std::wstring& in, COLORREF& colOut, std::wstring& normOut) {
+    if (in.size() != 7 || in[0] != L'#') return false;
+    unsigned int val = 0;
+    for (int i = 1; i < 7; i++) {
+        wchar_t c = in[i];
+        int d = -1;
+        if (c >= L'0' && c <= L'9') d = c - L'0';
+        else if (c >= L'a' && c <= L'f') d = 10 + (c - L'a');
+        else if (c >= L'A' && c <= L'F') d = 10 + (c - L'A');
+        else return false;
+        val = (val << 4) | (unsigned int)d;
+    }
+    BYTE r = (BYTE)((val >> 16) & 0xff), g2 = (BYTE)((val >> 8) & 0xff), b = (BYTE)(val & 0xff);
+    colOut = RGB(r, g2, b);
+    wchar_t buf[16];
+    swprintf_s(buf, L"#%02x%02x%02x", r, g2, b);
+    normOut = buf;
+    return true;
+}
+
+static std::wstring LightenHex(COLORREF c) {
+    int r = (GetRValue(c) + 255) / 2, g2 = (GetGValue(c) + 255) / 2, b = (GetBValue(c) + 255) / 2;
+    wchar_t buf[16];
+    swprintf_s(buf, L"#%02x%02x%02x", r, g2, b);
+    return buf;
+}
+
+static void ThemeLoad() {
+    std::wstring pr = RegGetString(L"AccentPreset");
+    std::wstring pk = RegGetString(L"AccentPink");
+    std::wstring cy = RegGetString(L"AccentCyan");
+    COLORREF pCol = C_PINK, cCol = C_CYAN;
+    std::wstring nPink = L"#ff2e97", nCyan = L"#00e5ff", nPreset = L"synthwave";
+    bool foundPreset = false;
+    for (int i = 0; i < THEME_PRESET_COUNT; i++) {
+        if (pr == THEME_PRESETS[i].id) {
+            nPreset = THEME_PRESETS[i].id;
+            nPink = THEME_PRESETS[i].pink;
+            nCyan = THEME_PRESETS[i].cyan;
+            pCol = THEME_PRESETS[i].pinkCol;
+            cCol = THEME_PRESETS[i].cyanCol;
+            foundPreset = true;
+            break;
+        }
+    }
+    if (!foundPreset && pr == L"custom") {
+        nPreset = L"custom";
+        if (!ParseHexColor(pk, pCol, nPink)) { pCol = C_PINK; nPink = L"#ff2e97"; }
+        if (!ParseHexColor(cy, cCol, nCyan)) { cCol = C_CYAN; nCyan = L"#00e5ff"; }
+    }
+    std::lock_guard<std::mutex> lk(g_themeMu);
+    g_themePreset = nPreset;
+    g_themePink = nPink;
+    g_themeCyan = nCyan;
+    g_accentCol = (DWORD)pCol;
+    g_cyanCol = (DWORD)cCol;
+}
+
+static std::string ThemeRuleCss() {
+    std::wstring p, c; COLORREF pc, cc;
+    {
+        std::lock_guard<std::mutex> lk(g_themeMu);
+        p = g_themePink; c = g_themeCyan;
+        pc = (COLORREF)g_accentCol.load(); cc = (COLORREF)g_cyanCol.load();
+    }
+    std::wstring p2 = LightenHex(pc);
+    char buf[256];
+    _snprintf_s(buf, sizeof(buf), _TRUNCATE,
+                ":root:not(.incog){--pink:%s;--pink2:%s;--cyan:%s;--pink-rgb:%d,%d,%d;--cyan-rgb:%d,%d,%d;}",
+                Utf8(p).c_str(), Utf8(p2).c_str(), Utf8(c).c_str(),
+                GetRValue(pc), GetGValue(pc), GetBValue(pc),
+                GetRValue(cc), GetGValue(cc), GetBValue(cc));
+    return std::string(buf);
+}
+
+static std::string ThemeStyleTag() {
+    return "<style id=\"nn-accent\">" + ThemeRuleCss() + "</style>";
+}
+
+static std::wstring ThemeStateJson() {
+    std::wstring pr, pk, cy; COLORREF pc;
+    {
+        std::lock_guard<std::mutex> lk(g_themeMu);
+        pr = g_themePreset; pk = g_themePink; cy = g_themeCyan;
+        pc = (COLORREF)g_accentCol.load();
+    }
+    return L"{\"preset\":" + JsonStr(pr) + L",\"pink\":" + JsonStr(pk) +
+           L",\"pink2\":" + JsonStr(LightenHex(pc)) + L",\"cyan\":" + JsonStr(cy) + L"}";
+}
+
+// ---------------------------------------------------------------------------
+// Custom Keybindings (per-command customizable keyboard shortcuts)
+
+struct KeyBindDef {
+    const char* id;
+    const wchar_t* label;
+    const wchar_t* group;
+    int cmd;
+    const wchar_t* defCombo;
+};
+static const KeyBindDef KEY_DEFS[] = {
+    { "newtab",        L"New tab",                 L"Tabs",       CMD_NEWTAB,        L"Ctrl+T" },
+    { "closetab",      L"Close tab",               L"Tabs",       CMD_CLOSETAB,      L"Ctrl+W" },
+    { "reopen",        L"Reopen closed tab",       L"Tabs",       CMD_REOPEN,        L"Ctrl+Shift+T" },
+    { "nexttab",       L"Next tab",                L"Tabs",       CMD_NEXTTAB,       L"Ctrl+Tab" },
+    { "prevtab",       L"Previous tab",            L"Tabs",       CMD_PREVTAB,       L"Ctrl+Shift+Tab" },
+    { "pin",           L"Pin / Unpin tab",         L"Tabs",       CMD_PIN_TAB,       L"" },
+    { "mute",          L"Mute / Unmute tab",       L"Tabs",       CMD_MUTE_TAB,      L"" },
+    { "palette",       L"Command palette",         L"Navigation", CMD_PALETTE,       L"Ctrl+Shift+P" },
+    { "focusurl",      L"Focus address bar",       L"Navigation", CMD_FOCUSURL,      L"Ctrl+L" },
+    { "reload",        L"Reload page",             L"Navigation", CMD_RELOAD,        L"Ctrl+R" },
+    { "back",          L"Back",                    L"Navigation", CMD_BACK,          L"Alt+Left" },
+    { "fwd",           L"Forward",                 L"Navigation", CMD_FWD,           L"Alt+Right" },
+    { "home",          L"Home",                    L"Navigation", CMD_HOME,          L"Alt+Home" },
+    { "find",          L"Find in page",            L"Navigation", CMD_FIND,          L"Ctrl+F" },
+    { "findnext",      L"Find next",               L"Navigation", CMD_FINDNEXT,      L"F3" },
+    { "findprev",      L"Find previous",           L"Navigation", CMD_FINDPREV,      L"Shift+F3" },
+    { "bookmark",      L"Bookmark this page",      L"Pages",      CMD_BOOKMARK,      L"Ctrl+D" },
+    { "bookmarks",     L"Bookmarks manager",       L"Pages",      CMD_BOOKMARKS,     L"Ctrl+Shift+O" },
+    { "bookmarks_bar", L"Toggle bookmarks bar",    L"Pages",      CMD_BOOKMARKS_BAR, L"Ctrl+Shift+B" },
+    { "history",       L"History",                 L"Pages",      CMD_HISTORY,       L"Ctrl+H" },
+    { "downloads",     L"Downloads",               L"Pages",      CMD_DOWNLOADS,     L"Ctrl+J" },
+    { "extensions",    L"Extensions (Userscripts)",L"Pages",      CMD_EXTENSIONS,    L"Ctrl+Shift+E" },
+    { "settings",      L"Settings",                L"Pages",      CMD_SETTINGS,      L"Ctrl+," },
+    { "incognito",     L"New incognito window",    L"Windows",    CMD_INCOGNITO,     L"Ctrl+Shift+N" },
+    { "proxy",         L"Toggle Proxy Tunnel",     L"Features",   CMD_PROXY_TOGGLE,  L"" },
+    { "forcedark",     L"Toggle Force Dark Mode",  L"Features",   CMD_FORCEDARK,     L"" },
+    { "blockads",      L"Toggle Ad & Tracker Block",L"Features",  CMD_BLOCKADS,      L"" },
+    { "scan",          L"Toggle Scanlines",        L"Features",   CMD_SCAN,          L"" },
+    { "perf",          L"Performance panel",       L"Tools",      CMD_PERFORMANCE,   L"Ctrl+Shift+M" },
+    { "devtools",      L"Developer tools",         L"Tools",      CMD_DEVTOOLS,      L"F12" },
+    { "print",         L"Print page",              L"Tools",      CMD_PRINT,         L"Ctrl+P" },
+    { "caret",         L"Caret browsing",          L"Tools",      CMD_CARET,         L"F7" },
+    { "fullscreen",    L"Toggle fullscreen",       L"Window",     CMD_FULLSCREEN,    L"F11" },
+    { "zoomin",        L"Zoom in",                 L"Zoom",       CMD_ZOOMIN,        L"Ctrl++" },
+    { "zoomout",       L"Zoom out",                L"Zoom",       CMD_ZOOMOUT,       L"Ctrl+-" },
+    { "zoomreset",     L"Reset zoom",              L"Zoom",       CMD_ZOOMRESET,     L"Ctrl+0" },
+    { "help",          L"User guide",              L"Tools",      CMD_HELP,          L"F1" },
+};
+static const int KEY_DEF_COUNT = (int)(sizeof(KEY_DEFS) / sizeof(KEY_DEFS[0]));
+
+struct ParsedKey {
+    bool valid = false;
+    bool ctrl = false;
+    bool shift = false;
+    bool alt = false;
+    int vk = 0;
+    std::wstring norm;
+};
+
+static int CanonicalVk(int vk) {
+    if (vk == VK_ADD) return VK_OEM_PLUS;
+    if (vk == VK_SUBTRACT) return VK_OEM_MINUS;
+    if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) return '0' + (vk - VK_NUMPAD0);
+    return vk;
+}
+
+static std::wstring VkName(int vk) {
+    vk = CanonicalVk(vk);
+    if (vk >= 'A' && vk <= 'Z') return std::wstring(1, (wchar_t)vk);
+    if (vk >= '0' && vk <= '9') return std::wstring(1, (wchar_t)vk);
+    if (vk >= VK_F1 && vk <= VK_F12) return L"F" + std::to_wstring(vk - VK_F1 + 1);
+    switch (vk) {
+    case VK_TAB: return L"Tab";
+    case VK_LEFT: return L"Left";
+    case VK_RIGHT: return L"Right";
+    case VK_UP: return L"Up";
+    case VK_DOWN: return L"Down";
+    case VK_HOME: return L"Home";
+    case VK_END: return L"End";
+    case VK_PRIOR: return L"PageUp";
+    case VK_NEXT: return L"PageDown";
+    case VK_INSERT: return L"Insert";
+    case VK_DELETE: return L"Delete";
+    case VK_SPACE: return L"Space";
+    case VK_RETURN: return L"Enter";
+    case VK_BACK: return L"Backspace";
+    case VK_OEM_COMMA: return L",";
+    case VK_OEM_PERIOD: return L".";
+    case VK_OEM_PLUS: return L"+";
+    case VK_OEM_MINUS: return L"-";
+    case VK_OEM_2: return L"/";
+    case VK_OEM_1: return L";";
+    case VK_OEM_7: return L"'";
+    case VK_OEM_4: return L"[";
+    case VK_OEM_6: return L"]";
+    case VK_OEM_5: return L"\\";
+    case VK_OEM_3: return L"`";
+    }
+    return L"";
+}
+
+static ParsedKey ParseKeyCombo(const std::wstring& raw) {
+    ParsedKey out;
+    std::wstring s = raw;
+    while (!s.empty() && iswspace(s.front())) s.erase(s.begin());
+    while (!s.empty() && iswspace(s.back())) s.pop_back();
+    if (s.empty()) { out.valid = true; return out; }
+
+    std::vector<std::wstring> toks;
+    size_t pos = 0;
+    while (pos < s.size()) {
+        size_t p = s.find(L'+', pos);
+        if (p == std::wstring::npos) {
+            toks.push_back(s.substr(pos));
+            break;
+        }
+        if (p == pos && p + 1 == s.size()) {
+            toks.push_back(L"+");
+            break;
+        }
+        std::wstring part = s.substr(pos, p - pos);
+        toks.push_back(part);
+        pos = p + 1;
+        if (pos == s.size()) { toks.push_back(L"+"); break; }
+    }
+    if (toks.empty()) return out;
+
+    for (size_t i = 0; i + 1 < toks.size(); i++) {
+        std::wstring m = toks[i];
+        for (auto& ch : m) ch = (wchar_t)towlower(ch);
+        while (!m.empty() && iswspace(m.front())) m.erase(m.begin());
+        while (!m.empty() && iswspace(m.back())) m.pop_back();
+        if (m == L"ctrl" || m == L"control") out.ctrl = true;
+        else if (m == L"alt") out.alt = true;
+        else if (m == L"shift") out.shift = true;
+        else return ParsedKey{};
+    }
+
+    std::wstring k = toks.back();
+    while (!k.empty() && iswspace(k.front())) k.erase(k.begin());
+    while (!k.empty() && iswspace(k.back())) k.pop_back();
+    std::wstring kl = k;
+    for (auto& ch : kl) ch = (wchar_t)towlower(ch);
+
+    int vk = 0;
+    if (kl.size() == 1) {
+        wchar_t ch = kl[0];
+        if (ch >= L'a' && ch <= L'z') vk = 'A' + (ch - L'a');
+        else if (ch >= L'0' && ch <= L'9') vk = '0' + (ch - L'0');
+        else if (ch == L',') vk = VK_OEM_COMMA;
+        else if (ch == L'.') vk = VK_OEM_PERIOD;
+        else if (ch == L'+' || ch == L'=') vk = VK_OEM_PLUS;
+        else if (ch == L'-') vk = VK_OEM_MINUS;
+        else if (ch == L'/') vk = VK_OEM_2;
+        else if (ch == L';') vk = VK_OEM_1;
+        else if (ch == L'\'') vk = VK_OEM_7;
+        else if (ch == L'[') vk = VK_OEM_4;
+        else if (ch == L']') vk = VK_OEM_6;
+        else if (ch == L'\\') vk = VK_OEM_5;
+        else if (ch == L'`') vk = VK_OEM_3;
+    } else if (kl.size() >= 2 && kl[0] == L'f') {
+        int fn = _wtoi(kl.c_str() + 1);
+        if (fn >= 1 && fn <= 12 && std::to_wstring(fn) == kl.substr(1)) vk = VK_F1 + fn - 1;
+    } else if (kl == L"tab") vk = VK_TAB;
+    else if (kl == L"left" || kl == L"arrowleft") vk = VK_LEFT;
+    else if (kl == L"right" || kl == L"arrowright") vk = VK_RIGHT;
+    else if (kl == L"up" || kl == L"arrowup") vk = VK_UP;
+    else if (kl == L"down" || kl == L"arrowdown") vk = VK_DOWN;
+    else if (kl == L"home") vk = VK_HOME;
+    else if (kl == L"end") vk = VK_END;
+    else if (kl == L"pageup") vk = VK_PRIOR;
+    else if (kl == L"pagedown") vk = VK_NEXT;
+    else if (kl == L"insert") vk = VK_INSERT;
+    else if (kl == L"delete") vk = VK_DELETE;
+    else if (kl == L"space") vk = VK_SPACE;
+    else if (kl == L"enter") vk = VK_RETURN;
+    else if (kl == L"backspace") vk = VK_BACK;
+    else if (kl == L"plus" || kl == L"equal") vk = VK_OEM_PLUS;
+    else if (kl == L"minus") vk = VK_OEM_MINUS;
+    else if (kl == L"comma") vk = VK_OEM_COMMA;
+    else if (kl == L"period") vk = VK_OEM_PERIOD;
+
+    if (!vk) return ParsedKey{};
+    bool isFunc = (vk >= VK_F1 && vk <= VK_F12);
+    if (!out.ctrl && !out.alt && !isFunc) return ParsedKey{};
+
+    out.vk = vk;
+    out.valid = true;
+    if (out.ctrl) out.norm += L"Ctrl+";
+    if (out.alt) out.norm += L"Alt+";
+    if (out.shift) out.norm += L"Shift+";
+    out.norm += VkName(vk);
+    return out;
+}
+
+static std::mutex g_kbMu;
+static std::vector<ParsedKey> g_kbList;
+
+static std::wstring KeybindsPath() { return KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME + L"\\keybindings.dat"; }
+
+static void KeybindsSeedDefaultsLocked() {
+    g_kbList.resize(KEY_DEF_COUNT);
+    for (int i = 0; i < KEY_DEF_COUNT; i++) g_kbList[i] = ParseKeyCombo(KEY_DEFS[i].defCombo);
+}
+
+static void KeybindsSaveLocked() {
+    if (g.incognito) return;
+    std::string out = "NEONNET-KEYS 1\n";
+    for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
+        out += std::string(KEY_DEFS[i].id) + "\t" + Utf8(g_kbList[i].norm) + "\n";
+    }
+    std::wstring path = KeybindsPath(), tmp = path + L".tmp";
+    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD wr = 0;
+    BOOL ok = WriteFile(h, out.data(), (DWORD)out.size(), &wr, nullptr) && wr == out.size();
+    CloseHandle(h);
+    if (!ok || !MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str());
+}
+
+static void KeybindsLoad() {
+    std::lock_guard<std::mutex> lk(g_kbMu);
+    KeybindsSeedDefaultsLocked();
+    HANDLE h = CreateFileW(KeybindsPath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD size = GetFileSize(h, nullptr), got = 0;
+    std::string data;
+    if (size > 0 && size < 256 * 1024) {
+        data.resize(size);
+        if (!ReadFile(h, &data[0], size, &got, nullptr) || got != size) data.clear();
+    }
+    CloseHandle(h);
+    size_t pos = data.find('\n');
+    if (pos == std::string::npos || data.compare(0, pos, "NEONNET-KEYS 1") != 0) return;
+    for (++pos; pos < data.size();) {
+        size_t e = data.find('\n', pos);
+        if (e == std::string::npos) e = data.size();
+        std::string line = data.substr(pos, e - pos);
+        pos = e + 1;
+        size_t t = line.find('\t');
+        if (t == std::string::npos) continue;
+        std::string id = line.substr(0, t);
+        std::wstring combo = Wide(line.substr(t + 1));
+        for (int i = 0; i < KEY_DEF_COUNT; i++) {
+            if (id == KEY_DEFS[i].id) {
+                ParsedKey pk = ParseKeyCombo(combo);
+                if (pk.valid) g_kbList[i] = std::move(pk);
+                break;
+            }
+        }
+    }
+}
+
+static std::wstring KeybindDisplay(int cmd) {
+    std::lock_guard<std::mutex> lk(g_kbMu);
+    for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
+        if (KEY_DEFS[i].cmd == cmd) return g_kbList[i].norm;
+    }
+    return L"";
+}
+
+static std::wstring KeybindsMapJson() {
+    std::lock_guard<std::mutex> lk(g_kbMu);
+    std::wstring o = L"{";
+    for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
+        if (i) o += L",";
+        o += L"\"" + Wide(KEY_DEFS[i].id) + L"\":" + JsonStr(g_kbList[i].norm);
+    }
+    return o + L"}";
+}
+
+static int MatchUserKeybind(bool ctrl, bool shift, bool alt, int vk) {
+    int cvk = CanonicalVk(vk);
+    std::lock_guard<std::mutex> lk(g_kbMu);
+    for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
+        const auto& pk = g_kbList[i];
+        if (pk.vk && pk.ctrl == ctrl && pk.shift == shift && pk.alt == alt && pk.vk == cvk) {
+            return KEY_DEFS[i].cmd;
+        }
+    }
+    return 0;
+}
+
+static std::string KeybindsJson() {
+    std::lock_guard<std::mutex> lk(g_kbMu);
+    std::string o = "{\"incognito\":";
+    o += (g.incognito ? "true" : "false");
+    o += ",\"items\":[";
+    for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
+        if (i) o += ",";
+        o += "{\"id\":" + JsonUtf8(Wide(KEY_DEFS[i].id)) +
+             ",\"label\":" + JsonUtf8(KEY_DEFS[i].label) +
+             ",\"group\":" + JsonUtf8(KEY_DEFS[i].group) +
+             ",\"combo\":" + JsonUtf8(g_kbList[i].norm) +
+             ",\"def\":" + JsonUtf8(KEY_DEFS[i].defCombo) + "}";
+    }
+    return o + "]}";
+}
+
+static bool KeybindSetFromJson(const std::string& body, std::string& errOut) {
+    CefRefPtr<CefValue> v = CefParseJSON(body, JSON_PARSER_RFC);
+    if (!v || v->GetType() != VTYPE_DICTIONARY) { errOut = "Invalid JSON payload."; return false; }
+    CefRefPtr<CefDictionaryValue> d = v->GetDictionary();
+    std::string id = d->GetString("id").ToString();
+    std::wstring combo = d->GetString("combo").ToWString();
+    int target = -1;
+    for (int i = 0; i < KEY_DEF_COUNT; i++) if (id == KEY_DEFS[i].id) { target = i; break; }
+    if (target < 0) { errOut = "Unknown command."; return false; }
+    ParsedKey pk = ParseKeyCombo(combo);
+    if (!pk.valid) { errOut = "Use Ctrl/Alt + key or F1-F12."; return false; }
+
+    std::lock_guard<std::mutex> lk(g_kbMu);
+    if (pk.vk) {
+        for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
+            if (i != target && g_kbList[i].vk == pk.vk && g_kbList[i].ctrl == pk.ctrl &&
+                g_kbList[i].shift == pk.shift && g_kbList[i].alt == pk.alt) {
+                errOut = "Shortcut " + Utf8(pk.norm) + " is already assigned to " + Utf8(KEY_DEFS[i].label) + ".";
+                return false;
+            }
+        }
+    }
+    if ((int)g_kbList.size() < KEY_DEF_COUNT) KeybindsSeedDefaultsLocked();
+    g_kbList[target] = std::move(pk);
+    KeybindsSaveLocked();
+    return true;
+}
+
+static void KeybindReset(const std::string& id) {
+    std::lock_guard<std::mutex> lk(g_kbMu);
+    if ((int)g_kbList.size() < KEY_DEF_COUNT) KeybindsSeedDefaultsLocked();
+    if (id.empty()) {
+        KeybindsSeedDefaultsLocked();
+    } else {
+        for (int i = 0; i < KEY_DEF_COUNT; i++) {
+            if (id == KEY_DEFS[i].id) { g_kbList[i] = ParseKeyCombo(KEY_DEFS[i].defCombo); break; }
+        }
+    }
+    KeybindsSaveLocked();
+}
+
+// ---------------------------------------------------------------------------
+// New Tab Scratchpad / Quick Notes & Customizable Speed Dial
+
+struct DialItem { std::wstring title, url; };
+static std::mutex g_ntMu;
+static std::wstring g_ntNote;
+static std::vector<DialItem> g_ntDials;
+
+static std::wstring NewTabPath() { return KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME + L"\\newtab.dat"; }
+
+static void NewTabSeedDialsLocked() {
+    g_ntDials = {
+        { L"YOUTUBE",   L"https://www.youtube.com" },
+        { L"GITHUB",    L"https://github.com" },
+        { L"WIKIPEDIA", L"https://en.wikipedia.org" },
+        { L"REDDIT",    L"https://www.reddit.com" },
+        { L"GMAIL",     L"https://mail.google.com" },
+        { L"MAPS",      L"https://www.google.com/maps" },
+    };
+}
+
+static bool ValidDialUrl(const std::wstring& u) {
+    if (u.empty() || u.size() > 1024) return false;
+    for (wchar_t c : u) if (c < 0x20 || c == 0x7f) return false;
+    std::wstring low = u;
+    for (auto& c : low) c = (wchar_t)towlower(c);
+    return low.rfind(L"https://", 0) == 0 || low.rfind(L"http://", 0) == 0 || low.rfind(L"file:///", 0) == 0;
+}
+
+static void NewTabSaveLocked() {
+    if (g.incognito) return;
+    std::string out = "{\"note\":" + JsonUtf8(g_ntNote) + ",\"dials\":[";
+    for (size_t i = 0; i < g_ntDials.size(); i++) {
+        if (i) out += ",";
+        out += "{\"title\":" + JsonUtf8(g_ntDials[i].title) + ",\"url\":" + JsonUtf8(g_ntDials[i].url) + "}";
+    }
+    out += "]}\n";
+    std::wstring path = NewTabPath(), tmp = path + L".tmp";
+    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD wr = 0;
+    BOOL ok = WriteFile(h, out.data(), (DWORD)out.size(), &wr, nullptr) && wr == out.size();
+    CloseHandle(h);
+    if (!ok || !MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str());
+}
+
+static void NewTabLoad() {
+    std::lock_guard<std::mutex> lk(g_ntMu);
+    g_ntNote.clear();
+    NewTabSeedDialsLocked();
+    HANDLE h = CreateFileW(NewTabPath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD size = GetFileSize(h, nullptr), got = 0;
+    std::string data;
+    if (size > 0 && size < 512 * 1024) {
+        data.resize(size);
+        if (!ReadFile(h, &data[0], size, &got, nullptr) || got != size) data.clear();
+    }
+    CloseHandle(h);
+    if (data.empty()) return;
+    CefRefPtr<CefValue> v = CefParseJSON(data, JSON_PARSER_RFC);
+    if (!v || v->GetType() != VTYPE_DICTIONARY) return;
+    CefRefPtr<CefDictionaryValue> d = v->GetDictionary();
+    if (d->HasKey("note")) {
+        g_ntNote = d->GetString("note").ToWString();
+        if (g_ntNote.size() > 65536) g_ntNote.resize(65536);
+    }
+    if (d->HasKey("dials") && d->GetType("dials") == VTYPE_LIST) {
+        CefRefPtr<CefListValue> arr = d->GetList("dials");
+        std::vector<DialItem> loaded;
+        for (size_t i = 0; i < arr->GetSize() && loaded.size() < 18; i++) {
+            if (arr->GetType(i) != VTYPE_DICTIONARY) continue;
+            CefRefPtr<CefDictionaryValue> it = arr->GetDictionary(i);
+            std::wstring title = it->GetString("title").ToWString();
+            std::wstring url = it->GetString("url").ToWString();
+            if (!ValidDialUrl(url)) continue;
+            if (title.empty()) title = url;
+            if (title.size() > 60) title.resize(60);
+            loaded.push_back({ title, url });
+        }
+        g_ntDials = std::move(loaded);
+    }
+}
+
+static std::string NewTabJson() {
+    std::lock_guard<std::mutex> lk(g_ntMu);
+    std::string o = std::string("{\"incognito\":") + (g.incognito ? "true" : "false") +
+                    ",\"note\":" + JsonUtf8(g_ntNote) + ",\"dials\":[";
+    for (size_t i = 0; i < g_ntDials.size(); i++) {
+        if (i) o += ",";
+        o += "{\"title\":" + JsonUtf8(g_ntDials[i].title) + ",\"url\":" + JsonUtf8(g_ntDials[i].url) + "}";
+    }
+    return o + "]}";
+}
+
+static bool NewTabSaveNoteFromJson(const std::string& body) {
+    CefRefPtr<CefValue> v = CefParseJSON(body, JSON_PARSER_RFC);
+    if (!v || v->GetType() != VTYPE_DICTIONARY) return false;
+    CefRefPtr<CefDictionaryValue> d = v->GetDictionary();
+    if (!d->HasKey("note")) return false;
+    std::wstring note = d->GetString("note").ToWString();
+    if (note.size() > 65536) note.resize(65536);
+    std::lock_guard<std::mutex> lk(g_ntMu);
+    g_ntNote = std::move(note);
+    NewTabSaveLocked();
+    return true;
+}
+
+static bool NewTabSaveDialsFromJson(const std::string& body, std::string& errOut) {
+    CefRefPtr<CefValue> v = CefParseJSON(body, JSON_PARSER_RFC);
+    if (!v || v->GetType() != VTYPE_DICTIONARY) { errOut = "Invalid JSON payload."; return false; }
+    CefRefPtr<CefDictionaryValue> d = v->GetDictionary();
+    if (!d->HasKey("dials") || d->GetType("dials") != VTYPE_LIST) { errOut = "Missing dials list."; return false; }
+    CefRefPtr<CefListValue> arr = d->GetList("dials");
+    std::vector<DialItem> next;
+    for (size_t i = 0; i < arr->GetSize() && next.size() < 18; i++) {
+        if (arr->GetType(i) != VTYPE_DICTIONARY) continue;
+        CefRefPtr<CefDictionaryValue> it = arr->GetDictionary(i);
+        std::wstring title = it->GetString("title").ToWString();
+        std::wstring url = it->GetString("url").ToWString();
+        while (!title.empty() && iswspace(title.front())) title.erase(title.begin());
+        while (!title.empty() && iswspace(title.back())) title.pop_back();
+        while (!url.empty() && iswspace(url.front())) url.erase(url.begin());
+        while (!url.empty() && iswspace(url.back())) url.pop_back();
+        if (!ValidDialUrl(url)) { errOut = "URL must start with http://, https://, or file:///."; return false; }
+        if (title.empty()) title = url;
+        if (title.size() > 60) title.resize(60);
+        next.push_back({ title, url });
+    }
+    std::lock_guard<std::mutex> lk(g_ntMu);
+    g_ntDials = std::move(next);
+    NewTabSaveLocked();
+    return true;
+}
+
+static void NewTabResetDials() {
+    std::lock_guard<std::mutex> lk(g_ntMu);
+    NewTabSeedDialsLocked();
+    NewTabSaveLocked();
+}
+
+// ---------------------------------------------------------------------------
+// Custom Search Engines (built-in presets + user-defined engines in engines.dat)
+
+struct CustomEngine { std::wstring id, name, url; };
+static std::mutex g_engMu;
+static std::vector<CustomEngine> g_customEngines;
+static int g_customEngNext = 1;
+static std::wstring g_activeEngineId = L"google";
+
+static std::wstring EnginesPath() { return KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME + L"\\engines.dat"; }
+
+static bool ValidSearchUrl(const std::wstring& u) {
+    if (u.empty() || u.size() > 500) return false;
+    for (wchar_t c : u) if (c < 0x20 || c == 0x7f) return false;
+    std::wstring low = u;
+    for (auto& c : low) c = (wchar_t)towlower(c);
+    return low.rfind(L"https://", 0) == 0 || low.rfind(L"http://", 0) == 0;
+}
+
+static bool ValidEngineName(const std::wstring& s) {
+    if (s.empty() || s.size() > 40) return false;
+    for (wchar_t c : s) if (c < 0x20 || c == 0x7f) return false;
+    return true;
+}
+
+static void EnginesSaveLocked() {
+    if (g.incognito) return;
+    std::string out = "NEONNET-ENGINES 1\n";
+    for (const auto& e : g_customEngines) {
+        out += Utf8(e.id) + "\t" + Utf8(e.name) + "\t" + Utf8(e.url) + "\n";
+    }
+    std::wstring path = EnginesPath(), tmp = path + L".tmp";
+    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD wr = 0;
+    BOOL ok = WriteFile(h, out.data(), (DWORD)out.size(), &wr, nullptr) && wr == out.size();
+    CloseHandle(h);
+    if (!ok || !MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str());
+}
+
+static bool EngineExistsLocked(const std::wstring& id) {
+    for (int i = 0; i < SEARCH_ENGINE_COUNT; i++) if (id == SEARCH_ENGINES[i].id) return true;
+    for (const auto& e : g_customEngines) if (id == e.id) return true;
+    return false;
+}
+
+static void EnginesLoad() {
+    std::lock_guard<std::mutex> lk(g_engMu);
+    g_customEngines.clear();
+    g_customEngNext = 1;
+    HANDLE h = CreateFileW(EnginesPath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h != INVALID_HANDLE_VALUE) {
+        DWORD size = GetFileSize(h, nullptr), got = 0;
+        std::string data;
+        if (size > 0 && size < 256 * 1024) {
+            data.resize(size);
+            if (!ReadFile(h, &data[0], size, &got, nullptr) || got != size) data.clear();
+        }
+        CloseHandle(h);
+        size_t pos = data.find('\n');
+        if (pos != std::string::npos && data.compare(0, pos, "NEONNET-ENGINES 1") == 0) {
+            for (++pos; pos < data.size();) {
+                size_t e = data.find('\n', pos);
+                if (e == std::string::npos) e = data.size();
+                std::string line = data.substr(pos, e - pos);
+                pos = e + 1;
+                size_t t1 = line.find('\t'), t2 = (t1 == std::string::npos) ? std::string::npos : line.find('\t', t1 + 1);
+                if (t1 == std::string::npos || t2 == std::string::npos) continue;
+                CustomEngine ce{ Wide(line.substr(0, t1)), Wide(line.substr(t1 + 1, t2 - t1 - 1)), Wide(line.substr(t2 + 1)) };
+                if (ce.id.rfind(L"c", 0) == 0 && ValidEngineName(ce.name) && ValidSearchUrl(ce.url)) {
+                    int n = _wtoi(ce.id.c_str() + 1);
+                    if (n >= g_customEngNext) g_customEngNext = n + 1;
+                    g_customEngines.push_back(std::move(ce));
+                }
+                if (g_customEngines.size() >= 32) break;
+            }
+        }
+    }
+    std::wstring eid = RegGetString(L"SearchEngine");
+    g_activeEngineId = EngineExistsLocked(eid) ? eid : L"google";
+}
+
+static void CurrentEngineInfo(std::wstring& idOut, std::wstring& nameOut, std::wstring& urlOut) {
+    std::lock_guard<std::mutex> lk(g_engMu);
+    for (int i = 0; i < SEARCH_ENGINE_COUNT; i++) {
+        if (g_activeEngineId == SEARCH_ENGINES[i].id) {
+            idOut = SEARCH_ENGINES[i].id; nameOut = SEARCH_ENGINES[i].name; urlOut = SEARCH_ENGINES[i].url;
+            return;
+        }
+    }
+    for (const auto& e : g_customEngines) {
+        if (g_activeEngineId == e.id) { idOut = e.id; nameOut = e.name; urlOut = e.url; return; }
+    }
+    idOut = SEARCH_ENGINES[0].id; nameOut = SEARCH_ENGINES[0].name; urlOut = SEARCH_ENGINES[0].url;
+}
+
+static std::string EnginesJsonArray(bool includeUrl) {
+    std::lock_guard<std::mutex> lk(g_engMu);
+    std::string o = "[";
+    bool first = true;
+    for (int i = 0; i < SEARCH_ENGINE_COUNT; i++) {
+        if (!first) o += ",";
+        first = false;
+        o += "{\"id\":" + JsonUtf8(SEARCH_ENGINES[i].id) + ",\"name\":" + JsonUtf8(SEARCH_ENGINES[i].name) + ",\"custom\":false";
+        if (includeUrl) o += ",\"url\":" + JsonUtf8(SEARCH_ENGINES[i].url);
+        o += "}";
+    }
+    for (const auto& e : g_customEngines) {
+        if (!first) o += ",";
+        first = false;
+        o += "{\"id\":" + JsonUtf8(e.id) + ",\"name\":" + JsonUtf8(e.name) + ",\"custom\":true";
+        if (includeUrl) o += ",\"url\":" + JsonUtf8(e.url);
+        o += "}";
+    }
+    return o + "]";
+}
+
+static bool EngineValidId(const std::wstring& id) {
+    std::lock_guard<std::mutex> lk(g_engMu);
+    return EngineExistsLocked(id);
+}
+
+static bool EngineSelect(const std::wstring& id) {
+    {
+        std::lock_guard<std::mutex> lk(g_engMu);
+        if (!EngineExistsLocked(id)) return false;
+        g_activeEngineId = id;
+    }
+    if (!g.incognito) RegSetBin(L"SearchEngine", REG_SZ, id.c_str(), (DWORD)((id.size() + 1) * sizeof(wchar_t)));
+    return true;
+}
+
+static bool EngineSaveFromJson(const std::string& body, std::string& errOut, std::wstring& savedIdOut) {
+    CefRefPtr<CefValue> v = CefParseJSON(body, JSON_PARSER_RFC);
+    if (!v || v->GetType() != VTYPE_DICTIONARY) { errOut = "Invalid JSON payload."; return false; }
+    CefRefPtr<CefDictionaryValue> d = v->GetDictionary();
+    std::wstring id = d->GetString("id").ToWString();
+    std::wstring name = d->GetString("name").ToWString();
+    std::wstring url = d->GetString("url").ToWString();
+    while (!name.empty() && iswspace(name.front())) name.erase(name.begin());
+    while (!name.empty() && iswspace(name.back())) name.pop_back();
+    while (!url.empty() && iswspace(url.front())) url.erase(url.begin());
+    while (!url.empty() && iswspace(url.back())) url.pop_back();
+    if (!ValidEngineName(name)) { errOut = "Engine name must be 1-40 characters."; return false; }
+    if (!ValidSearchUrl(url)) { errOut = "URL must start with https:// or http:// (use %s for query)."; return false; }
+
+    std::lock_guard<std::mutex> lk(g_engMu);
+    if (!id.empty()) {
+        for (auto& e : g_customEngines) {
+            if (e.id == id) {
+                e.name = name; e.url = url;
+                EnginesSaveLocked();
+                savedIdOut = e.id;
+                return true;
+            }
+        }
+    }
+    if (g_customEngines.size() >= 32) { errOut = "Maximum 32 custom search engines reached."; return false; }
+    CustomEngine ce{ L"c" + std::to_wstring(g_customEngNext++), name, url };
+    savedIdOut = ce.id;
+    g_customEngines.push_back(std::move(ce));
+    g_activeEngineId = savedIdOut;
+    EnginesSaveLocked();
+    if (!g.incognito) RegSetBin(L"SearchEngine", REG_SZ, savedIdOut.c_str(), (DWORD)((savedIdOut.size() + 1) * sizeof(wchar_t)));
+    return true;
+}
+
+static bool EngineDelete(const std::wstring& id) {
+    std::lock_guard<std::mutex> lk(g_engMu);
+    size_t before = g_customEngines.size();
+    g_customEngines.erase(std::remove_if(g_customEngines.begin(), g_customEngines.end(), [&](const CustomEngine& e) { return e.id == id; }), g_customEngines.end());
+    if (g_customEngines.size() == before) return false;
+    if (g_activeEngineId == id) {
+        g_activeEngineId = L"google";
+        if (!g.incognito) RegSetBin(L"SearchEngine", REG_SZ, g_activeEngineId.c_str(), (DWORD)((g_activeEngineId.size() + 1) * sizeof(wchar_t)));
+    }
+    EnginesSaveLocked();
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Site permissions
 // What a site may do (camera, location, ...) is remembered per origin in sitepermissions.txt and can be
@@ -1292,7 +2592,7 @@ static void RestoreTab(Tab* t);   // below: gives an unloaded tab its page back
 static void SelectTab(int id, bool focus) {
     Tab* sel = FindTab(id);
     if (!sel) return;
-    if (id != g.active) HideFind();
+    if (id != g.active) { HideFind(); g_kbCapturing = false; }
     g.active = id;
     if (FindWs(sel->wsId)) {
         g.activeWs = sel->wsId;
@@ -1561,6 +2861,8 @@ static bool HandleOpenDisposition(const CefString& target_url, cef_window_open_d
     return true;
 }
 
+static bool HandleShortcutKey(bool ctrl, bool shift, bool alt, bool repeat, int vk);
+
 class DevToolsClient : public CefClient, public CefLifeSpanHandler, public CefKeyboardHandler, public CefLoadHandler, public CefDisplayHandler, public CefRequestHandler {
 public:
     explicit DevToolsClient(int tabId) : tabId_(tabId) {}
@@ -1638,20 +2940,16 @@ public:
         bool alt = (e.modifiers & EVENTFLAG_ALT_DOWN) != 0, repeat = (e.modifiers & EVENTFLAG_IS_REPEAT) != 0;
         int vk = e.windows_key_code, cmd = 0;
         if (repeat) return false;
-        if (ctrl && !alt) {
-            if (vk == 'N' && shift) cmd = CMD_INCOGNITO;
-            else if (vk == 'T') cmd = shift ? CMD_REOPEN : CMD_NEWTAB;
-            else if (vk == 'H' && !shift) cmd = CMD_HISTORY;
-            else if (vk == 'J' && !shift) cmd = CMD_DOWNLOADS;
-            else if (vk == 'E' && shift) cmd = CMD_EXTENSIONS;
-            else if (vk == VK_OEM_COMMA) cmd = CMD_SETTINGS;
-            else if (vk == VK_TAB) cmd = shift ? CMD_PREVTAB : CMD_NEXTTAB;
-        } else if (!ctrl && !alt && !shift) {
-            if (vk == VK_F1) cmd = CMD_HELP;
-            else if (vk == VK_F7) cmd = CMD_CARET;
-            else if (vk == VK_F11) cmd = CMD_FULLSCREEN;
-            else if (vk == VK_F12) cmd = CMD_DEVTOOLS;   // closes the tools
+        int userCmd = MatchUserKeybind(ctrl, shift, alt, vk);
+        switch (userCmd) {
+        case CMD_INCOGNITO: case CMD_PALETTE: case CMD_NEWTAB: case CMD_REOPEN:
+        case CMD_HISTORY: case CMD_DOWNLOADS: case CMD_EXTENSIONS: case CMD_SETTINGS:
+        case CMD_PREVTAB: case CMD_NEXTTAB: case CMD_HELP: case CMD_CARET:
+        case CMD_FULLSCREEN: case CMD_DEVTOOLS:
+            cmd = userCmd;
+            break;
         }
+        if (!cmd && !userCmd && ctrl && shift && !alt && vk == 'K') cmd = CMD_PALETTE;
         if (!cmd) return false;
         ExecCmd(cmd);
         return true;
@@ -1904,7 +3202,8 @@ private:
 
 class Client : public CefClient, public CefLifeSpanHandler, public CefDisplayHandler, public CefLoadHandler,
                public CefKeyboardHandler, public CefDownloadHandler, public CefContextMenuHandler,
-               public CefRequestHandler, public CefFindHandler, public CefJSDialogHandler, public CefPermissionHandler {
+               public CefRequestHandler, public CefFindHandler, public CefJSDialogHandler, public CefPermissionHandler,
+               public CefFocusHandler {
 public:
     CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
@@ -1916,6 +3215,15 @@ public:
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
     CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
     CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
+    CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
+
+    void OnGotFocus(CefRefPtr<CefBrowser> browser) override {
+        if (!IsChrome(browser) && g.dropNeed > 0) {
+            g.dropNeed = 0; g.dropX0 = 0; g.dropX1 = 0;
+            UpdateChromeRegion();
+            RunInChrome(L"window.__nn&&window.__nn({type:'closeDrops'})");
+        }
+    }
 
     // --- dialogs, permission prompts and sign-in: shown by ShowDlgReq() in the NeonNet theme ---
     static bool QueueDialog(DlgReq* r) {
@@ -2001,8 +3309,15 @@ public:
 
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
         g_all.push_back(browser);
+        DarkenBrowserWindow(browser->GetHost()->GetWindowHandle());
         if (g.creatingChrome) { g.chrome = browser; g.chromeId = browser->GetIdentifier(); return; }
-        if (g.creatingPanel) { g.panel = browser; g.panelId = browser->GetIdentifier(); return; }
+        if (g.creatingPanel) {
+            g.panel = browser; g.panelId = browser->GetIdentifier();
+            if (HWND pw = browser->GetHost()->GetWindowHandle()) {
+                SetWindowRgn(pw, CreateRectRgn(0, 0, 0, 0), FALSE);
+            }
+            return;
+        }
         Tab* t = nullptr;
         if (g.creatingTab) t = FindTab(g.creatingTab);
         else if (!g.pendingPopups.empty()) { t = FindTab(g.pendingPopups.front()); g.pendingPopups.pop_front(); }
@@ -2089,6 +3404,7 @@ public:
 
     // --- load ---
     void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack, bool canGoForward) override {
+        DarkenBrowserWindow(browser->GetHost()->GetWindowHandle());
         if (Tab* t = TabOf(browser)) {
             t->loading = isLoading;
             t->canBack = canGoBack;
@@ -2099,6 +3415,10 @@ public:
         } else if (IsChrome(browser) && !isLoading) {
             SendState();
         } else if (IsPanel(browser) && !isLoading) {
+            if (!g.panelReady) {
+                g.panelReady = true;
+                if (HWND pw = browser->GetHost()->GetWindowHandle()) SetWindowRgn(pw, nullptr, FALSE);
+            }
             PushPerf();
         }
     }
@@ -2145,6 +3465,15 @@ public:
     }
 
     // --- certificates and HTTPS-only mode ---
+    bool GetAuthCredentials(CefRefPtr<CefBrowser>, const CefString&, bool isProxy, const CefString& host, int port,
+                            const CefString&, const CefString&, CefRefPtr<CefAuthCallback> callback) override {
+        if (!isProxy || !callback) return false;
+        std::wstring user, pass;
+        if (!ProxyAuthLookup(host.ToWString(), port, user, pass)) return false;
+        callback->Continue(user, pass);
+        if (!pass.empty()) SecureZeroMemory(&pass[0], pass.size() * sizeof(wchar_t));
+        return true;
+    }
     bool OnCertificateError(CefRefPtr<CefBrowser> browser, cef_errorcode_t, const CefString& request_url, CefRefPtr<CefSSLInfo>,
                             CefRefPtr<CefCallback> callback) override {
         // Not allowed: the load is cancelled and OnLoadError() shows the warning page. Allowed: the user
@@ -2219,64 +3548,16 @@ public:
     }
 
     // --- keyboard ---
-    bool OnPreKeyEvent(CefRefPtr<CefBrowser>, const CefKeyEvent& e, CefEventHandle, bool*) override {
+    bool OnPreKeyEvent(CefRefPtr<CefBrowser> browser, const CefKeyEvent& e, CefEventHandle, bool*) override {
         if (e.type != KEYEVENT_RAWKEYDOWN) return false;
+        if (g_kbCapturing.load() && browser) {
+            std::wstring curUrl = browser->GetMainFrame() ? browser->GetMainFrame()->GetURL().ToWString() : L"";
+            if (curUrl.rfind(SETTINGS_PAGE, 0) == 0) return false;
+            g_kbCapturing = false;
+        }
         bool ctrl = (e.modifiers & EVENTFLAG_CONTROL_DOWN) != 0, shift = (e.modifiers & EVENTFLAG_SHIFT_DOWN) != 0;
         bool alt = (e.modifiers & EVENTFLAG_ALT_DOWN) != 0, repeat = (e.modifiers & EVENTFLAG_IS_REPEAT) != 0;
-        int vk = e.windows_key_code, cmd = 0;
-        if (ctrl && !alt) {
-            switch (vk) {
-            case 'T': if (!repeat) cmd = shift ? CMD_REOPEN : CMD_NEWTAB; break;
-            case 'F': cmd = CMD_FIND; break;
-            case 'G': cmd = shift ? CMD_FINDPREV : CMD_FINDNEXT; break;
-            case 'D': if (!repeat) cmd = CMD_BOOKMARK; break;
-            case 'B': if (shift && !repeat) cmd = CMD_BOOKMARKS_BAR; break;
-            case 'N': if (shift && !repeat) cmd = CMD_INCOGNITO; break;
-            case 'M': if (shift && !repeat) cmd = CMD_PERFORMANCE; break;
-            case 'H': if (!repeat) cmd = CMD_HISTORY; break;
-            case 'J': if (!repeat) cmd = CMD_DOWNLOADS; break;
-            case VK_OEM_COMMA: if (!repeat) cmd = CMD_SETTINGS; break;
-            case 'O': if (shift && !repeat) cmd = CMD_BOOKMARKS; break;
-            case 'E': if (shift && !repeat) cmd = CMD_EXTENSIONS; break;
-            case 'W': case VK_F4: if (!repeat) cmd = CMD_CLOSETAB; break;
-            case 'L': cmd = CMD_FOCUSURL; break;
-            case 'R': cmd = CMD_RELOAD; break;
-            case 'P': if (!repeat) cmd = CMD_PRINT; break;
-            case VK_TAB: cmd = shift ? CMD_PREVTAB : CMD_NEXTTAB; break;
-            case VK_OEM_PLUS: case VK_ADD: cmd = CMD_ZOOMIN; break;
-            case VK_OEM_MINUS: case VK_SUBTRACT: cmd = CMD_ZOOMOUT; break;
-            case '0': case VK_NUMPAD0: cmd = CMD_ZOOMRESET; break;
-            default:
-                if (vk >= '1' && vk <= '9') {
-                    std::vector<int> vis;
-                    for (auto& t : g.tabs) if (t->wsId == g.activeWs) vis.push_back(t->id);
-                    if (!vis.empty()) {
-                        size_t i = (vk == '9') ? vis.size() - 1 : (size_t)(vk - '1');
-                        if (i < vis.size()) { SelectTab(vis[i], true); return true; }
-                    }
-                }
-            }
-        } else if (alt && !ctrl) {
-            if (vk == VK_LEFT) cmd = CMD_BACK;
-            else if (vk == VK_RIGHT) cmd = CMD_FWD;
-            else if (vk == VK_HOME) cmd = CMD_HOME;
-            else if (vk >= '1' && vk <= '9' && !repeat) {
-                size_t wi = (size_t)(vk - '1');
-                if (wi < g.workspaces.size()) { SwitchWorkspace(g.workspaces[wi].id); return true; }
-            }
-        } else if (!ctrl && !alt) {
-            if (vk == VK_F1 && !repeat) cmd = CMD_HELP;
-            else if (vk == VK_F5) cmd = CMD_RELOAD;
-            else if (vk == VK_F3) cmd = shift ? CMD_FINDPREV : CMD_FINDNEXT;
-            else if (vk == VK_F7 && !shift && !repeat) cmd = CMD_CARET;
-            else if (vk == VK_F11 && !repeat) cmd = CMD_FULLSCREEN;
-            else if (vk == VK_F12 && !repeat) cmd = CMD_DEVTOOLS;
-            else if (vk == VK_F6) cmd = CMD_FOCUSURL;
-            else if (vk == VK_ESCAPE && g.fsUser) cmd = CMD_FULLSCREEN;
-        }
-        if (!cmd) return false;
-        ExecCmd(cmd);
-        return true;
+        return HandleShortcutKey(ctrl, shift, alt, repeat, e.windows_key_code);
     }
 
     // --- downloads ---
@@ -2659,14 +3940,110 @@ static std::string PwJsonList() {
     return o + "]}";
 }
 
+static std::string ProxyJsonList() {
+    std::lock_guard<std::mutex> lk(g_proxyMu);
+    auto b = [](bool v) { return v ? "true" : "false"; };
+    std::string o = std::string("{\"enabled\":") + b(g_proxyEnabled && !g_proxyList.empty()) +
+                    ",\"checking\":" + b(g_proxyChecking) +
+                    ",\"error\":" + JsonUtf8(g_proxyError) +
+                    ",\"activeId\":" + std::to_string(g_proxyActiveId) +
+                    ",\"noWebRtcLeak\":" + b(g_proxyNoWebRtcLeak) +
+                    ",\"incognito\":" + b(g.incognito) + ",\"profiles\":[";
+    for (size_t i = 0; i < g_proxyList.size(); i++) {
+        const auto& p = g_proxyList[i];
+        if (i) o += ",";
+        o += "{\"id\":" + std::to_string(p.id) + ",\"name\":" + JsonUtf8(p.name) +
+             ",\"scheme\":" + JsonUtf8(p.scheme) + ",\"host\":" + JsonUtf8(p.host) +
+             ",\"port\":" + std::to_string(p.port) + ",\"user\":" + JsonUtf8(p.user) +
+             ",\"hasPass\":" + b(!p.passBlob.empty()) + ",\"bypass\":" + JsonUtf8(p.bypass) + "}";
+    }
+    return o + "]}";
+}
+
+static bool ProxySaveFromJson(const std::string& body, std::string& errOut, int& savedIdOut) {
+    CefRefPtr<CefValue> v = CefParseJSON(body, JSON_PARSER_RFC);
+    if (!v || v->GetType() != VTYPE_DICTIONARY) { errOut = "Invalid JSON payload."; return false; }
+    CefRefPtr<CefDictionaryValue> d = v->GetDictionary();
+    int id = d->HasKey("id") ? d->GetInt("id") : 0;
+    std::wstring name = d->GetString("name").ToWString();
+    std::wstring scheme = d->GetString("scheme").ToWString();
+    std::wstring host = d->GetString("host").ToWString();
+    int port = d->GetInt("port");
+    std::wstring user = d->GetString("user").ToWString();
+    std::wstring pass = d->GetString("pass").ToWString();
+    std::wstring bypass = d->GetString("bypass").ToWString();
+    bool keepPass = d->HasKey("keepPass") && d->GetBool("keepPass");
+
+    auto trim = [](std::wstring s) {
+        size_t a = s.find_first_not_of(L" \t\r\n"); if (a == std::wstring::npos) return std::wstring();
+        size_t b = s.find_last_not_of(L" \t\r\n"); return s.substr(a, b - a + 1);
+    };
+    name = trim(name); host = trim(host); user = trim(user); bypass = trim(bypass);
+    for (auto& c : scheme) c = (wchar_t)towlower(c);
+    if (name.empty() || !ValidProxyField(name, 40)) { errOut = "Profile name must be 1-40 characters."; return false; }
+    if (scheme != L"socks5" && scheme != L"https" && scheme != L"http") { errOut = "Protocol must be SOCKS5, HTTPS, or HTTP."; return false; }
+    if (!ValidProxyHost(host)) { errOut = "Enter a valid proxy hostname or IP address."; return false; }
+    if (port < 1 || port > 65535) { errOut = "Port must be between 1 and 65535."; return false; }
+    if (!ValidProxyField(user, 128) || !ValidProxyField(bypass, 500)) { errOut = "Invalid username or bypass list."; return false; }
+    for (wchar_t c : bypass) if (c == L'"' || c == L'\'') { errOut = "Quotes are not allowed in bypass list."; return false; }
+
+    std::lock_guard<std::mutex> lk(g_proxyMu);
+    if (id > 0) {
+        for (auto& p : g_proxyList) {
+            if (p.id != id) continue;
+            std::string nextBlob;
+            if (!pass.empty()) {
+                if (!DpProtect(Utf8(pass), nextBlob)) { errOut = "Failed to encrypt password."; return false; }
+            } else if (keepPass) {
+                nextBlob = p.passBlob;
+            }
+            p.name = name; p.scheme = scheme; p.host = host; p.port = port; p.user = user; p.bypass = bypass;
+            p.passBlob = std::move(nextBlob);
+            g_proxyAuthBurst = 0;
+            ProxySaveLocked();
+            savedIdOut = p.id;
+            return true;
+        }
+    }
+    if (g_proxyList.size() >= 64) { errOut = "Maximum 64 proxy profiles reached."; return false; }
+    ProxyProfile np;
+    np.id = g_proxyNextId++;
+    np.name = name; np.scheme = scheme; np.host = host; np.port = port; np.user = user; np.bypass = bypass;
+    if (!pass.empty() && !DpProtect(Utf8(pass), np.passBlob)) { errOut = "Failed to encrypt password."; return false; }
+    g_proxyList.push_back(std::move(np));
+    if (g_proxyList.size() == 1) g_proxyActiveId = g_proxyList.front().id;
+    ProxySaveLocked();
+    savedIdOut = g_proxyList.back().id;
+    return true;
+}
+
+static bool ProxyDelete(int id) {
+    std::lock_guard<std::mutex> lk(g_proxyMu);
+    size_t before = g_proxyList.size();
+    g_proxyList.erase(std::remove_if(g_proxyList.begin(), g_proxyList.end(), [&](const ProxyProfile& p) { return p.id == id; }), g_proxyList.end());
+    if (g_proxyList.size() == before) return false;
+    if (g_proxyList.empty()) {
+        g_proxyEnabled = false;
+        g_proxyActiveId = 0;
+    } else if (g_proxyActiveId == id) {
+        g_proxyActiveId = g_proxyList.front().id;
+    }
+    g_proxyAuthBurst = 0;
+    ProxySaveLocked();
+    if (!g.incognito) {
+        DWORD en = g_proxyEnabled ? 1 : 0, aid = (DWORD)g_proxyActiveId;
+        RegSetBin(L"ProxyEnabled", REG_DWORD, &en, sizeof(en));
+        RegSetBin(L"ProxyActiveId", REG_DWORD, &aid, sizeof(aid));
+    }
+    return true;
+}
+
 // Settings for the settings page. Runs on the IO thread: only atomics and the registry.
 static std::string SettingsJson() {
     auto b = [](bool v) { return v ? "true" : "false"; };
-    std::string o = "{\"searchUrl\":" + JsonUtf8(CurrentEngine().url) + ",\"search\":" + JsonUtf8(CurrentEngine().id) + ",\"engines\":[";
-    for (int i = 0; i < SEARCH_ENGINE_COUNT; i++) {
-        if (i) o += ",";
-        o += "{\"id\":" + JsonUtf8(SEARCH_ENGINES[i].id) + ",\"name\":" + JsonUtf8(SEARCH_ENGINES[i].name) + "}";
-    }
+    std::wstring eid, ename, eurl;
+    CurrentEngineInfo(eid, ename, eurl);
+    std::string o = "{\"searchUrl\":" + JsonUtf8(eurl) + ",\"search\":" + JsonUtf8(eid) + ",\"engines\":" + EnginesJsonArray(true);
     std::wstring chromium = std::to_wstring(cef_version_info(4)) + L"." + std::to_wstring(cef_version_info(5)) + L"." +
                             std::to_wstring(cef_version_info(6)) + L"." + std::to_wstring(cef_version_info(7));
     size_t scriptTotal = 0, scriptEnabled = 0;
@@ -2678,12 +4055,28 @@ static std::string SettingsJson() {
     else if (us.state == U_DOWNLOADING) updState = "downloading";
     else if (us.state == U_AVAILABLE) updState = "available";
     else if (us.state == U_READY) updState = "ready";
-    o += std::string("],\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
+    o += std::string(",\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
          ",\"updState\":\"" + updState + "\",\"updPercent\":" + std::to_string(us.percent) + ",\"updVersion\":" + JsonUtf8(us.version) + ",\"updResult\":" + JsonUtf8(us.result) + ",\"updError\":" + JsonUtf8(us.error) +
          ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
          ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) + ",\"smoothScroll\":" + b(RegGetDword(L"SmoothScroll", 1) != 0) + ",\"smoothStep\":" + std::to_string(RegGetDword(L"SmoothStep", 120)) + ",\"smoothTime\":" + std::to_string(RegGetDword(L"SmoothTime", 400)) + ",\"netSpeed\":" + b(RegGetDword(L"NetSpeed", 1) != 0) + ",\"devDock\":" + std::to_string(RegGetDword(L"DevToolsDock", 0)) + ",\"defaultBrowser\":" + b(browserreg::IsDefault()) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
          ",\"scriptTotal\":" + std::to_string(scriptTotal) + ",\"scriptEnabled\":" + std::to_string(scriptEnabled) +
-         ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"bookmarksBar\":" + b(RegGetDword(L"BookmarksBar", 1) != 0) + ",\"forceDark\":" + b(RegGetDword(L"ForceDark", 0) != 0) + ",\"version\":" + JsonUtf8(APP_VERSION) +
+         ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"bookmarksBar\":" + b(RegGetDword(L"BookmarksBar", 1) != 0) + ",\"forceDark\":" + b(RegGetDword(L"ForceDark", 0) != 0) +
+         ",\"dohMode\":" + JsonUtf8(RegGetString(L"DohMode").empty() ? L"automatic" : RegGetString(L"DohMode")) +
+         ",\"dohProvider\":" + JsonUtf8(RegGetString(L"DohProvider").empty() ? L"cloudflare" : RegGetString(L"DohProvider")) +
+         ",\"dohCustom\":" + JsonUtf8(RegGetString(L"DohCustom")) + ",\"dohProviders\":[";
+    for (int i = 0; i < DOH_PROVIDER_COUNT; i++) {
+        if (i) o += ",";
+        o += "{\"id\":" + JsonUtf8(DOH_PROVIDERS[i].id) + ",\"name\":" + JsonUtf8(DOH_PROVIDERS[i].name) + ",\"tmpl\":" + JsonUtf8(DOH_PROVIDERS[i].tmpl) + "}";
+    }
+    std::wstring tp, tpk, tcy;
+    { std::lock_guard<std::mutex> lk(g_themeMu); tp = g_themePreset; tpk = g_themePink; tcy = g_themeCyan; }
+    o += "],\"accentPreset\":" + JsonUtf8(tp) + ",\"accentPink\":" + JsonUtf8(tpk) + ",\"accentCyan\":" + JsonUtf8(tcy) + ",\"accentPresets\":[";
+    for (int i = 0; i < THEME_PRESET_COUNT; i++) {
+        if (i) o += ",";
+        o += "{\"id\":" + JsonUtf8(THEME_PRESETS[i].id) + ",\"name\":" + JsonUtf8(THEME_PRESETS[i].name) +
+             ",\"pink\":" + JsonUtf8(THEME_PRESETS[i].pink) + ",\"cyan\":" + JsonUtf8(THEME_PRESETS[i].cyan) + "}";
+    }
+    o += "],\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
     return o;
 }
@@ -2798,11 +4191,55 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         if (!userscripts::Delete(id))
             return new StringResource("{\"error\":\"cannot delete script\"}", "application/json", userscripts::IsReadOnly() ? 403 : 400);
     }
+    else if (path == L"api/proxy") out = ProxyJsonList();
+    else if (path == L"api/proxy/toggle") {
+        if (!ProxySetEnabled(QueryParam(query, L"enabled") == L"1" ? 1 : 0))
+            PostMessageW(g.hwnd, WM_APP_PROXY, 0, 0);
+    }
+    else if (path == L"api/proxy/select") {
+        if (!ProxySelect((int)id))
+            PostMessageW(g.hwnd, WM_APP_PROXY, 0, 0);
+    }
+    else if (path == L"api/proxy/test") {
+        std::wstring host; int port = 0; bool found = false;
+        {
+            std::lock_guard<std::mutex> lk(g_proxyMu);
+            for (const auto& p : g_proxyList) if (p.id == (int)id) { host = p.host; port = p.port; found = true; break; }
+        }
+        if (!found) return new StringResource("{\"ok\":false,\"error\":\"Profile not found\"}", "application/json", 404);
+        ULONGLONG t0 = GetTickCount64();
+        bool ok = ProxyTcpReachable(host, port, 1200);
+        ULONGLONG dt = GetTickCount64() - t0;
+        if (ok) out = "{\"ok\":true,\"ms\":" + std::to_string(dt) + "}";
+        else {
+            std::wstring msg = L"Cannot reach " + host + L":" + std::to_wstring(port);
+            out = "{\"ok\":false,\"error\":" + JsonUtf8(msg) + "}";
+        }
+    }
+    else if (path == L"api/proxy/webrtc") {
+        ProxySetWebRtc(QueryParam(query, L"on") == L"1");
+        PostMessageW(g.hwnd, WM_APP_PROXY, 0, 0);
+    }
+    else if (path == L"api/proxy/save") {
+        if (g.incognito) return new StringResource("{\"error\":\"incognito cannot modify saved profiles\"}", "application/json", 403);
+        std::string err; int savedId = 0;
+        if (!ProxySaveFromJson(body, err, savedId)) {
+            std::wstring werr(err.begin(), err.end());
+            return new StringResource("{\"error\":" + JsonUtf8(werr) + "}", "application/json", 400);
+        }
+        PostMessageW(g.hwnd, WM_APP_PROXY, 0, 0);
+        out = "{\"ok\":true,\"id\":" + std::to_string(savedId) + "}";
+    }
+    else if (path == L"api/proxy/delete") {
+        if (g.incognito) return new StringResource("{\"error\":\"incognito cannot modify saved profiles\"}", "application/json", 403);
+        if (!ProxyDelete((int)id)) return new StringResource("{\"error\":\"not found\"}", "application/json", 404);
+        PostMessageW(g.hwnd, WM_APP_PROXY, 0, 0);
+    }
     else if (path == L"api/settings") out = SettingsJson();
     else if (path == L"api/settings/set") {
         std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
         bool ok = false;
-        if (key == L"search") { for (const auto& e : SEARCH_ENGINES) if (val == e.id) ok = true; }
+        if (key == L"search") ok = EngineValidId(val);
         else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons" || key == L"bookmarksBar" || key == L"httpsOnly" || key == L"blockAds" || key == L"savePasswords" || key == L"smoothScroll" || key == L"netSpeed" || key == L"forceDark") ok = (val == L"0" || val == L"1");
         else if (key == L"smoothStep") ok = (val == L"70" || val == L"120" || val == L"200");
         else if (key == L"devDock") ok = (val == L"0" || val == L"1" || val == L"2" || val == L"3");
@@ -2813,6 +4250,16 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         else if (key == L"home") {
             std::wstring low = val; for (auto& ch : low) ch = towlower(ch);
             ok = val.empty() || (val.size() < 500 && (low.rfind(L"http://", 0) == 0 || low.rfind(L"https://", 0) == 0 || low.rfind(L"file:///", 0) == 0));
+        } else if (key == L"dohMode") ok = (val == L"off" || val == L"automatic" || val == L"secure");
+        else if (key == L"dohProvider") { for (int i = 0; i < DOH_PROVIDER_COUNT; i++) if (val == DOH_PROVIDERS[i].id) ok = true; }
+        else if (key == L"dohCustom") ok = ValidDohCustomUrl(val);
+        else if (key == L"accentPreset") {
+            if (val == L"custom") ok = true;
+            else for (int i = 0; i < THEME_PRESET_COUNT; i++) if (val == THEME_PRESETS[i].id) ok = true;
+        }
+        else if (key == L"accentPink" || key == L"accentCyan") {
+            COLORREF dummy; std::wstring norm;
+            ok = ParseHexColor(val, dummy, norm);
         }
         if (!ok) return new StringResource("{\"error\":\"invalid value\"}", "application/json", 400);
         // Applied on the UI thread, and waited for, so that the page can read the result back.
@@ -2820,6 +4267,55 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         DWORD_PTR res = 0;
         SendMessageTimeoutW(g.hwnd, WM_APP_SETTING, 0, (LPARAM)&msg, SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &res);
         out = "{\"ok\":true}";
+    }
+    else if (path == L"api/keybindings") out = KeybindsJson();
+    else if (path == L"api/keybindings/capture") {
+        g_kbCapturing = (QueryParam(query, L"on") == L"1");
+    }
+    else if (path == L"api/keybindings/set") {
+        if (g.incognito) return new StringResource("{\"error\":\"incognito cannot modify keybindings\"}", "application/json", 403);
+        std::string err;
+        if (!KeybindSetFromJson(body, err)) {
+            return new StringResource("{\"error\":" + JsonUtf8(Wide(err)) + "}", "application/json", 400);
+        }
+        PostMessageW(g.hwnd, WM_APP_THEME, 1, 0);
+        out = KeybindsJson();
+    }
+    else if (path == L"api/keybindings/reset") {
+        if (g.incognito) return new StringResource("{\"error\":\"incognito cannot modify keybindings\"}", "application/json", 403);
+        std::string kid = Utf8(QueryParam(query, L"id"));
+        KeybindReset(kid);
+        PostMessageW(g.hwnd, WM_APP_THEME, 1, 0);
+        out = KeybindsJson();
+    }
+    else if (path == L"api/newtab") out = NewTabJson();
+    else if (path == L"api/newtab/note") {
+        if (!NewTabSaveNoteFromJson(body)) return new StringResource("{\"error\":\"invalid note payload\"}", "application/json", 400);
+    }
+    else if (path == L"api/newtab/dials") {
+        std::string err;
+        if (!NewTabSaveDialsFromJson(body, err)) return new StringResource("{\"error\":" + JsonUtf8(Wide(err)) + "}", "application/json", 400);
+    }
+    else if (path == L"api/newtab/reset") {
+        NewTabResetDials();
+        out = NewTabJson();
+    }
+    else if (path == L"api/engines/save") {
+        std::string err;
+        std::wstring savedId;
+        if (!EngineSaveFromJson(body, err, savedId)) {
+            return new StringResource("{\"error\":" + JsonUtf8(Wide(err)) + "}", "application/json", 400);
+        }
+        PostMessageW(g.hwnd, WM_APP_THEME, 1, 0);
+        out = "{\"ok\":true,\"id\":" + JsonUtf8(savedId) + ",\"engines\":" + EnginesJsonArray(true) + "}";
+    }
+    else if (path == L"api/engines/delete") {
+        std::wstring eid = QueryParam(query, L"id");
+        if (!EngineDelete(eid)) {
+            return new StringResource("{\"error\":\"engine not found\"}", "application/json", 404);
+        }
+        PostMessageW(g.hwnd, WM_APP_THEME, 1, 0);
+        out = "{\"ok\":true,\"engines\":" + EnginesJsonArray(true) + "}";
     }
     else return new StringResource("not found", "text/plain", 404);
     if (changed) PostMessageW(g.hwnd, WM_APP_STORE, 0, 0);
@@ -2889,7 +4385,13 @@ public:
         else if (path == L"permissions.html") id = IDR_PERMISSIONS;
         else if (path == L"extensions.html" || path == L"userscripts.html") id = IDR_EXTENSIONS;
         std::string body;
-        if (id && LoadUi(id, body)) return new StringResource(std::move(body), "text/html", 200);
+        if (id && LoadUi(id, body)) {
+            std::string cssTag = ThemeStyleTag();
+            size_t hpos = body.find("</head>");
+            if (hpos != std::string::npos) body.insert(hpos, cssTag);
+            else body = cssTag + body;
+            return new StringResource(std::move(body), "text/html", 200);
+        }
         // Unknown neonnet:// page: a themed page with a proper title (the tab would otherwise
         // be named after the address). Nothing from the request is echoed back.
         static const char NOT_FOUND[] =
@@ -3551,6 +5053,8 @@ static void SetPanelOpen(bool open) {
     if (open == g.panelOpen) return;
     g.panelOpen = open;
     if (open) {
+        g.panelReady = false;
+        Layout();
         if (!g.panel) {
             g.creatingPanel = true;
             CefBrowserHost::CreateBrowserSync(ChildInfo(PanelRect()), g_client.get(), PANEL_UI, BrowserSettings(), nullptr, nullptr);
@@ -3558,6 +5062,7 @@ static void SetPanelOpen(bool open) {
         }
         SamplePerf();
     } else if (g.panel) {
+        g.panelReady = false;
         // closed for good, so the panel itself holds no memory while it is hidden
         CefRefPtr<CefBrowser> p = g.panel;
         g.panel = nullptr;
@@ -3566,6 +5071,7 @@ static void SetPanelOpen(bool open) {
     Layout();
     UpdatePerfTimer();
     SendState();
+    if (!open) FocusPage();
 }
 
 static void SetRamLimit(DWORD mb) {
@@ -3623,6 +5129,56 @@ static void OnPerfCommand(const std::wstring& cmd, const std::wstring& arg) {
     PushPerf();
 }
 
+static void OpenPalette() {
+    if (!g.chrome) return;
+    if (g.fullscreen) { g.fsUser = false; g.fsElement = false; UpdateFullscreen(); }
+    EnsureDefaultWorkspaces();
+    Tab* a = Active();
+    std::wstring curUrl = a ? DisplayUrl(a) : L"";
+    bool canStar = !g.incognito && a && store::Recordable(curUrl);
+    bool starred = canStar && store::FindBookmark(curUrl);
+
+    std::wstring j = L"{\"type\":\"togglePalette\",\"data\":{\"tabs\":[";
+    for (size_t i = 0; i < g.tabs.size(); i++) {
+        Tab* t = g.tabs[i].get();
+        Workspace* w = FindWs(t->wsId);
+        if (i) j += L",";
+        j += L"{\"id\":" + std::to_wstring(t->id) +
+             L",\"title\":" + JsonStr(t->title.empty() ? std::wstring(L"New tab") : t->title) +
+             L",\"url\":" + JsonStr(DisplayUrl(t)) +
+             L",\"wsId\":" + std::to_wstring(t->wsId) +
+             L",\"wsName\":" + JsonStr(w ? w->name : L"") +
+             L",\"wsColor\":" + JsonStr(w ? w->color : L"#00e5ff") +
+             L",\"pinned\":" + (t->pinned ? L"true" : L"false") +
+             L",\"muted\":" + (t->muted ? L"true" : L"false") +
+             L",\"audible\":" + (t->audible ? L"true" : L"false") +
+             L",\"active\":" + (t->id == g.active ? L"true" : L"false") + L"}";
+    }
+    bool proxyOn = false; std::wstring proxyName;
+    {
+        std::lock_guard<std::mutex> lk(g_proxyMu);
+        proxyOn = g_proxyEnabled && !g_proxyList.empty();
+        for (const auto& p : g_proxyList) if (p.id == g_proxyActiveId) { proxyName = p.name; break; }
+    }
+    j += L"],\"activePinned\":" + std::wstring(a && a->pinned ? L"true" : L"false") +
+         L",\"activeMuted\":" + std::wstring(a && a->muted ? L"true" : L"false") +
+         L",\"hasActive\":" + std::wstring(a ? L"true" : L"false") +
+         L",\"canReopen\":" + std::wstring(!g.closed.empty() ? L"true" : L"false") +
+         L",\"canStar\":" + std::wstring(canStar ? L"true" : L"false") +
+         L",\"starred\":" + std::wstring(starred ? L"true" : L"false") +
+         L",\"forceDark\":" + std::wstring(g.forceDark ? L"true" : L"false") +
+         L",\"blockAds\":" + std::wstring(g.blockAds.load() ? L"true" : L"false") +
+         L",\"proxyOn\":" + std::wstring(proxyOn ? L"true" : L"false") +
+         L",\"proxyName\":" + JsonStr(proxyName) +
+         L",\"scan\":" + std::wstring(g.scan.load() ? L"true" : L"false") +
+         L",\"bookmarksBar\":" + std::wstring(g.bookmarksBar ? L"true" : L"false") +
+         L",\"perf\":" + std::wstring(g.panelOpen ? L"true" : L"false") +
+         L",\"incognito\":" + std::wstring(g.incognito ? L"true" : L"false") + L"}}";
+
+    FocusChrome();
+    RunInChrome(L"window.__nn&&window.__nn(" + j + L")");
+}
+
 static void ToggleCaretBrowsing();
 
 static void ExecCmd(int cmd) {
@@ -3630,6 +5186,25 @@ static void ExecCmd(int cmd) {
     CefRefPtr<CefBrowser> b = a ? a->browser : nullptr;
     switch (cmd) {
     case CMD_NEWTAB: CreateTab(NEWTAB, true); break;
+    case CMD_PALETTE: OpenPalette(); break;
+    case CMD_PIN_TAB: if (a) SetPinned(a->id, !a->pinned); break;
+    case CMD_MUTE_TAB: if (a) ToggleMute(a->id); break;
+    case CMD_FORCEDARK: {
+        g.forceDark = !g.forceDark;
+        DWORD v = g.forceDark ? 1 : 0;
+        RegSetBin(L"ForceDark", REG_DWORD, &v, sizeof(v));
+        for (auto& t : g.tabs) if (t->browser && !t->discarded) ApplyForceDark(t->browser);
+        ShowNotice(g.forceDark ? L"FORCE DARK MODE ON" : L"FORCE DARK MODE OFF");
+        break;
+    }
+    case CMD_PROXY_TOGGLE: {
+        if (!ProxySetEnabled(-1)) {
+            ApplyProxyPrefs();
+            SendState();
+            ShowNotice(L"PROXY TUNNEL OFF");
+        }
+        break;
+    }
     case CMD_CARET: ToggleCaretBrowsing(); break;
     case CMD_INCOGNITO: if (g.incognito) CreateTab(NEWTAB, true); else LaunchIncognito(L""); break;
     case CMD_PERFORMANCE: SetPanelOpen(!g.panelOpen); break;
@@ -3727,6 +5302,50 @@ static void ExecCmd(int cmd) {
     if (cmd == CMD_ZOOMIN || cmd == CMD_ZOOMOUT || cmd == CMD_ZOOMRESET) SetTimer(g.hwnd, TIMER_ZOOM, 150, nullptr);
 }
 
+static bool IsNoRepeatCmd(int cmd) {
+    switch (cmd) {
+    case CMD_NEWTAB: case CMD_CLOSETAB: case CMD_REOPEN: case CMD_BOOKMARK: case CMD_BOOKMARKS_BAR:
+    case CMD_INCOGNITO: case CMD_PERFORMANCE: case CMD_HISTORY: case CMD_DOWNLOADS: case CMD_SETTINGS:
+    case CMD_BOOKMARKS: case CMD_EXTENSIONS: case CMD_PALETTE: case CMD_PRINT:
+    case CMD_PIN_TAB: case CMD_MUTE_TAB: case CMD_PROXY_TOGGLE: case CMD_FORCEDARK:
+    case CMD_SCAN: case CMD_BLOCKADS: case CMD_HELP: case CMD_CARET: case CMD_FULLSCREEN: case CMD_DEVTOOLS:
+        return true;
+    default: return false;
+    }
+}
+
+static bool HandleShortcutKey(bool ctrl, bool shift, bool alt, bool repeat, int vk) {
+    int cmd = MatchUserKeybind(ctrl, shift, alt, vk);
+    if (cmd) {
+        if (repeat && IsNoRepeatCmd(cmd)) return true;   // swallow key repeat without firing twice
+        ExecCmd(cmd);
+        return true;
+    }
+    if (ctrl && !alt) {
+        if (vk == 'G') cmd = shift ? CMD_FINDPREV : CMD_FINDNEXT;
+        else if (vk == VK_F4 && !shift && !repeat) cmd = CMD_CLOSETAB;
+        else if (vk == 'K' && shift && !repeat) cmd = CMD_PALETTE;
+        else if (!shift && vk >= '1' && vk <= '9') {
+            std::vector<int> vis;
+            for (auto& t : g.tabs) if (t->wsId == g.activeWs) vis.push_back(t->id);
+            if (!vis.empty()) {
+                size_t i = (vk == '9') ? vis.size() - 1 : (size_t)(vk - '1');
+                if (i < vis.size()) { SelectTab(vis[i], true); return true; }
+            }
+        }
+    } else if (alt && !ctrl && !shift && vk >= '1' && vk <= '9' && !repeat) {
+        size_t wi = (size_t)(vk - '1');
+        if (wi < g.workspaces.size()) { SwitchWorkspace(g.workspaces[wi].id); return true; }
+    } else if (!ctrl && !alt && !shift) {
+        if (vk == VK_F5) cmd = CMD_RELOAD;
+        else if (vk == VK_F6) cmd = CMD_FOCUSURL;
+        else if (vk == VK_ESCAPE && g.fsUser) cmd = CMD_FULLSCREEN;
+    }
+    if (!cmd) return false;
+    ExecCmd(cmd);
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // The ≡ menu: a popup window painted in the NeonNet theme (a native menu cannot be
 // recolored or given clipped corners). RunMenu() runs its own message loop, like
@@ -3810,7 +5429,7 @@ static void PaintMenu(HWND hwnd, MenuState& st, HDC hdc) {
             RECT f{ r.left + S(4), r.top, r.right - S(4), r.bottom };
             int k = S(7);
             POINT pts[5] = { {f.left, f.top}, {f.right - k, f.top}, {f.right, f.top + k}, {f.right, f.bottom}, {f.left, f.bottom} };
-            HBRUSH hb = CreateSolidBrush(C_CYAN);
+            HBRUSH hb = CreateSolidBrush(SecondaryAccent());
             HRGN rg = CreatePolygonRgn(pts, 5, WINDING);
             FillRgn(mem, rg, hb);
             DeleteObject(rg); DeleteObject(hb);
@@ -4388,38 +6007,44 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
     Tab* a = Active();
     bool starred = a && store::FindBookmark(DisplayUrl(a)) != 0;
     bool canStar = !g.incognito && a && store::Recordable(DisplayUrl(a));
-    add(CMD_NEWTAB, L"New tab", L"Ctrl+T");
-    add(CMD_CLOSETAB, L"Close tab", L"Ctrl+W");
-    add(CMD_REOPEN, L"Reopen closed tab", L"Ctrl+Shift+T", g.closed.empty());
-    add(CMD_INCOGNITO, g.incognito ? L"New incognito tab" : L"New incognito window", L"Ctrl+Shift+N");
+    add(CMD_NEWTAB, L"New tab", KeybindDisplay(CMD_NEWTAB));
+    add(CMD_PALETTE, L"Command palette", KeybindDisplay(CMD_PALETTE));
+    add(CMD_CLOSETAB, L"Close tab", KeybindDisplay(CMD_CLOSETAB));
+    add(CMD_REOPEN, L"Reopen closed tab", KeybindDisplay(CMD_REOPEN), g.closed.empty());
+    add(CMD_INCOGNITO, g.incognito ? L"New incognito tab" : L"New incognito window", KeybindDisplay(CMD_INCOGNITO));
     sep();
-    add(CMD_BOOKMARK, starred ? L"Remove bookmark" : L"Bookmark this page", L"Ctrl+D", !canStar);
-    add(CMD_BOOKMARKS, L"Bookmarks", L"Ctrl+Shift+O");
-    add(CMD_BOOKMARKS_BAR, L"Bookmarks bar", L"Ctrl+Shift+B", false, g.bookmarksBar);
-    add(CMD_HISTORY, L"History", L"Ctrl+H", g.incognito);   // nothing is recorded in an incognito window
-    add(CMD_DOWNLOADS, L"Downloads", L"Ctrl+J");
-    add(CMD_EXTENSIONS, L"Extensions (Userscripts)", L"Ctrl+Shift+E");
-    add(CMD_PERFORMANCE, L"Performance panel", L"Ctrl+Shift+M", false, g.panelOpen);
-    add(CMD_FIND, L"Find in page", L"Ctrl+F");
+    add(CMD_BOOKMARK, starred ? L"Remove bookmark" : L"Bookmark this page", KeybindDisplay(CMD_BOOKMARK), !canStar);
+    add(CMD_BOOKMARKS, L"Bookmarks", KeybindDisplay(CMD_BOOKMARKS));
+    add(CMD_BOOKMARKS_BAR, L"Bookmarks bar", KeybindDisplay(CMD_BOOKMARKS_BAR), false, g.bookmarksBar);
+    add(CMD_HISTORY, L"History", KeybindDisplay(CMD_HISTORY), g.incognito);   // nothing is recorded in an incognito window
+    add(CMD_DOWNLOADS, L"Downloads", KeybindDisplay(CMD_DOWNLOADS));
+    add(CMD_EXTENSIONS, L"Extensions (Userscripts)", KeybindDisplay(CMD_EXTENSIONS));
+    add(CMD_PERFORMANCE, L"Performance panel", KeybindDisplay(CMD_PERFORMANCE), false, g.panelOpen);
+    add(CMD_FIND, L"Find in page", KeybindDisplay(CMD_FIND));
     sep();
-    add(CMD_ZOOMIN, L"Zoom in", L"Ctrl++");
-    add(CMD_ZOOMOUT, L"Zoom out", L"Ctrl+-");
-    add(CMD_ZOOMRESET, L"Reset zoom", L"Ctrl+0");
+    add(CMD_ZOOMIN, L"Zoom in", KeybindDisplay(CMD_ZOOMIN));
+    add(CMD_ZOOMOUT, L"Zoom out", KeybindDisplay(CMD_ZOOMOUT));
+    add(CMD_ZOOMRESET, L"Reset zoom", KeybindDisplay(CMD_ZOOMRESET));
     sep();
-    add(CMD_PRINT, L"Print", L"Ctrl+P");
-    add(CMD_BLOCKADS, L"Block trackers and ads", L"", false, g.blockAds.load());
-    add(CMD_SCAN, L"Scanlines", L"", false, g.scan);
-    add(CMD_FULLSCREEN, L"Fullscreen", L"F11", false, g.fullscreen);
-    add(CMD_DEVTOOLS, L"Developer tools", L"F12");
+    add(CMD_PRINT, L"Print", KeybindDisplay(CMD_PRINT));
+    add(CMD_BLOCKADS, L"Block trackers and ads", KeybindDisplay(CMD_BLOCKADS), false, g.blockAds.load());
+    {
+        bool proxyOn = false;
+        { std::lock_guard<std::mutex> lk(g_proxyMu); proxyOn = g_proxyEnabled && !g_proxyList.empty(); }
+        add(CMD_PROXY_TOGGLE, L"Proxy tunnel", KeybindDisplay(CMD_PROXY_TOGGLE), false, proxyOn);
+    }
+    add(CMD_SCAN, L"Scanlines", KeybindDisplay(CMD_SCAN), false, g.scan);
+    add(CMD_FULLSCREEN, L"Fullscreen", KeybindDisplay(CMD_FULLSCREEN), false, g.fullscreen);
+    add(CMD_DEVTOOLS, L"Developer tools", KeybindDisplay(CMD_DEVTOOLS));
     sep();
-    add(CMD_SETTINGS, L"Settings", L"Ctrl+,");
+    add(CMD_SETTINGS, L"Settings", KeybindDisplay(CMD_SETTINGS));
     if (!g.incognito) {   // updates are handled by the normal window
         if (g.upd == U_READY) add(CMD_UPDATE_RESTART, L"Restart to update to v" + g.updVersion);
         if (g.upd == U_AVAILABLE) add(CMD_UPDATE_PAGE, L"Download v" + g.updVersion);
         add(CMD_UPDATE_CHECK, L"Check for updates", L"", g.upd == U_CHECKING || g.upd == U_DOWNLOADING);
         if (IsInstalledCopy()) add(CMD_UPDATE_AUTO, L"Automatic updates", L"", false, AutoUpdateEnabled());
     }
-    add(CMD_HELP, L"User guide", L"F1");
+    add(CMD_HELP, L"User guide", KeybindDisplay(CMD_HELP));
     add(CMD_ABOUT, L"About NeonNet");
 
     RECT c = ChromeRect();
@@ -4446,7 +6071,7 @@ static void ShowTabMenu(int id, int cssX, int cssY, double ratio) {
     };
     add(T_PIN, t->pinned ? L"Unpin tab" : L"Pin tab");
     add(T_DUP, L"Duplicate tab", DisplayUrl(t).empty());
-    if (t->audible || t->muted) add(T_MUTE, t->muted ? L"Unmute tab" : L"Mute tab");
+    add(T_MUTE, t->muted ? L"Unmute tab" : L"Mute tab");
     m.push_back(MenuItem());
     std::vector<int> moveTargets;
     for (const auto& w : g.workspaces) {
@@ -4512,8 +6137,14 @@ static void ShowWsMenu(int wsId, int cssX, int cssY, double ratio) {
     if (g.closing) return;
     switch (cmd) {
     case W_SWITCH: SwitchWorkspace(wsId); break;
-    case W_EDIT: RunInChrome(L"window.__nn&&window.__nn({type:'wsEdit',id:" + std::to_wstring(wsId) + L"})"); break;
-    case W_NEW: RunInChrome(L"window.__nn&&window.__nn({type:'wsEdit',id:0})"); break;
+    case W_EDIT:
+        FocusChrome();
+        RunInChrome(L"window.__nn&&window.__nn({type:'wsEdit',id:" + std::to_wstring(wsId) + L"})");
+        break;
+    case W_NEW:
+        FocusChrome();
+        RunInChrome(L"window.__nn&&window.__nn({type:'wsEdit',id:0})");
+        break;
     case W_DEL: DeleteWorkspace(wsId); break;
     }
 }
@@ -4677,13 +6308,49 @@ static void OnChromeCommand(const std::wstring& msg) {
         else ExecCmd(CMD_NEWTAB);
     }
     else if (cmd == L"mute") ToggleMute(_wtoi(arg.c_str()));
+    else if (cmd == L"proxy.toggle") {
+        if (!ProxySetEnabled(arg.empty() ? -1 : (arg == L"1" ? 1 : 0))) {
+            ApplyProxyPrefs();
+            SendState();
+        }
+    }
+    else if (cmd == L"proxy.select") {
+        if (!ProxySelect(_wtoi(arg.c_str()))) {
+            ApplyProxyPrefs();
+            SendState();
+        }
+    }
+    else if (cmd == L"proxy.webrtc") {
+        ProxySetWebRtc(arg == L"1");
+        ApplyProxyPrefs();
+        SendState();
+    }
+    else if (cmd == L"engine.select") {
+        if (EngineSelect(arg)) SendState();
+    }
+    else if (cmd == L"palette") OpenPalette();
+    else if (cmd == L"exec") {
+        static const struct { const wchar_t* name; int id; } kExec[] = {
+            { L"newtab", CMD_NEWTAB }, { L"closetab", CMD_CLOSETAB }, { L"reopen", CMD_REOPEN },
+            { L"incognito", CMD_INCOGNITO }, { L"bookmark", CMD_BOOKMARK }, { L"bookmarks", CMD_BOOKMARKS },
+            { L"bookmarks_bar", CMD_BOOKMARKS_BAR }, { L"history", CMD_HISTORY }, { L"downloads", CMD_DOWNLOADS },
+            { L"extensions", CMD_EXTENSIONS }, { L"settings", CMD_SETTINGS }, { L"perf", CMD_PERFORMANCE },
+            { L"find", CMD_FIND }, { L"zoomin", CMD_ZOOMIN }, { L"zoomout", CMD_ZOOMOUT },
+            { L"zoomreset", CMD_ZOOMRESET }, { L"print", CMD_PRINT }, { L"blockads", CMD_BLOCKADS },
+            { L"scan", CMD_SCAN }, { L"forcedark", CMD_FORCEDARK }, { L"proxy", CMD_PROXY_TOGGLE }, { L"fullscreen", CMD_FULLSCREEN },
+            { L"devtools", CMD_DEVTOOLS }, { L"caret", CMD_CARET }, { L"pin", CMD_PIN_TAB },
+            { L"mute", CMD_MUTE_TAB }, { L"help", CMD_HELP }, { L"about", CMD_ABOUT },
+            { L"update_check", CMD_UPDATE_CHECK },
+        };
+        for (const auto& it : kExec) if (arg == it.name) { ExecCmd(it.id); break; }
+    }
     else if (cmd == L"perf") ExecCmd(CMD_PERFORMANCE);
     else if (cmd.rfind(L"perf.", 0) == 0) OnPerfCommand(cmd, arg);
     else if (cmd == L"home") ExecCmd(CMD_HOME);
     else if (cmd == L"dropdown") {
-        // address bar suggestions: the toolbar height they need (CSS px, 0 = closed)
+        // address bar suggestions / palette: the toolbar height they need (CSS px, 0 = closed)
         // arguments: the height, then optionally where a narrower dropdown starts and ends
-        int n = std::max(0, std::min(_wtoi(arg.c_str()), 520)), x0 = 0, x1 = 0;
+        int n = std::max(0, std::min(_wtoi(arg.c_str()), 560)), x0 = 0, x1 = 0;
         size_t p1 = arg.find(L'\n');
         if (p1 != std::wstring::npos) {
             size_t p2 = arg.find(L'\n', p1 + 1);
@@ -4691,7 +6358,7 @@ static void OnChromeCommand(const std::wstring& msg) {
             if (p2 != std::wstring::npos) x1 = std::max(0, _wtoi(arg.c_str() + p2 + 1));
         }
         if (n == 0) x0 = x1 = 0;
-        if (n != g.dropNeed || x0 != g.dropX0 || x1 != g.dropX1) { g.dropNeed = n; g.dropX0 = x0; g.dropX1 = x1; Layout(); }
+        if (n != g.dropNeed || x0 != g.dropX0 || x1 != g.dropX1) { g.dropNeed = n; g.dropX0 = x0; g.dropX1 = x1; UpdateChromeRegion(); }
     }
     else if (cmd == L"siteperm") {
         // "<key>\n<0|1|2>" for the page that is shown (never for an address the toolbar names): 0 ask, 1 allow, 2 block;
@@ -5078,6 +6745,8 @@ public:
             }
         };
         noAutofill(CefRequestContext::GetGlobalContext());
+        ApplyDohPrefs();
+        ApplyProxyPrefs();
 
         CefRegisterSchemeHandlerFactory("https", "neonnet.ui", new UiSchemeFactory());
         CefRegisterSchemeHandlerFactory("https", "chrome.neonnet.ui", new UiSchemeFactory());
@@ -5089,15 +6758,21 @@ public:
             g.reqCtx = CefRequestContext::CreateContext(rs, nullptr);
             g.reqCtx->SetPreference("download_bubble.partial_view_enabled", noBubble, err);
             noAutofill(g.reqCtx);
+            ApplyProxyPrefs();
             g.reqCtx->RegisterSchemeHandlerFactory("https", "neonnet.ui", new UiSchemeFactory());
             g.reqCtx->RegisterSchemeHandlerFactory("https", "chrome.neonnet.ui", new UiSchemeFactory());
         }
         g_client = new Client();
         g.creatingChrome = true;
-        CefBrowserHost::CreateBrowserSync(ChildInfo(ChromeRect()), g_client.get(), CHROME_UI, BrowserSettings(), nullptr, nullptr);
+        CefBrowserHost::CreateBrowserSync(ChildInfo(ChromeHostRect()), g_client.get(), CHROME_UI, BrowserSettings(), nullptr, nullptr);
         g.creatingChrome = false;
         OpenStartTabs();
         Layout();
+        {
+            bool enabledAtBoot = false;
+            { std::lock_guard<std::mutex> lk(g_proxyMu); enabledAtBoot = g_proxyEnabled && !g_proxyList.empty(); }
+            if (enabledAtBoot) ProxyBeginEnableAsync(0);
+        }
     }
 
     bool OnAlreadyRunningAppRelaunch(CefRefPtr<CefCommandLine> command_line, const CefString&) override {
@@ -5206,15 +6881,15 @@ static void Paint(HDC hdc) {
         RECT tr = st; tr.left += S(12) + (IsZoomed(g.hwnd) ? 0 : S(CUT_DIP) / 2); tr.right -= S(12); tr.top += 1;
         Tab* a = Active();
         std::wstring left; COLORREF lc = C_MUTED;
-        if (!g.alert.empty()) { left = g.alert; lc = C_PINK; }
-        else if (!g.hoverText.empty()) { left = g.hoverText; lc = C_CYAN; }
+        if (!g.alert.empty()) { left = g.alert; lc = Accent(); }
+        else if (!g.hoverText.empty()) { left = g.hoverText; lc = SecondaryAccent(); }
         else if (a && a->loading) { left = L"LOADING..."; lc = C_YELLOW; }
         else if (!g.download.empty()) { left = g.download; lc = C_YELLOW; }
-        else if (!g.notice.empty()) { left = g.notice; lc = C_CYAN; }
+        else if (!g.notice.empty()) { left = g.notice; lc = SecondaryAccent(); }
         else if (g.upd == U_DOWNLOADING) { left = L"DOWNLOADING UPDATE v" + g.updVersion + L"  " + std::to_wstring(g.updPercent) + L"%"; lc = C_YELLOW; }
         else if (g.upd == U_READY) { left = L"UPDATE v" + g.updVersion + L" READY - INSTALLS WHEN NEONNET CLOSES"; lc = C_YELLOW; }
         else if (g.upd == U_AVAILABLE) { left = L"NEONNET v" + g.updVersion + L" IS AVAILABLE - SEE THE MENU"; lc = C_YELLOW; }
-        else if (a && !a->errorUrl.empty()) { left = L"SIGNAL LOST"; lc = C_PINK; }
+        else if (a && !a->errorUrl.empty()) { left = L"SIGNAL LOST"; lc = Accent(); }
         else if (g.incognito) { left = L"INCOGNITO - HISTORY AND COOKIES ARE NOT SAVED"; lc = C_GREEN; }
         else left = L"LINK STABLE";
 
@@ -5226,7 +6901,7 @@ static void Paint(HDC hdc) {
                    zp != 100 ? (L"ZOOM " + std::to_wstring(zp) + L"%   ").c_str() : L"",
                    g.scan ? L"SCAN ON   " : L"", t.wHour, t.wMinute);
         SIZE rs; GetTextExtentPoint32W(mem, right, (int)wcslen(right), &rs);
-        SetTextColor(mem, C_CYAN);
+        SetTextColor(mem, SecondaryAccent());
         DrawTextW(mem, right, -1, &tr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         RECT lr = tr; lr.right -= rs.cx + S(16);
         if (g.netSpeed) {
@@ -5234,10 +6909,10 @@ static void Paint(HDC hdc) {
             std::wstring dn = L"\x25BC " + Rate(g.netDown), up = L"\x25B2 " + Rate(g.netUp);
             SIZE col; GetTextExtentPoint32W(mem, L"\x25BC 999.99 MB/s", 16, &col);
             RECT dr = tr; dr.right = dr.left + col.cx;
-            SetTextColor(mem, C_CYAN);
+            SetTextColor(mem, SecondaryAccent());
             DrawTextW(mem, dn.c_str(), -1, &dr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
             RECT ur = tr; ur.left += col.cx + S(14); ur.right = ur.left + col.cx;
-            SetTextColor(mem, C_PINK);
+            SetTextColor(mem, Accent());
             DrawTextW(mem, up.c_str(), -1, &ur, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
             lr.left = ur.right + S(22);
         }
@@ -5257,15 +6932,25 @@ static void MakeFont() {
 // ---------------------------------------------------------------------------
 // Window procedure
 
+static void BroadcastThemeAccent() {
+    if (g.hwnd) InvalidateRect(g.hwnd, nullptr, TRUE);
+    SendState();
+    std::wstring js = L"(()=>{let s=document.getElementById('nn-accent');if(!s){s=document.createElement('style');s.id='nn-accent';document.head.appendChild(s);}s.textContent=" +
+                      JsonStr(Wide(ThemeRuleCss())) + L";})();";
+    auto push = [&](CefRefPtr<CefBrowser> b) {
+        if (b && b->GetMainFrame()) b->GetMainFrame()->ExecuteJavaScript(js, "", 0);
+    };
+    push(g.chrome);
+    push(g.panel);
+    for (auto& t : g.tabs) {
+        if (t->browser && !t->discarded && t->url.rfind(UI_HOST, 0) == 0) push(t->browser);
+    }
+}
+
 // A change made on the settings page (already validated on the IO thread). Runs on the UI thread.
 static void ApplySetting(const std::wstring& key, const std::wstring& val) {
     if (key == L"search") {
-        for (int i = 0; i < SEARCH_ENGINE_COUNT; i++) {
-            if (val != SEARCH_ENGINES[i].id) continue;
-            g.engine = i;
-            RegSetBin(L"SearchEngine", REG_SZ, SEARCH_ENGINES[i].id, (DWORD)((wcslen(SEARCH_ENGINES[i].id) + 1) * sizeof(wchar_t)));
-            SendState();   // the toolbar needs the new search address
-        }
+        if (EngineSelect(val)) SendState();
     } else if (key == L"scan") {
         if ((val == L"1") != g.scan.load()) ExecCmd(CMD_SCAN);
     } else if (key == L"autoUpdate") {
@@ -5337,6 +7022,66 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
     } else if (key == L"home") {
         if (val.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, L"HomePage");
         else RegSetBin(L"HomePage", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
+    } else if (key == L"dohMode") {
+        g.dohMode = val;
+        RegSetBin(L"DohMode", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
+        ApplyDohPrefs();
+    } else if (key == L"dohProvider") {
+        g.dohProvider = val;
+        RegSetBin(L"DohProvider", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
+        ApplyDohPrefs();
+    } else if (key == L"dohCustom") {
+        g.dohCustom = val;
+        if (val.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, L"DohCustom");
+        else RegSetBin(L"DohCustom", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
+        ApplyDohPrefs();
+    } else if (key == L"accentPreset") {
+        bool ok = false;
+        COLORREF pCol = C_PINK, cCol = C_CYAN;
+        std::wstring nPink, nCyan;
+        for (int i = 0; i < THEME_PRESET_COUNT; i++) {
+            if (val == THEME_PRESETS[i].id) {
+                nPink = THEME_PRESETS[i].pink;
+                nCyan = THEME_PRESETS[i].cyan;
+                pCol = THEME_PRESETS[i].pinkCol;
+                cCol = THEME_PRESETS[i].cyanCol;
+                ok = true;
+                break;
+            }
+        }
+        if (ok) {
+            {
+                std::lock_guard<std::mutex> lk(g_themeMu);
+                g_themePreset = val; g_themePink = nPink; g_themeCyan = nCyan;
+                g_accentCol = (DWORD)pCol; g_cyanCol = (DWORD)cCol;
+            }
+            if (!g.incognito) {
+                RegSetBin(L"AccentPreset", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
+                RegSetBin(L"AccentPink", REG_SZ, nPink.c_str(), (DWORD)((nPink.size() + 1) * sizeof(wchar_t)));
+                RegSetBin(L"AccentCyan", REG_SZ, nCyan.c_str(), (DWORD)((nCyan.size() + 1) * sizeof(wchar_t)));
+            }
+            BroadcastThemeAccent();
+        } else if (val == L"custom") {
+            { std::lock_guard<std::mutex> lk(g_themeMu); g_themePreset = L"custom"; }
+            if (!g.incognito) RegSetBin(L"AccentPreset", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
+            BroadcastThemeAccent();
+        }
+    } else if (key == L"accentPink" || key == L"accentCyan") {
+        COLORREF col; std::wstring norm;
+        if (ParseHexColor(val, col, norm)) {
+            {
+                std::lock_guard<std::mutex> lk(g_themeMu);
+                g_themePreset = L"custom";
+                if (key == L"accentPink") { g_themePink = norm; g_accentCol = (DWORD)col; }
+                else { g_themeCyan = norm; g_cyanCol = (DWORD)col; }
+            }
+            if (!g.incognito) {
+                const wchar_t* cp = L"custom";
+                RegSetBin(L"AccentPreset", REG_SZ, cp, (DWORD)((wcslen(cp) + 1) * sizeof(wchar_t)));
+                RegSetBin(key == L"accentPink" ? L"AccentPink" : L"AccentCyan", REG_SZ, norm.c_str(), (DWORD)((norm.size() + 1) * sizeof(wchar_t)));
+            }
+            BroadcastThemeAccent();
+        }
     }
 }
 
@@ -5609,12 +7354,31 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APP_CTXMENU: ShowContextMenu(std::unique_ptr<CtxMenu>((CtxMenu*)lp)); return 0;
     case WM_APP_CLEARDATA: StartClearData(std::unique_ptr<ClearReq>((ClearReq*)lp)); return 0;
     case WM_APP_CLEARSITES: ClearSiteData(std::unique_ptr<ClearSites>((ClearSites*)lp)); return 0;
+    case WM_APP_PROXY:
+        ApplyProxyPrefs();
+        SendState();
+        if (wp == 1) ShowNotice(L"PROXY TUNNEL ON");
+        else if (wp == 2) ShowNotice(L"PROXY UNREACHABLE");
+        return 0;
+    case WM_APP_THEME:
+        if (wp == 0) BroadcastThemeAccent();
+        else SendState();
+        return 0;
     case WM_APP_SETTING: {
         auto* m = (const std::pair<std::wstring, std::wstring>*)lp;   // owned by the sender, which waits for us
         if (m) ApplySetting(m->first, m->second);
         return 0;
     }
     case WM_SETFOCUS: FocusPage(); return 0;
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN: {
+        bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+        bool repeat = (lp & (1 << 30)) != 0;
+        if (HandleShortcutKey(ctrl, shift, alt, repeat, (int)wp)) return 0;
+        break;
+    }
     case WM_APP_CMD: { std::unique_ptr<std::wstring> m((std::wstring*)lp); if (!g.closing) OnChromeCommand(*m); return 0; }
     case WM_APP_OPEN: {
         std::unique_ptr<std::wstring> u((std::wstring*)lp);
@@ -5789,6 +7553,11 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     { DWORD s = RegGetDword(L"SmoothStep", 120), t = RegGetDword(L"SmoothTime", 400); g.smoothStep = (s >= 40 && s <= 400) ? (int)s : 120; g.smoothTime = (t >= 100 && t <= 1500) ? (int)t : 400; }
     g.netSpeed = RegGetDword(L"NetSpeed", 1) != 0;
     if (!g.incognito) PwLoad();
+    ThemeLoad();
+    KeybindsLoad();
+    NewTabLoad();
+    EnginesLoad();
+    ProxyLoad();
     SpLoad();
     g.blockAds = RegGetDword(L"BlockAds", 0) != 0;
     if (g.blockAds) LoadBlocklist();
@@ -5797,8 +7566,12 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     { DWORD n = RegGetDword(L"NetLimitKB", 0); g.netLimitKB = (n >= 64 && n <= 102400) ? n : 0; }
     g.netLimitAll = RegGetDword(L"NetLimitAll", 0) != 0;
     {
-        std::wstring eid = RegGetString(L"SearchEngine");
-        for (int i = 0; i < SEARCH_ENGINE_COUNT; i++) if (eid == SEARCH_ENGINES[i].id) g.engine = i;
+        std::wstring dm = RegGetString(L"DohMode");
+        if (dm == L"off" || dm == L"automatic" || dm == L"secure") g.dohMode = dm;
+        std::wstring dp = RegGetString(L"DohProvider");
+        for (int i = 0; i < DOH_PROVIDER_COUNT; i++) if (dp == DOH_PROVIDERS[i].id) g.dohProvider = dp;
+        std::wstring dc = RegGetString(L"DohCustom");
+        if (ValidDohCustomUrl(dc)) g.dohCustom = dc;
     }
 
     WNDCLASSEXW wc{ sizeof(wc) };
