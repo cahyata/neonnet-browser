@@ -91,6 +91,7 @@ Snapshot Sample() {
 }
 
 int TrimWorkingSets() {
+    _heapmin();
     int n = 0;
     for (DWORD pid : Family()) {
         HANDLE h = OpenProcess(PROCESS_SET_QUOTA | PROCESS_QUERY_INFORMATION, FALSE, pid);

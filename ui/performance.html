@@ -4,106 +4,201 @@
 <meta charset="utf-8">
 <title>PERFORMANCE</title>
 <style>
-:root{--bg:#12062c;--bg2:#0a0420;--row:#1b0b3d;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0;--green:#35ffa0}
+:root{--bg:#12062c;--bg2:#0a0420;--card:#170936;--row:#200e49;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0;--green:#35ffa0;--border:rgba(138,111,192,.32)}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:#e8d8ff;font:12px "Cascadia Mono","Consolas","Courier New",monospace;user-select:none;overflow:hidden}
-body{display:flex;flex-direction:column;border-left:1px solid var(--pink)}
-header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px;flex:none}
-h1{margin:0;font:italic 900 22px Impact,"Arial Black",sans-serif;letter-spacing:2px;color:var(--cyan);text-shadow:2px 2px 0 var(--pink)}
+body{display:flex;flex-direction:column;border-left:1px solid var(--pink);background:linear-gradient(180deg,#140732 0%,#0d0422 100%)}
+header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 8px;flex:none;border-bottom:1px solid rgba(255,46,151,.3);background:rgba(10,4,32,.75)}
+.hd-l{display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+.dot.eco{background:var(--yellow);box-shadow:0 0 8px var(--yellow)}
+h1{margin:0;font:italic 900 18px Impact,"Arial Black",sans-serif;letter-spacing:2px;color:var(--cyan);text-shadow:2px 2px 0 var(--pink)}
 button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
-#x{width:26px;height:26px;color:var(--muted);display:flex;align-items:center;justify-content:center}
-#x svg,.tab .a svg,.keep button svg{display:block;margin:auto}
+#x{width:26px;height:26px;color:var(--muted);display:flex;align-items:center;justify-content:center;border:1px solid transparent}
+#x svg,.tab .a svg,.keep button svg,.act svg{display:block;margin:auto}
 #x:hover{background:var(--pink);color:var(--bg)}
-main{flex:1;overflow:auto;padding:0 12px 14px}
-h2{font:bold 11px "Cascadia Mono","Consolas",monospace;color:var(--yellow);letter-spacing:2px;margin:16px 0 6px;padding-bottom:3px;border-bottom:1px solid rgba(255,46,151,.5)}
-.big{display:flex;align-items:baseline;gap:8px}
-.big b{font-size:28px;color:var(--cyan);font-weight:bold}
-.big span{color:var(--muted)}
-.meter{height:8px;background:var(--bg2);border:1px solid rgba(138,111,192,.5);margin:6px 0 4px;position:relative}
-.meter i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--cyan),var(--pink));width:0}
+main{flex:1;overflow-y:auto;padding:10px 12px 16px}
+main::-webkit-scrollbar{width:5px}
+main::-webkit-scrollbar-track{background:transparent}
+main::-webkit-scrollbar-thumb{background:rgba(0,229,255,.3);border-radius:2px}
+main::-webkit-scrollbar-thumb:hover{background:var(--cyan)}
+
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.card{background:var(--card);border:1px solid var(--border);padding:9px 10px;position:relative;margin-bottom:10px}
+.card.accent{border-color:rgba(0,229,255,.45);border-top:2px solid var(--cyan)}
+.card.eco-on{border-color:rgba(53,255,160,.65);border-top:2px solid var(--green);box-shadow:0 0 18px rgba(53,255,160,.08) inset}
+.kpis .card{margin-bottom:8px}
+.klbl{font-size:10px;color:var(--muted);letter-spacing:1.4px;display:flex;align-items:center;justify-content:space-between}
+.kval{font-size:20px;font-weight:bold;color:var(--cyan);margin:4px 0 4px;letter-spacing:-.5px}
+.kval.pink{color:var(--pink2)}
+.spark{width:100%;height:26px;display:block}
+.ksub{font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.segbar{height:8px;background:var(--bg2);border:1px solid var(--border);display:flex;overflow:hidden;margin:6px 0}
+.segbar i{display:block;height:100%;transition:width .3s ease}
+.seg-p{background:var(--cyan)}
+.seg-b{background:var(--pink)}
+.seg-e{background:#7d4dff}
+.legend{display:flex;justify-content:space-between;font-size:10px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:4px}
+.legend i{width:7px;height:7px;display:inline-block}
+.legend b{color:#e8d8ff;font-weight:normal}
+
+.meter{height:6px;background:var(--bg2);border:1px solid var(--border);margin:7px 0 3px;position:relative;display:none}
+.meter i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--cyan),var(--pink));width:0;transition:width .3s ease}
 .meter.over i{background:var(--pink)}
-.split{display:flex;justify-content:space-between;color:var(--muted);margin-top:2px}
-.split b{color:#e8d8ff;font-weight:normal}
-.btn{display:block;width:100%;height:32px;margin-top:8px;border:1px solid var(--pink);color:var(--pink);font-weight:bold;letter-spacing:1px}
-.btn:hover{background:var(--pink);color:var(--bg)}
-.btn.alt{border-color:var(--cyan);color:var(--cyan)}
-.btn.alt:hover{background:var(--cyan);color:var(--bg)}
-.hint{color:var(--muted);margin-top:4px;line-height:1.5;min-height:16px}
+
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.act{display:flex;align-items:center;justify-content:center;gap:6px;height:32px;border:1px solid var(--pink);color:var(--pink);font-size:11px;font-weight:bold;letter-spacing:.7px;background:rgba(255,46,151,.06)}
+.act:hover{background:var(--pink);color:var(--bg)}
+.act.alt{border-color:var(--cyan);color:var(--cyan);background:rgba(0,229,255,.06)}
+.act.alt:hover{background:var(--cyan);color:var(--bg)}
+
+.sec{font:bold 10px "Cascadia Mono","Consolas",monospace;color:var(--yellow);letter-spacing:1.8px;margin:12px 0 6px;display:flex;align-items:center;justify-content:space-between}
+.sec span.sub{color:var(--muted);font-weight:normal;letter-spacing:.4px}
+
+.bat-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.bat-info{display:flex;align-items:center;gap:8px;min-width:0}
+.bat-ico{width:28px;height:15px;border:1px solid var(--cyan);padding:2px;position:relative;flex:none}
+.bat-ico::after{content:"";position:absolute;right:-4px;top:3px;width:2px;height:7px;background:var(--cyan)}
+.bat-fill{height:100%;background:var(--green);width:100%;transition:width .3s ease}
+.bat-fill.low{background:var(--pink)}
+.bat-fill.mid{background:var(--yellow)}
+.bat-pct{font-size:13px;font-weight:bold;color:#e8d8ff}
+.bat-st{font-size:10px;color:var(--muted)}
+.bat-bar{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(138,111,192,.2)}
+.pill{height:24px;padding:0 9px;border:1px solid var(--muted);color:var(--muted);font-size:10px;font-weight:bold;letter-spacing:.6px}
+.pill:hover{border-color:var(--cyan);color:var(--cyan)}
+.pill.on{border-color:var(--green);color:var(--bg);background:var(--green)}
+
+.hint{color:var(--muted);margin:4px 0 0;line-height:1.45;font-size:11px}
 .hint.ok{color:var(--green)}
-.row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
-.row label{color:#e8d8ff}
-select{height:28px;background:var(--bg2);color:var(--cyan);border:1px solid var(--cyan);padding:0 6px;font:inherit;outline:0;min-width:110px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0}
+.row+.row{border-top:1px solid rgba(138,111,192,.16)}
+.row label{color:#e8d8ff;font-size:11px}
+select{height:26px;background:var(--bg2);color:var(--cyan);border:1px solid rgba(0,229,255,.55);padding:0 6px;font:11px inherit;outline:0;min-width:112px}
 select option{background:var(--bg2);color:var(--cyan)}
-.tog{min-width:64px;height:28px;padding:0 10px;border:1px solid var(--muted);color:var(--muted);font-weight:bold;letter-spacing:1px}
-.tog.on{border-color:var(--green);color:var(--green)}
-.tab{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding:6px 4px;border-bottom:1px solid rgba(138,111,192,.2)}
-.tab:hover{background:var(--row)}
-.tab .t{flex:1 1 100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e8d8ff}
+.tog{min-width:58px;height:26px;padding:0 10px;border:1px solid var(--muted);color:var(--muted);font-weight:bold;font-size:11px;letter-spacing:1px}
+.tog:hover{border-color:var(--cyan);color:var(--cyan)}
+.tog.on{border-color:var(--green);color:var(--bg);background:var(--green)}
+
+.tab{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding:7px 8px;margin-bottom:5px;background:var(--card);border:1px solid rgba(138,111,192,.22)}
+.tab:hover{background:var(--row);border-color:rgba(0,229,255,.45)}
+.tab.active{border-left:2px solid var(--cyan)}
+.tab.hot{border-left:2px solid var(--pink)}
+.tab .t{flex:1 1 100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e8d8ff;font-size:11.5px}
 .tab.active .t{color:var(--cyan)}
 .tab.off .t{color:var(--muted);font-style:italic}
-.tab .m{width:62px;text-align:right;color:var(--cyan);flex:none;margin-left:auto}
-.tab .c{width:44px;text-align:right;color:var(--muted);flex:none}
+.tab .m{width:60px;text-align:right;color:var(--cyan);flex:none;margin-left:auto;font-size:11px}
+.tab .c{width:38px;text-align:right;color:var(--muted);flex:none;font-size:11px}
 .tab.hot .c{color:var(--pink);font-weight:bold}
-.tab .a{width:22px;height:22px;flex:none;color:var(--muted);visibility:hidden}
-.tab:hover .a{visibility:visible}
+.tab .a{width:22px;height:22px;flex:none;color:var(--muted);opacity:.35}
+.tab:hover .a{opacity:1}
 .tab .a:hover{background:var(--pink);color:var(--bg)}
-.tab .a:disabled{opacity:.3;cursor:default}
-.tab .a.on{visibility:visible;color:var(--cyan)}
-.tag{font-size:10px;color:var(--bg);background:var(--pink);padding:0 4px;letter-spacing:1px;flex:none}
+.tab .a:disabled{opacity:.18;cursor:default}
+.tab .a.on{opacity:1;color:var(--cyan)}
+.tab .mbar{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(138,111,192,.14)}
+.tab .mbar i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--pink))}
+.tag{font-size:9px;font-weight:bold;color:var(--bg);background:var(--pink);padding:1px 4px;letter-spacing:.7px;flex:none}
 .tag.ok{background:var(--green)}
-.keep{display:flex;align-items:center;justify-content:space-between;padding:4px 4px;border-bottom:1px solid rgba(138,111,192,.2);color:#e8d8ff}
+.tag.act{background:var(--cyan)}
+
+.keep{display:flex;align-items:center;justify-content:space-between;padding:5px 8px;margin-bottom:4px;background:var(--card);border:1px solid rgba(138,111,192,.22);color:#e8d8ff;font-size:11px}
 .keep button{width:22px;height:22px;color:var(--muted)}
 .keep button:hover{background:var(--pink);color:var(--bg)}
-.empty{color:var(--muted);padding:8px 0}
+.empty{color:var(--muted);padding:6px 0;font-size:11px}
 </style>
 </head>
 <body>
-<header><h1>PERFORMANCE</h1><button id="x" title="Close the panel (Ctrl+Shift+M)"></button></header>
+<header>
+  <div class="hd-l"><span class="dot" id="hdDot"></span><h1>PERFORMANCE</h1></div>
+  <button id="x" title="Close the panel (Ctrl+Shift+M)"></button>
+</header>
 <main>
-  <h2>MEMORY</h2>
-  <div class="big"><b id="total">-</b><span>in use by NeonNet</span></div>
-  <div class="meter" id="meter"><i id="meterFill"></i></div>
-  <div class="split"><span>PAGES <b id="pages">-</b></span><span>BROWSER <b id="browser">-</b></span><span>ENGINE <b id="engine">-</b></span></div>
-  <div class="split"><span>CPU <b id="cpu">-</b></span><span id="limitNote"></span></div>
-  <button class="btn" id="clean">CLEAN MEMORY</button>
-  <div class="hint" id="cleanHint">Collects garbage and gives unused memory back to Windows. Use rises again as pages are used.</div>
-  <button class="btn alt" id="unloadbg">SLEEP BACKGROUND TABS</button>
-  <div class="hint">A sleeping tab frees its memory and reloads when you select it.</div>
+  <div class="kpis">
+    <div class="card accent">
+      <div class="klbl"><span>RAM USED</span><span id="limitNote"></span></div>
+      <div class="kval" id="total">-</div>
+      <svg class="spark" id="ramSpark" viewBox="0 0 120 26" preserveAspectRatio="none"></svg>
+      <div class="ksub" id="ramSub">Live process memory</div>
+    </div>
+    <div class="card">
+      <div class="klbl"><span>CPU LOAD</span><span id="tabCount">- TABS</span></div>
+      <div class="kval pink" id="cpu">-</div>
+      <svg class="spark" id="cpuSpark" viewBox="0 0 120 26" preserveAspectRatio="none"></svg>
+      <div class="ksub" id="cpuSub">All NeonNet processes</div>
+    </div>
+  </div>
 
-  <h2>LIMITERS</h2>
-  <div class="row"><label for="ram">RAM limiter</label>
-    <select id="ram">
-      <option value="0">Off</option>
-      <option value="1024">1 GB</option><option value="2048">2 GB</option><option value="3072">3 GB</option>
-      <option value="4096">4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option>
-    </select></div>
-  <div class="hint" id="ramHint">Above the limit, the tab unused the longest goes to sleep.</div>
-  <div class="row"><label>CPU limiter</label><button class="tog" id="bg">OFF</button></div>
-  <div class="hint">Tabs you are not looking at keep running, but with low priority and in power-saving mode.</div>
-  <div class="row"><label for="net">Network limiter</label>
-    <select id="net">
-      <option value="0">Off</option>
-      <option value="256">256 KB/s</option><option value="512">512 KB/s</option>
-      <option value="1024">1 MB/s</option><option value="2048">2 MB/s</option>
-      <option value="5120">5 MB/s</option><option value="10240">10 MB/s</option>
-    </select></div>
-  <div class="row" id="netScopeRow" style="display:none"><label for="netScope">Apply to</label>
-    <select id="netScope">
-      <option value="bg">Background tabs</option>
-      <option value="all">All tabs</option>
-    </select></div>
-  <div class="hint" id="netHint">Caps the download speed of all tabs or background tabs through DevTools network conditions.</div>
+  <div class="card">
+    <div class="klbl"><span>MEMORY BREAKDOWN</span><span id="totalMini">-</span></div>
+    <div class="segbar"><i class="seg-p" id="segP"></i><i class="seg-b" id="segB"></i><i class="seg-e" id="segE"></i></div>
+    <div class="legend">
+      <span><i style="background:var(--cyan)"></i>PAGES <b id="pages">-</b></span>
+      <span><i style="background:var(--pink)"></i>APP <b id="browser">-</b></span>
+      <span><i style="background:#7d4dff"></i>ENGINE <b id="engine">-</b></span>
+    </div>
+    <div class="meter" id="meter"><i id="meterFill"></i></div>
+  </div>
 
-  <h2>TABS</h2>
-  <div class="hint">These tabs are never put to sleep on their own: one with sound, one with text typed into it, and sites you keep awake with the lock.</div>
+  <div class="actions">
+    <button class="act" id="clean" title="Trim unused memory back to Windows">CLEAN MEMORY</button>
+    <button class="act alt" id="unloadbg" title="Put background tabs to sleep">SLEEP BG TABS</button>
+  </div>
+  <div class="hint" id="cleanHint" style="margin-bottom:8px">Collects garbage and trims working sets.</div>
+
+  <div class="sec"><span>BATTERY SAVER</span><span class="sub" id="batStateTxt">OFF</span></div>
+  <div class="card" id="batCard">
+    <div class="bat-top">
+      <div class="bat-info">
+        <div class="bat-ico"><div class="bat-fill" id="batFill"></div></div>
+        <div>
+          <div class="bat-pct" id="batPct">--%</div>
+          <div class="bat-st" id="batSt">Checking power...</div>
+        </div>
+      </div>
+      <button class="tog" id="batBtn">OFF</button>
+    </div>
+    <div class="bat-bar">
+      <span style="font-size:11px;color:#e8d8ff">Auto-enable at &le;25%</span>
+      <button class="pill" id="batAutoBtn">AUTO OFF</button>
+    </div>
+    <div class="hint" id="batHint">Throttles background tabs, sleeps 3m idle tabs, and reduces UI animations.</div>
+  </div>
+
+  <div class="sec"><span>LIMITERS</span></div>
+  <div class="card">
+    <div class="row"><label for="ram">RAM limiter</label>
+      <select id="ram">
+        <option value="0">Off</option>
+        <option value="1024">1 GB</option><option value="2048">2 GB</option><option value="3072">3 GB</option>
+        <option value="4096">4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option>
+      </select></div>
+    <div class="row"><label>CPU limiter</label><button class="tog" id="bg">OFF</button></div>
+    <div class="row"><label for="net">Network limiter</label>
+      <select id="net">
+        <option value="0">Off</option>
+        <option value="256">256 KB/s</option><option value="512">512 KB/s</option>
+        <option value="1024">1 MB/s</option><option value="2048">2 MB/s</option>
+        <option value="5120">5 MB/s</option><option value="10240">10 MB/s</option>
+      </select></div>
+    <div class="row" id="netScopeRow" style="display:none"><label for="netScope">Apply to</label>
+      <select id="netScope">
+        <option value="bg">Background tabs</option>
+        <option value="all">All tabs</option>
+      </select></div>
+    <div class="hint" id="ramHint">Above the RAM limit, longest-unused background tabs sleep.</div>
+    <div class="hint" id="netHint"></div>
+  </div>
+
+  <div class="sec"><span>TABS</span><span class="sub" id="sleepCount"></span></div>
   <div id="tabs"></div>
 
-  <h2>KEPT AWAKE</h2>
+  <div class="sec"><span>KEPT AWAKE</span></div>
   <div id="keep"></div>
 </main>
 <script>
 const $ = s => document.querySelector(s);
-// Line icons in the panel's colours (they follow the text colour of the button they are in).
 const svg = d => '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter">' + d + '</svg>';
 const ICON = {
   spk:  svg('<path d="M2 6h3l4-3v10l-4-3H2z"/><path d="M11.2 5.6c1 .8 1 3.9 0 4.8M13 4c2 1.8 2 6.2 0 8"/>'),
@@ -114,39 +209,93 @@ const ICON = {
 };
 const send = (cmd, arg) => fetch('/cmd?m=' + encodeURIComponent(cmd + (arg === undefined ? '' : '\n' + arg)), {cache:'no-store'}).catch(() => {});
 const fmt = mb => mb >= 1024 ? (mb / 1024).toFixed(2) + ' GB' : mb + ' MB';
-const HOT = 20;   // percent of the whole CPU a tab must use to be called hot
-let last = null, cleaning = 0;
+const HOT = 20;
+const ramHist = [], cpuHist = [];
+let cleaning = 0;
+
+function drawSpark(el, data, color, fixedMax){
+  if(data.length < 2){ el.innerHTML = ''; return; }
+  const w = 120, h = 26;
+  const max = fixedMax || Math.max(10, ...data) * 1.15;
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * w;
+    const y = h - Math.max(2, Math.min(h - 2, (v / max) * (h - 4) + 2));
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  });
+  const area = '0,' + h + ' ' + pts.join(' ') + ' ' + w + ',' + h;
+  el.innerHTML = '<polygon points="' + area + '" fill="' + color + '" fill-opacity="0.14"/><polyline points="' + pts.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="1.6"/>';
+}
 
 $('#x').innerHTML = ICON.x;
 $('#x').onclick = () => send('perf.hide');
 $('#clean').onclick = () => {
   send('perf.clean'); cleaning = Date.now();
-  $('#cleanHint').className = 'hint'; $('#cleanHint').textContent = 'Cleaning...';
+  $('#cleanHint').className = 'hint'; $('#cleanHint').textContent = 'Cleaning memory...';
 };
 $('#unloadbg').onclick = () => send('perf.unloadbg');
 $('#ram').onchange = () => send('perf.ram', $('#ram').value);
 $('#bg').onclick = () => send('perf.bg', $('#bg').classList.contains('on') ? '0' : '1');
+$('#batBtn').onclick = () => send('perf.bat', $('#batBtn').classList.contains('on') ? '0' : '1');
+$('#batAutoBtn').onclick = () => send('perf.batauto', $('#batAutoBtn').classList.contains('on') ? '0' : '1');
 $('#net').onchange = () => send('perf.net', $('#net').value);
 $('#netScope').onchange = () => send('perf.netall', $('#netScope').value === 'all' ? '1' : '0');
 
 window.nnPerf = d => {
-  const before = last ? last.total : d.total;
-  last = d;
-  const pages = d.total - d.browser - d.engine;
+  const pages = Math.max(0, d.total - d.browser - d.engine);
+  ramHist.push(d.total); if(ramHist.length > 24) ramHist.shift();
+  cpuHist.push(d.cpu);   if(cpuHist.length > 24) cpuHist.shift();
+  drawSpark($('#ramSpark'), ramHist, '#00e5ff', d.limit || 0);
+  drawSpark($('#cpuSpark'), cpuHist, '#ff2e97', 100);
+
   $('#total').textContent = fmt(d.total);
-  $('#pages').textContent = fmt(Math.max(0, pages));
+  $('#totalMini').textContent = fmt(d.total);
+  $('#pages').textContent = fmt(pages);
   $('#browser').textContent = fmt(d.browser);
   $('#engine').textContent = fmt(d.engine);
   $('#cpu').textContent = d.cpu.toFixed(1) + '%';
+  $('#tabCount').textContent = d.tabs.length + ' TAB' + (d.tabs.length === 1 ? '' : 'S');
+
+  const tot = Math.max(1, d.total);
+  $('#segP').style.width = (pages / tot * 100).toFixed(1) + '%';
+  $('#segB').style.width = (d.browser / tot * 100).toFixed(1) + '%';
+  $('#segE').style.width = (d.engine / tot * 100).toFixed(1) + '%';
+
   const meter = $('#meter');
   if(d.limit){
-    meter.style.display = '';
+    meter.style.display = 'block';
     $('#meterFill').style.width = Math.min(100, d.total / d.limit * 100) + '%';
     meter.classList.toggle('over', d.total > d.limit);
-    $('#limitNote').textContent = 'LIMIT ' + fmt(d.limit);
+    $('#limitNote').textContent = 'CAP ' + fmt(d.limit);
+    $('#ramSub').textContent = Math.round(d.total / d.limit * 100) + '% of RAM cap';
   } else {
-    meter.style.display = 'none'; $('#limitNote').textContent = '';
+    meter.style.display = 'none';
+    $('#limitNote').textContent = '';
+    $('#ramSub').textContent = 'Uncapped memory';
   }
+
+  // Battery Saver UI
+  const batOn = !!d.bat;
+  $('#hdDot').classList.toggle('eco', batOn);
+  $('#batCard').classList.toggle('eco-on', batOn);
+  $('#batStateTxt').textContent = batOn ? (d.batManual ? 'ON (MANUAL)' : 'ON (AUTO)') : 'OFF';
+  $('#batStateTxt').style.color = batOn ? 'var(--green)' : 'var(--muted)';
+  $('#batBtn').classList.toggle('on', !!d.batManual);
+  $('#batBtn').textContent = d.batManual ? 'ON' : 'OFF';
+  $('#batAutoBtn').classList.toggle('on', !!d.batAuto);
+  $('#batAutoBtn').textContent = d.batAuto ? 'AUTO ON' : 'AUTO OFF';
+  const fill = $('#batFill');
+  if(d.batPct >= 0){
+    $('#batPct').textContent = d.batPct + '%';
+    $('#batSt').textContent = d.batAc ? 'Plugged in (AC)' : 'Running on battery';
+    fill.style.width = d.batPct + '%';
+    fill.className = 'bat-fill' + (d.batPct <= 20 ? ' low' : d.batPct <= 45 ? ' mid' : '');
+  } else {
+    $('#batPct').textContent = 'AC';
+    $('#batSt').textContent = 'Desktop / No battery';
+    fill.style.width = '100%';
+    fill.className = 'bat-fill';
+  }
+
   if(document.activeElement !== $('#ram')) $('#ram').value = String(d.limit || 0);
   $('#bg').classList.toggle('on', !!d.bg);
   $('#bg').textContent = d.bg ? 'ON' : 'OFF';
@@ -154,52 +303,63 @@ window.nnPerf = d => {
   if(document.activeElement !== $('#netScope')) $('#netScope').value = d.netAll ? 'all' : 'bg';
   $('#netScopeRow').style.display = d.net ? '' : 'none';
   $('#netHint').textContent = d.net
-    ? (d.netAll ? 'All tabs are capped at ' : 'Background tabs are capped at ') + (d.net >= 1024 ? (d.net / 1024) + ' MB/s.' : d.net + ' KB/s.')
-    : 'Caps the download speed of all tabs or background tabs through DevTools network conditions.';
+    ? (d.netAll ? 'All tabs capped at ' : 'Background tabs capped at ') + (d.net >= 1024 ? (d.net / 1024) + ' MB/s.' : d.net + ' KB/s.')
+    : '';
   $('#ramHint').textContent = d.limit && d.blocked && d.total > d.limit
-      ? 'Over the limit, but ' + d.blocked + ' tab' + (d.blocked === 1 ? ' is' : 's are') + ' kept awake (sound, typing or kept sites).'
-    : d.auto ? 'Put ' + d.auto + ' tab' + (d.auto === 1 ? '' : 's') + ' to sleep since NeonNet started.'
-    : 'Above the limit, the tab unused the longest goes to sleep.';
+    ? d.blocked + ' tab' + (d.blocked === 1 ? ' is' : 's are') + ' protected from sleeping.'
+    : d.auto ? 'Slept ' + d.auto + ' idle tab' + (d.auto === 1 ? '' : 's') + ' this session.'
+    : 'Above the RAM limit, longest-unused background tabs sleep.';
+
   if(cleaning && Date.now() - cleaning > 2600){
     cleaning = 0;
     const h = $('#cleanHint'); h.className = 'hint ok';
-    h.textContent = 'Done. ' + d.trimmed + ' processes trimmed, now ' + fmt(d.total) + '.';
+    h.textContent = 'Done: trimmed ' + d.trimmed + ' processes, now ' + fmt(d.total) + '.';
   }
+
   const list = $('#tabs'); list.innerHTML = '';
   const tabs = d.tabs.slice().sort((a, b) => (b.cpu >= HOT) - (a.cpu >= HOT) || b.mem - a.mem);
+  const maxTabMem = Math.max(50, ...tabs.map(t => t.mem || 0));
+  const sleeping = tabs.filter(t => t.discarded).length;
+  $('#sleepCount').textContent = sleeping ? (sleeping + ' SLEEPING') : '';
   if(!tabs.length) list.innerHTML = '<div class="empty">No tabs.</div>';
   for(const t of tabs){
     const row = document.createElement('div');
     row.className = 'tab' + (t.active ? ' active' : '') + (t.discarded ? ' off' : '') + (t.cpu >= HOT ? ' hot' : '');
     const title = document.createElement('span'); title.className = 't'; title.textContent = t.title; title.title = t.title;
     const mem = document.createElement('span'); mem.className = 'm';
-    mem.textContent = t.discarded ? 'SLEEPING' : (t.shared ? '~' : '') + t.mem + ' MB';
-    if(t.shared) mem.title = 'This tab shares a process with another tab';
+    mem.textContent = t.discarded ? 'SLEEP' : (t.shared ? '~' : '') + t.mem + ' MB';
     const cpu = document.createElement('span'); cpu.className = 'c'; cpu.textContent = t.discarded ? '' : t.cpu.toFixed(0) + '%';
-    const un = document.createElement('button'); un.className = 'a'; un.innerHTML = ICON.moon; un.title = 'Put this tab to sleep (it reloads when selected)';
+    const un = document.createElement('button'); un.className = 'a'; un.innerHTML = ICON.moon; un.title = 'Sleep tab';
     un.disabled = t.discarded || t.active; un.onclick = () => send('perf.unload', t.id);
-    const cl = document.createElement('button'); cl.className = 'a'; cl.innerHTML = ICON.x; cl.title = 'Close this tab';
+    const cl = document.createElement('button'); cl.className = 'a'; cl.innerHTML = ICON.x; cl.title = 'Close tab';
     cl.onclick = () => send('perf.close', t.id);
     const mu = document.createElement('button'); mu.className = 'a' + (t.muted ? ' on' : ''); mu.innerHTML = t.muted ? ICON.mute : ICON.spk;
-    mu.title = t.muted ? 'Unmute this tab' : 'Mute this tab'; mu.disabled = t.discarded; mu.onclick = () => send('perf.mute', t.id);
+    mu.title = t.muted ? 'Unmute' : 'Mute'; mu.disabled = t.discarded; mu.onclick = () => send('perf.mute', t.id);
     const ke = document.createElement('button'); ke.className = 'a' + (t.kept ? ' on' : ''); ke.innerHTML = ICON.lock;
-    ke.title = t.kept ? 'Stop keeping ' + t.site + ' awake' : 'Never put ' + (t.site || 'this site') + ' to sleep on its own'; ke.disabled = !t.site;
+    ke.title = t.kept ? 'Stop keeping awake' : 'Keep site awake'; ke.disabled = !t.site;
     ke.onclick = () => send('perf.keep', t.id);
     row.append(title);
-    const tag = (txt, cls, tip) => { const s = document.createElement('span'); s.className = 'tag ' + (cls || ''); s.textContent = txt; s.title = tip; row.append(s); };
-    if(t.cpu >= HOT) tag('HOT', '', 'Uses a lot of the CPU');
-    if(t.audible) tag('SOUND', 'ok', 'Playing sound: it is not put to sleep on its own');
-    if(t.form) tag('TYPING', 'ok', 'A text field holds typed text: it is not put to sleep on its own');
-    if(t.kept) tag('AWAKE', 'ok', 'Kept awake by you');
+    const tag = (txt, cls) => { const s = document.createElement('span'); s.className = 'tag ' + (cls || ''); s.textContent = txt; row.append(s); };
+    if(t.active) tag('ACTIVE', 'act');
+    if(t.cpu >= HOT) tag('HOT', '');
+    if(t.audible) tag('SOUND', 'ok');
+    if(t.form) tag('TYPING', 'ok');
+    if(t.kept) tag('AWAKE', 'ok');
     row.append(mem, cpu, mu, ke, un, cl);
+    if(!t.discarded && t.mem > 0){
+      const mb = document.createElement('div'); mb.className = 'mbar';
+      const fi = document.createElement('i'); fi.style.width = Math.min(100, Math.round(t.mem / maxTabMem * 100)) + '%';
+      mb.appendChild(fi); row.appendChild(mb);
+    }
     list.appendChild(row);
   }
   const keep = $('#keep'); keep.innerHTML = '';
-  if(!d.keep.length) keep.innerHTML = '<div class="empty">No sites. Use the lock on a tab.</div>';
+  if(!d.keep.length) keep.innerHTML = '<div class="empty">No sites. Use the lock icon on a tab.</div>';
   for(const h of d.keep){
     const r = document.createElement('div'); r.className = 'keep';
     const s = document.createElement('span'); s.textContent = h;
-    const b = document.createElement('button'); b.innerHTML = ICON.x; b.title = 'Stop keeping ' + h + ' awake'; b.onclick = () => send('perf.unkeep', h);
+    const b = document.createElement('button'); b.innerHTML = ICON.x; b.title = 'Remove';
+    b.onclick = () => send('perf.unkeep', h);
     r.append(s, b); keep.appendChild(r);
   }
 };
