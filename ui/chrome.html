@@ -27,7 +27,27 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;app-re
 #top{height:38px;display:flex;align-items:flex-end;gap:6px;padding:0 0 0 12px;border-bottom:1px solid var(--cyan);app-region:drag}
 #brand{align-self:center;color:var(--yellow);font-weight:bold;letter-spacing:1px;white-space:nowrap;margin-right:6px}
 #brand b{color:var(--pink)}
-#tabs{display:flex;gap:4px;align-items:flex-end;min-width:0;flex:0 1 auto;overflow:hidden}
+#tabs{display:flex;gap:4px;align-items:flex-end;min-width:0;flex:0 1 auto;overflow-x:auto;overflow-y:hidden}
+#tabs::-webkit-scrollbar{display:none}
+#tabListBtn{app-region:no-drag;width:24px;height:28px;color:var(--muted);font-size:11px;flex:none;display:inline-flex;align-items:center;justify-content:center}
+#tabListBtn:hover,#tabListBtn.on{color:var(--cyan);background:rgba(0,229,255,.1)}
+#tabListPop{position:absolute;z-index:23;display:none;width:300px;background:var(--bg2);border:1px solid var(--cyan);border-top:2px solid var(--pink);box-shadow:0 12px 28px rgba(0,0,0,.78);padding:6px 0;max-height:360px;overflow-y:auto}
+#tabListPop.on{display:block}
+#tabListPop .tl-row{display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;border-left:2px solid transparent}
+#tabListPop .tl-row:hover{background:rgba(0,229,255,.12);border-left-color:var(--cyan)}
+#tabListPop .tl-row.act{background:rgba(255,46,151,.12);border-left-color:var(--pink)}
+#tabListPop .tl-n{color:var(--yellow);font-size:10px;flex:none}
+#tabListPop .tl-m{flex:1;min-width:0}
+#tabListPop .tl-t{color:#e8d8ff;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tabListPop .tl-u{color:var(--muted);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tabListPop .tl-x{color:var(--muted);width:20px;height:20px;flex:none}
+#tabListPop .tl-x:hover{color:var(--pink)}
+#tabTip{position:absolute;z-index:22;display:none;width:280px;background:var(--bg2);border:1px solid var(--cyan);border-top:2px solid var(--pink);box-shadow:0 10px 24px rgba(0,0,0,.76);padding:8px 10px;pointer-events:none}
+#tabTip.on{display:block}
+#tabTip .tt-t{color:#fff;font-size:12px;font-weight:bold;line-height:1.35;word-break:break-word}
+#tabTip .tt-u{color:var(--cyan);font-size:10.5px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tabTip .tt-b{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
+#tabTip .tt-b span{font-size:9px;padding:1px 5px;border:1px solid var(--pink);color:var(--pink2)}
 .tab{app-region:no-drag;display:flex;align-items:center;gap:6px;height:30px;padding:0 8px 0 10px;
   width:200px;min-width:70px;flex:0 1 200px;color:var(--muted);border:1px solid transparent;border-bottom:none;
   clip-path:polygon(0 0,calc(100% - 9px) 0,100% 9px,100% 100%,0 100%);cursor:default;position:relative}
@@ -115,6 +135,38 @@ html.idle .tab.snd:not(.muted) .spk svg,html.idle .tab.loading .n,html.idle #bar
 #darkb.show{display:inline-flex;align-items:center}
 #darkb:hover{border-color:var(--pink);color:var(--pink)}
 #darkb.ex{border-color:var(--pink);color:var(--pink);background:rgba(255,46,151,.12);text-decoration:line-through}
+#zoomb{display:none;height:22px;padding:0 6px;margin-right:2px;border:1px solid rgba(0,229,255,.45);color:var(--cyan);font-size:10px;font-weight:bold;flex:none}
+#zoomb.show{display:inline-flex;align-items:center}
+#zoomb:hover,#zoomb.on{border-color:var(--pink);color:var(--pink)}
+#zoomPop{position:absolute;z-index:23;display:none;width:220px;background:var(--bg2);border:1px solid var(--cyan);border-top:2px solid var(--pink);box-shadow:0 12px 26px rgba(0,0,0,.78);padding:10px 12px}
+#zoomPop.on{display:block}
+#zoomPop .zp-row{display:flex;align-items:center;justify-content:space-between;gap:6px}
+#zoomPop .zp-btn{height:26px;min-width:32px;padding:0 8px;border:1px solid rgba(0,229,255,.5);color:var(--cyan);font-weight:bold}
+#zoomPop .zp-btn:hover{background:var(--cyan);color:var(--bg)}
+#zoomPop .zp-val{font-size:13px;font-weight:bold;color:#fff}
+#zoomPop .zp-rst{width:100%;height:26px;margin-top:8px;border:1px solid var(--pink);color:var(--pink);font-size:10px;font-weight:bold;letter-spacing:.7px}
+#zoomPop .zp-rst:hover{background:var(--pink);color:var(--bg)}
+#dlb{position:relative;height:28px;padding:0 8px;border:1px solid var(--muted);color:var(--muted);display:inline-flex;align-items:center;gap:5px;font-weight:bold;overflow:hidden}
+#dlb:hover,#dlb.on{border-color:var(--cyan);color:var(--cyan)}
+#dlb.active{border-color:var(--yellow);color:var(--yellow)}
+#dlb .dl-pct{font-size:10px}
+#dlb .dl-prog{position:absolute;left:0;bottom:0;height:2px;background:var(--yellow);width:0;transition:width .2s}
+#dlPop{position:absolute;z-index:23;display:none;width:336px;background:var(--bg2);border:1px solid var(--cyan);border-top:2px solid var(--pink);box-shadow:0 14px 32px rgba(0,0,0,.78);padding:10px 12px;font-size:12px}
+#dlPop.on{display:block}
+#dlPop .dl-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+#dlPop .dl-title{color:var(--cyan);font-weight:bold;font-size:11px;letter-spacing:1.1px}
+#dlPop .dl-list{max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+#dlPop .dl-item{padding:7px 8px;background:var(--bg);border:1px solid rgba(138,111,192,.28)}
+#dlPop .dl-name{color:#fff;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#dlPop .dl-sub{color:var(--muted);font-size:10px;margin-top:2px}
+#dlPop .dl-acts{display:flex;gap:6px;margin-top:6px}
+#dlPop .dl-acts button{height:22px;padding:0 7px;border:1px solid rgba(0,229,255,.45);color:var(--cyan);font-size:10px;font-weight:bold}
+#dlPop .dl-acts button:hover{background:var(--cyan);color:var(--bg)}
+#dlPop .dl-acts button.can{border-color:var(--pink);color:var(--pink)}
+#dlPop .dl-acts button.can:hover{background:var(--pink);color:var(--bg)}
+#dlPop .dl-ft{margin-top:8px;padding-top:8px;border-top:1px solid rgba(138,111,192,.25);display:flex;justify-content:flex-end}
+#dlPop .dl-ft button{height:24px;padding:0 10px;border:1px solid var(--pink);color:var(--pink);font-size:10px;font-weight:bold}
+#dlPop .dl-ft button:hover{background:var(--pink);color:var(--bg)}
 
 /* row 3: bookmarks bar (only while enabled; the host makes the chrome area taller) */
 #bmbar{height:28px;display:none;align-items:center;gap:4px;padding:0 12px;background:var(--bg2);
@@ -351,6 +403,7 @@ body.find #find{display:flex}
   <button id="wsAdd" title="New workspace">+</button>
   <div id="tabs"></div>
   <button id="plus" title="New tab (Ctrl+T)">+</button>
+  <button id="tabListBtn" title="Search &amp; list tabs in workspace">&#9662;</button>
   <div id="spacer"></div>
   <div id="win">
     <button id="min" title="Minimize">&#9472;</button>
@@ -365,10 +418,11 @@ body.find #find{display:flex}
   <button class="nb" id="reload" title="Reload (F5)">[&#10227;]</button>
   <button class="nb" id="home" title="Home">[&#8962;]</button>
   <button id="vpnBtn" title="Built-in Proxy Tunnel"><span class="vd"></span><span id="vpnTxt">PROXY</span></button>
-  <div id="addr"><button id="lock" title="Site information and permissions"></button><span id="pr">&gt;&gt;</span><button id="engBtn" type="button" title="Search engine (click to switch)"><span id="engTxt">GOOGLE</span> &#9662;</button><input id="url" spellcheck="false" autocomplete="off" placeholder="search the grid or enter address"><button id="darkb" title="Force Dark Mode exception for this site">DARK</button><button id="readb" title="Reader Mode (Ctrl+Alt+R)">READ</button><button id="star" title="Bookmark this page (Ctrl+D)">&#9734;</button></div>
+  <div id="addr"><button id="lock" title="Site information and permissions"></button><span id="pr">&gt;&gt;</span><button id="engBtn" type="button" title="Search engine (click to switch)"><span id="engTxt">GOOGLE</span> &#9662;</button><input id="url" spellcheck="false" autocomplete="off" placeholder="search the grid or enter address"><button id="zoomb" title="Page zoom (click for controls)"></button><button id="darkb" title="Force Dark Mode exception for this site">DARK</button><button id="readb" title="Reader Mode (Ctrl+Alt+R)">READ</button><button id="star" title="Bookmark this page (Ctrl+D)">&#9734;</button></div>
   <button id="go">GO</button>
   <button id="palb" title="Command palette (Ctrl+Shift+P)">&gt;_</button>
   <button id="perfb" title="Performance panel (Ctrl+Shift+M)">PERF</button>
+  <button id="dlb" title="Downloads (Ctrl+J)"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v8m-3.5-3.5L8 10l3.5-3.5M3 13.5h10"/></svg><span class="dl-pct" id="dlPct"></span><i class="dl-prog" id="dlProg"></i></button>
   <button id="shieldb" title="Ad & Tracker Blocker"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.5l5.5 2v4.3c0 3.4-2.3 5.7-5.5 6.7C4.8 13.5 2.5 11.2 2.5 7.8V3.5z"/><path class="sh-chk" d="M5.5 8l1.8 1.8 3.4-3.6"/></svg><span class="scnt" id="shieldCnt"></span></button>
   <button id="menu" title="Menu">&#8801;</button>
   <div id="line"></div>
@@ -394,6 +448,10 @@ body.find #find{display:flex}
 <div id="vpnPop"></div>
 <div id="engPop"></div>
 <div id="shieldPop"></div>
+<div id="zoomPop"></div>
+<div id="dlPop"></div>
+<div id="tabListPop"></div>
+<div id="tabTip"></div>
 <div id="pal">
   <div class="pal-hd">
     <span class="pal-p">CMD&gt;&gt;</span>
@@ -436,6 +494,7 @@ function syncDrop(need, x0, x1, y0){
 }
 const NEWTAB = 'https://neonnet.ui/newtab.html';
 let state = {tabs:[], active:0};
+let lastActiveTab = 0;
 let editing = false;
 let drag = null, pendingRender = false;   // tab being pressed or dragged: {id, x0, on, el, grab, w}
 
@@ -511,10 +570,13 @@ function render(){
       spk.onmousedown = e => { e.stopPropagation(); };
       spk.onclick = e => { e.stopPropagation(); send('mute', Number(d.dataset.id)); };
       d.onmousedown = e => {
+        hideTabTip();
         if(e.button !== 0 || e.target.classList.contains('x')) return;
         send('select', Number(d.dataset.id), 'nofocus');
         drag = {id: Number(d.dataset.id), x0: e.clientX, on: false};
       };
+      d.onmouseenter = () => scheduleTabTip(d);
+      d.onmouseleave = hideTabTip;
       d.onauxclick = e => { if(e.button === 1 && !d.classList.contains('pinned')) send('close', Number(d.dataset.id)); };
       d.oncontextmenu = e => { e.preventDefault(); send('tabmenu', Number(d.dataset.id), Math.round(e.clientX), Math.round(e.clientY), window.devicePixelRatio || 1); };
       d.querySelector('.x').onclick = e => { e.stopPropagation(); send('close', Number(d.dataset.id)); };
@@ -534,7 +596,7 @@ function render(){
     const spEl = d.querySelector('.sp');
     const spTxt = isSplitL ? 'L' : (isSplitR ? 'R' : '');
     if(spEl.textContent !== spTxt) spEl.textContent = spTxt;
-    if(d.title !== (t.title || '')) d.title = t.title || '';
+    if(d.title) d.removeAttribute('title');
     const spk = d.querySelector('.spk');
     const wantMuted = t.muted ? '1' : '0';
     if(spk.dataset.m !== wantMuted){
@@ -603,6 +665,14 @@ function render(){
   updateVpnBtn();
   updateEngBtn();
   updateShieldBtn();
+  updateZoomBtn();
+  updateDlBtn();
+  if(tabListOpen) renderTabList();
+  if(state.active !== lastActiveTab){
+    lastActiveTab = state.active;
+    const actEl = box.querySelector('.tab.active');
+    if(actEl && actEl.scrollIntoView) actEl.scrollIntoView({block:'nearest', inline:'nearest'});
+  }
 }
 
 // --- site information and permissions: the lock icon at the left of the address bar ---
@@ -710,7 +780,7 @@ window.__nn = m => {
   else if(m.type === 'focusFind'){ fq.focus(); fq.select(); }
   else if(m.type === 'findResult'){ showCount(m.count, m.active); }
   else if(m.type === 'wsEdit'){ openWsModal(m.id || 0); }
-  else if(m.type === 'closeDrops'){ closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closeVpn(); closeEng(); closeShield(); closePal(false); }
+  else if(m.type === 'closeDrops'){ closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closeVpn(); closeEng(); closeShield(); closeZoom(); closeDl(); closeTabList(); hideTabTip(); closePal(false); }
   else if(m.type === 'togglePalette'){ if(palOpen) closePal(true); else openPal(m.data || {}); }
 };
 
@@ -1374,11 +1444,266 @@ function renderShield(){
 }
 shieldBtn.onclick = () => {
   if(shieldOpen) closeShield();
-  else { closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closePal(false); closeVpn(); closeEng(); shieldOpen = true; renderShield(); send('shield.refresh'); }
+  else { closeAllDrops('shield'); shieldOpen = true; renderShield(); send('shield.refresh'); }
 };
 document.addEventListener('mousedown', e => { if(shieldOpen && !shieldPop.contains(e.target) && !shieldBtn.contains(e.target)) closeShield(); });
 document.addEventListener('keydown', e => { if(e.key === 'Escape' && shieldOpen){ e.preventDefault(); closeShield(); } });
 window.addEventListener('blur', closeShield);
+
+function closeAllDrops(except){
+  if(except !== 'sug') closeSug();
+  if(except !== 'site') closeSite();
+  if(except !== 'bm') closeBmDrop();
+  if(except !== 'ws') closeWsModal();
+  if(except !== 'vpn') closeVpn();
+  if(except !== 'eng') closeEng();
+  if(except !== 'shield') closeShield();
+  if(except !== 'zoom') closeZoom();
+  if(except !== 'dl') closeDl();
+  if(except !== 'tl') closeTabList();
+  if(except !== 'pal') closePal(false);
+  hideTabTip();
+}
+
+// ---- Tab Strip Scroll, Tab List & Hover Card -----------------------------------------
+const tabsBox = $('#tabs'), tabTip = $('#tabTip'), tabListBtn = $('#tabListBtn'), tabListPop = $('#tabListPop');
+let tabTipTmr = 0, tabTipNeed = 0, tabListOpen = false, tabListNeed = 0;
+
+tabsBox.addEventListener('wheel', e => {
+  if(tabsBox.scrollWidth <= tabsBox.clientWidth) return;
+  const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  if(d){ e.preventDefault(); tabsBox.scrollLeft += d; }
+}, {passive:false});
+
+function hideTabTip(){
+  clearTimeout(tabTipTmr);
+  if(!tabTip.classList.contains('on')) return;
+  tabTip.classList.remove('on'); tabTip.textContent = '';
+  if(tabTipNeed){ tabTipNeed = 0; if(!zoomOpen && !dlOpen && !tabListOpen && !shieldOpen && !palOpen && !siteOpen && !vpnOpen && !engOpen) syncDrop(0); }
+}
+function scheduleTabTip(el){
+  clearTimeout(tabTipTmr);
+  if(drag && drag.on) return;
+  if(zoomOpen || dlOpen || tabListOpen || shieldOpen || palOpen || siteOpen || vpnOpen || engOpen) return;
+  tabTipTmr = setTimeout(() => {
+    if(drag && drag.on) return;
+    const t = (state.tabs || []).find(x => x.id === Number(el.dataset.id));
+    if(!t) return;
+    tabTip.textContent = '';
+    const mk = (tag, cls, txt) => { const e = document.createElement(tag); if(cls) e.className = cls; if(txt !== undefined) e.textContent = txt; return e; };
+    tabTip.appendChild(mk('div', 'tt-t', t.title || 'New tab'));
+    tabTip.appendChild(mk('div', 'tt-u', shownUrl(t.url) || 'neonnet://newtab'));
+    const badges = [];
+    if(t.pinned) badges.push('PINNED');
+    if(t.discarded) badges.push('SLEEPING');
+    if(state.splitActive && t.id === state.splitLeft) badges.push('SPLIT LEFT');
+    if(state.splitActive && t.id === state.splitRight) badges.push('SPLIT RIGHT');
+    if(t.muted) badges.push('MUTED');
+    else if(t.audible) badges.push('PLAYING AUDIO');
+    if(badges.length){
+      const row = mk('div', 'tt-b');
+      badges.forEach(b => row.appendChild(mk('span', '', b)));
+      tabTip.appendChild(row);
+    }
+    const r = el.getBoundingClientRect();
+    const w = Math.min(280, Math.max(180, window.innerWidth - 16));
+    const left = Math.max(8, Math.min(window.innerWidth - w - 8, Math.round(r.left)));
+    tabTip.style.left = left + 'px';
+    tabTip.style.top = (Math.ceil(r.bottom) + 6) + 'px';
+    tabTip.style.width = w + 'px';
+    tabTip.classList.add('on');
+    const need = Math.ceil(tabTip.getBoundingClientRect().bottom) + 6;
+    if(need !== tabTipNeed){ tabTipNeed = need; syncDrop(need, Math.floor(left), Math.ceil(left + w)); }
+  }, 260);
+}
+
+function closeTabList(){
+  if(!tabListOpen) return;
+  tabListOpen = false; tabListBtn.classList.remove('on');
+  tabListPop.classList.remove('on'); tabListPop.textContent = '';
+  if(tabListNeed){ tabListNeed = 0; syncDrop(0); }
+}
+function renderTabList(){
+  tabListPop.textContent = '';
+  const mk = (tag, cls, txt) => { const e = document.createElement(tag); if(cls) e.className = cls; if(txt !== undefined) e.textContent = txt; return e; };
+  (state.tabs || []).forEach((t, i) => {
+    const row = mk('div', 'tl-row' + (t.id === state.active ? ' act' : ''));
+    row.appendChild(mk('span', 'tl-n', String(i + 1).padStart(2, '0')));
+    const m = mk('div', 'tl-m');
+    m.appendChild(mk('div', 'tl-t', t.title || 'New tab'));
+    m.appendChild(mk('div', 'tl-u', shownUrl(t.url) || 'neonnet://newtab'));
+    const x = mk('button', 'tl-x', '✕'); x.title = 'Close tab';
+    x.onclick = e => { e.stopPropagation(); send('close', t.id); };
+    row.append(m, x);
+    row.onclick = () => { closeTabList(); send('select', t.id); };
+    tabListPop.appendChild(row);
+  });
+  const r = tabListBtn.getBoundingClientRect();
+  const w = Math.min(300, Math.max(220, window.innerWidth - 16));
+  const left = Math.max(8, Math.min(window.innerWidth - w - 8, Math.round(r.left)));
+  tabListPop.style.left = left + 'px';
+  tabListPop.style.top = (Math.ceil(r.bottom) + 4) + 'px';
+  tabListPop.style.width = w + 'px';
+  tabListPop.classList.add('on');
+  tabListBtn.classList.add('on');
+  const need = Math.ceil(tabListPop.getBoundingClientRect().bottom) + 8;
+  if(need !== tabListNeed){ tabListNeed = need; syncDrop(need, Math.floor(left), Math.ceil(left + w)); }
+}
+tabListBtn.onclick = () => {
+  if(tabListOpen) closeTabList();
+  else { closeAllDrops('tl'); tabListOpen = true; renderTabList(); }
+};
+document.addEventListener('mousedown', e => { if(tabListOpen && !tabListPop.contains(e.target) && !tabListBtn.contains(e.target)) closeTabList(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && tabListOpen){ e.preventDefault(); closeTabList(); } });
+window.addEventListener('blur', closeTabList);
+
+// ---- Address Bar Zoom Indicator & Popover --------------------------------------------
+const zoomBtn = $('#zoomb'), zoomPop = $('#zoomPop');
+let zoomOpen = false, zoomNeed = 0;
+
+function updateZoomBtn(){
+  const z = state.zoom || 100;
+  zoomBtn.classList.toggle('show', z !== 100 || zoomOpen);
+  zoomBtn.textContent = z + '%';
+  zoomBtn.title = 'Page zoom: ' + z + '% (click for controls)';
+  if(zoomOpen) renderZoom();
+}
+function closeZoom(){
+  if(!zoomOpen) return;
+  zoomOpen = false; zoomBtn.classList.remove('on');
+  zoomPop.classList.remove('on'); zoomPop.textContent = '';
+  zoomBtn.classList.toggle('show', (state.zoom || 100) !== 100);
+  if(zoomNeed){ zoomNeed = 0; syncDrop(0); }
+}
+function renderZoom(){
+  const z = state.zoom || 100;
+  const mk = (tag, cls, txt) => { const e = document.createElement(tag); if(cls) e.className = cls; if(txt !== undefined) e.textContent = txt; return e; };
+  zoomPop.textContent = '';
+  const row = mk('div', 'zp-row');
+  const minus = mk('button', 'zp-btn', '-'); minus.title = 'Zoom out (Ctrl+-)'; minus.onclick = () => send('exec', 'zoomout');
+  const val = mk('span', 'zp-val', z + '%');
+  const plus = mk('button', 'zp-btn', '+'); plus.title = 'Zoom in (Ctrl++)'; plus.onclick = () => send('exec', 'zoomin');
+  row.append(minus, val, plus);
+  const rst = mk('button', 'zp-rst', 'RESET TO 100%'); rst.onclick = () => { send('exec', 'zoomreset'); closeZoom(); };
+  zoomPop.append(row, rst);
+  const r = zoomBtn.getBoundingClientRect();
+  const w = 220;
+  const left = Math.max(8, Math.min(window.innerWidth - w - 8, Math.round(r.right - w)));
+  zoomPop.style.left = left + 'px';
+  zoomPop.style.top = (Math.ceil(r.bottom) + 6) + 'px';
+  zoomPop.classList.add('on');
+  zoomBtn.classList.add('on');
+  const need = Math.ceil(zoomPop.getBoundingClientRect().bottom) + 8;
+  if(need !== zoomNeed){ zoomNeed = need; syncDrop(need, Math.floor(left), Math.ceil(left + w)); }
+}
+zoomBtn.onclick = () => {
+  if(zoomOpen) closeZoom();
+  else { closeAllDrops('zoom'); zoomOpen = true; renderZoom(); }
+};
+document.addEventListener('mousedown', e => { if(zoomOpen && !zoomPop.contains(e.target) && !zoomBtn.contains(e.target)) closeZoom(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && zoomOpen){ e.preventDefault(); closeZoom(); } });
+window.addEventListener('blur', closeZoom);
+
+// ---- Toolbar Downloads Popover -------------------------------------------------------
+const dlBtn = $('#dlb'), dlPop = $('#dlPop'), dlPct = $('#dlPct'), dlProg = $('#dlProg');
+let dlOpen = false, dlNeed = 0, lastDlSeq = -1;
+
+function updateDlBtn(){
+  const act = !!state.dlActive;
+  const pct = state.dlPct || 0;
+  dlBtn.classList.toggle('active', act);
+  dlPct.textContent = act ? (pct + '%') : '';
+  dlProg.style.width = act ? (pct + '%') : '0%';
+  if(dlOpen && state.dlSeq !== lastDlSeq){ lastDlSeq = state.dlSeq; renderDl(); }
+}
+function closeDl(){
+  if(!dlOpen) return;
+  dlOpen = false; dlBtn.classList.remove('on');
+  dlPop.classList.remove('on'); dlPop.textContent = '';
+  if(dlNeed){ dlNeed = 0; syncDrop(0); }
+}
+function fmtBytes(n){
+  if(!n || n <= 0) return '0 B';
+  if(n < 1024) return n + ' B';
+  if(n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  if(n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+  return (n / 1073741824).toFixed(2) + ' GB';
+}
+async function renderDl(){
+  const mk = (tag, cls, txt) => { const e = document.createElement(tag); if(cls) e.className = cls; if(txt !== undefined) e.textContent = txt; return e; };
+  let items = [];
+  try {
+    const r = await fetch('/api/downloads', {cache:'no-store'});
+    if(r.ok) items = await r.json();
+  } catch {}
+  if(!dlOpen) return;
+  dlPop.textContent = '';
+  const hd = mk('div', 'dl-hd');
+  hd.appendChild(mk('span', 'dl-title', 'RECENT DOWNLOADS'));
+  const cls = mk('button', '', '✕'); cls.style.color = 'var(--muted)'; cls.onclick = closeDl;
+  hd.appendChild(cls);
+  dlPop.appendChild(hd);
+  const list = mk('div', 'dl-list');
+  const top5 = (Array.isArray(items) ? items : []).slice(0, 6);
+  if(!top5.length){
+    list.appendChild(mk('div', 'dl-sub', 'No downloads yet.'));
+  } else {
+    top5.forEach(d => {
+      const it = mk('div', 'dl-item');
+      it.appendChild(mk('div', 'dl-name', d.name || d.url || 'Download'));
+      let st = '';
+      if(d.state === 0){
+        const pct = d.total > 0 ? Math.min(100, Math.round(d.received / d.total * 100)) + '%' : fmtBytes(d.received);
+        st = 'DOWNLOADING · ' + pct + (d.speed > 0 ? ' · ' + fmtBytes(d.speed) + '/s' : '');
+      } else if(d.state === 1){
+        st = (d.exists ? 'COMPLETE · ' : 'MOVED/DELETED · ') + fmtBytes(d.total || d.received);
+      } else if(d.state === 2) st = 'CANCELLED';
+      else st = 'FAILED';
+      it.appendChild(mk('div', 'dl-sub', st));
+      const acts = mk('div', 'dl-acts');
+      if(d.state === 0){
+        const cBtn = mk('button', 'can', 'CANCEL');
+        cBtn.onclick = async () => { await fetch('/api/downloads/cancel?id=' + d.id, {cache:'no-store'}); renderDl(); };
+        acts.appendChild(cBtn);
+      } else if(d.state === 1 && d.exists){
+        if(d.openable){
+          const oBtn = mk('button', '', 'OPEN');
+          oBtn.onclick = () => { fetch('/api/downloads/open?id=' + d.id, {cache:'no-store'}); closeDl(); };
+          acts.appendChild(oBtn);
+        }
+        const fBtn = mk('button', '', 'FOLDER');
+        fBtn.onclick = () => { fetch('/api/downloads/show?id=' + d.id, {cache:'no-store'}); closeDl(); };
+        acts.appendChild(fBtn);
+      }
+      if(acts.children.length) it.appendChild(acts);
+      list.appendChild(it);
+    });
+  }
+  dlPop.appendChild(list);
+  const ft = mk('div', 'dl-ft');
+  const all = mk('button', '', 'ALL DOWNLOADS (Ctrl+J)');
+  all.onclick = () => { closeDl(); send('exec', 'downloads'); };
+  ft.appendChild(all);
+  dlPop.appendChild(ft);
+
+  const r = dlBtn.getBoundingClientRect();
+  const w = Math.min(336, Math.max(240, window.innerWidth - 16));
+  const left = Math.max(8, Math.min(window.innerWidth - w - 8, Math.round(r.right - w)));
+  dlPop.style.left = left + 'px';
+  dlPop.style.top = (Math.ceil(r.bottom) + 6) + 'px';
+  dlPop.style.width = w + 'px';
+  dlPop.classList.add('on');
+  dlBtn.classList.add('on');
+  const need = Math.ceil(dlPop.getBoundingClientRect().bottom) + 8;
+  if(need !== dlNeed){ dlNeed = need; syncDrop(need, Math.floor(left), Math.ceil(left + w)); }
+}
+dlBtn.onclick = () => {
+  if(dlOpen) closeDl();
+  else { closeAllDrops('dl'); dlOpen = true; lastDlSeq = state.dlSeq || 0; renderDl(); }
+};
+document.addEventListener('mousedown', e => { if(dlOpen && !dlPop.contains(e.target) && !dlBtn.contains(e.target)) closeDl(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && dlOpen){ e.preventDefault(); closeDl(); } });
+window.addEventListener('blur', closeDl);
 
 // ---- Command Palette (Ctrl+Shift+P / Ctrl+Shift+K) -----------------------------------
 const pal = $('#pal'), palIn = $('#palIn'), palList = $('#palList');
@@ -1606,7 +1931,7 @@ function execPal(i){
 }
 
 function openPal(data){
-  closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closeVpn(); closeEng(); closeShield();
+  closeAllDrops('pal');
   palData = data || {};
   palSug = []; palSel = 0;
   palIn.value = '';

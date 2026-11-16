@@ -259,6 +259,8 @@ struct App {
     bool fsUser = false, fsElement = false, fullscreen = false;
     WINDOWPLACEMENT fsPrev{ sizeof(WINDOWPLACEMENT) };
     std::wstring hoverText, download;
+    bool dlActive = false;
+    int dlPct = 0, dlSeq = 0;
     std::wstring alert;   // urgent status bar message (unsupported video / DRM), shown above everything else
     std::wstring startUrl;
     bool favicons = true;             // show site icons on tabs (registry ShowFavicons)
@@ -945,6 +947,7 @@ static void SendState() {
         if (!firstTab) j += L",";
         firstTab = false;
         j += L"{\"id\":" + std::to_wstring(t->id) + L",\"title\":" + JsonStr(t->title) +
+             L",\"url\":" + JsonStr(DisplayUrl(t)) +
              L",\"loading\":" + (t->loading ? L"true" : L"false") + L",\"discarded\":" + (t->discarded ? L"true" : L"false") +
              L",\"audible\":" + (t->audible ? L"true" : L"false") + L",\"muted\":" + (t->muted ? L"true" : L"false") +
              L",\"pinned\":" + (t->pinned ? L"true" : L"false") +
@@ -1001,6 +1004,14 @@ static void SendState() {
     j += L",\"forceDark\":" + std::wstring(g.forceDark ? L"true" : L"false");
     j += L",\"waOpen\":" + std::wstring(g.waOpen ? L"true" : L"false");
     j += L",\"waUnread\":" + std::to_wstring(TotalDockUnread());
+    {
+        int zp = 100;
+        if (a && a->browser) zp = (int)std::lround(std::pow(1.2, a->browser->GetHost()->GetZoomLevel()) * 100.0);
+        j += L",\"zoom\":" + std::to_wstring(zp);
+    }
+    j += L",\"dlActive\":" + std::wstring(g.dlActive ? L"true" : L"false");
+    j += L",\"dlPct\":" + std::to_wstring(g.dlPct);
+    j += L",\"dlSeq\":" + std::to_wstring(g.dlSeq);
     j += L",\"shield\":" + ShieldJsonForTab(a);
     j += L",\"proxy\":" + ProxyStateJson();
     j += L",\"theme\":" + ThemeStateJson();
@@ -4017,10 +4028,15 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
         if (store::DownloadUpdate(id, item->GetURL().ToWString(), path, L"", item->GetTotalBytes(), item->GetReceivedBytes(),
                                   item->GetCurrentSpeed(), state))
             ScheduleSave();
-        if (item->IsComplete()) g.download = L"DOWNLOADED " + name;
-        else if (item->IsCanceled() || item->IsInterrupted()) g.download.clear();
-        else if (item->IsInProgress() && !name.empty())
-            g.download = L"DOWNLOADING " + name + L" " + std::to_wstring(std::max(0, item->GetPercentComplete())) + L"%";
+        if (item->IsComplete()) { g.download = L"DOWNLOADED " + name; g.dlActive = false; g.dlPct = 100; }
+        else if (item->IsCanceled() || item->IsInterrupted()) { g.download.clear(); g.dlActive = false; g.dlPct = 0; }
+        else if (item->IsInProgress() && !name.empty()) {
+            int pct = std::max(0, item->GetPercentComplete());
+            g.dlActive = true; g.dlPct = pct;
+            g.download = L"DOWNLOADING " + name + L" " + std::to_wstring(pct) + L"%";
+        }
+        g.dlSeq++;
+        SendState();
         InvalidateStatus();
     }
 
@@ -8569,7 +8585,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: { PAINTSTRUCT ps; HDC hdc = BeginPaint(hwnd, &ps); Paint(hdc); EndPaint(hwnd, &ps); return 0; }
     case WM_TIMER:
-        if (wp == TIMER_ZOOM) { KillTimer(hwnd, TIMER_ZOOM); InvalidateStatus(); }
+        if (wp == TIMER_ZOOM) { KillTimer(hwnd, TIMER_ZOOM); InvalidateStatus(); SendState(); }
         else if (wp == TIMER_NOTICE) { KillTimer(hwnd, TIMER_NOTICE); g.notice.clear(); InvalidateStatus(); }
         else if (wp == TIMER_ALERT) { KillTimer(hwnd, TIMER_ALERT); g.alert.clear(); InvalidateStatus(); }
         else if (wp == TIMER_CLOCK) InvalidateStatus();
