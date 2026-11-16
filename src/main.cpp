@@ -1789,9 +1789,14 @@ static std::string ThemeRuleCss() {
         pc = (COLORREF)g_accentCol.load(); cc = (COLORREF)g_cyanCol.load();
     }
     std::wstring p2 = LightenHex(pc);
-    char buf[256];
+    char buf[768];
     _snprintf_s(buf, sizeof(buf), _TRUNCATE,
-                ":root:not(.incog){--pink:%s;--pink2:%s;--cyan:%s;--pink-rgb:%d,%d,%d;--cyan-rgb:%d,%d,%d;}",
+                ":root:not(.incog){--pink:%s;--pink2:%s;--cyan:%s;--pink-rgb:%d,%d,%d;--cyan-rgb:%d,%d,%d;}"
+                "::-webkit-scrollbar{width:7px;height:7px;}"
+                "::-webkit-scrollbar-track{background:#0a0420;border-left:1px solid rgba(138,111,192,.18);}"
+                "::-webkit-scrollbar-thumb{background:rgba(var(--cyan-rgb,0,229,255),.32);border:1px solid rgba(var(--cyan-rgb,0,229,255),.55);}"
+                "::-webkit-scrollbar-thumb:hover{background:var(--pink,#ff2e97);border-color:var(--pink2,#ff7bc0);}"
+                "::-webkit-scrollbar-corner{background:#0a0420;}",
                 Utf8(p).c_str(), Utf8(p2).c_str(), Utf8(c).c_str(),
                 GetRValue(pc), GetGValue(pc), GetBValue(pc),
                 GetRValue(cc), GetGValue(cc), GetBValue(cc));
@@ -4452,7 +4457,18 @@ static std::string SettingsJson() {
     o += std::string(",\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
          ",\"updState\":\"" + updState + "\",\"updPercent\":" + std::to_string(us.percent) + ",\"updVersion\":" + JsonUtf8(us.version) + ",\"updResult\":" + JsonUtf8(us.result) + ",\"updError\":" + JsonUtf8(us.error) +
          ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
-         ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) + ",\"smoothScroll\":" + b(RegGetDword(L"SmoothScroll", 1) != 0) + ",\"smoothStep\":" + std::to_string(RegGetDword(L"SmoothStep", 120)) + ",\"smoothTime\":" + std::to_string(RegGetDword(L"SmoothTime", 400)) + ",\"netSpeed\":" + b(RegGetDword(L"NetSpeed", 1) != 0) + ",\"devDock\":" + std::to_string(RegGetDword(L"DevToolsDock", 0)) + ",\"defaultBrowser\":" + b(browserreg::IsDefault()) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
+         ",\"defaultBrowser\":" + b(browserreg::IsDefault()) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"blockTrackers\":" + b(g.blockTrackers.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
+         ",\"ramLimitMB\":" + std::to_string(RegGetDword(L"RamLimitMB", 0)) +
+         ",\"bgLimit\":" + b(RegGetDword(L"BgLimit", 0) != 0) +
+         ",\"batterySaver\":" + b(RegGetDword(L"BatterySaver", 0) != 0) +
+         ",\"batteryAuto\":" + b(RegGetDword(L"BatteryAuto", 0) != 0) +
+         ",\"netLimitKB\":" + std::to_string(RegGetDword(L"NetLimitKB", 0)) +
+         ",\"netLimitAll\":" + b(RegGetDword(L"NetLimitAll", 0) != 0) +
+         ",\"dockDefault\":" + std::to_string(RegGetDword(L"DockDefault", 0)) +
+         ",\"dockWidth\":" + std::to_string(RegGetDword(L"DockWidth", 500)) +
+         ",\"readerTheme\":" + JsonUtf8(RegGetString(L"ReaderTheme").empty() ? L"neon" : RegGetString(L"ReaderTheme")) +
+         ",\"readerFont\":" + JsonUtf8(RegGetString(L"ReaderFont").empty() ? L"sans" : RegGetString(L"ReaderFont")) +
+         ",\"readerSize\":" + std::to_string(RegGetDword(L"ReaderSize", 18)) +
          ",\"scriptTotal\":" + std::to_string(scriptTotal) + ",\"scriptEnabled\":" + std::to_string(scriptEnabled) +
          ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"bookmarksBar\":" + b(RegGetDword(L"BookmarksBar", 1) != 0) + ",\"forceDark\":" + b(RegGetDword(L"ForceDark", 0) != 0) +
          ",\"dohMode\":" + JsonUtf8(RegGetString(L"DohMode").empty() ? L"automatic" : RegGetString(L"DohMode")) +
@@ -4469,6 +4485,26 @@ static std::string SettingsJson() {
         if (i) o += ",";
         o += "{\"id\":" + JsonUtf8(THEME_PRESETS[i].id) + ",\"name\":" + JsonUtf8(THEME_PRESETS[i].name) +
              ",\"pink\":" + JsonUtf8(THEME_PRESETS[i].pink) + ",\"cyan\":" + JsonUtf8(THEME_PRESETS[i].cyan) + "}";
+    }
+    o += "],\"adsExempt\":[";
+    {
+        std::lock_guard<std::mutex> lk(g_blockMu);
+        bool first = true;
+        for (const auto& h : g_adsExempt) { if (!first) o += ","; first = false; o += JsonUtf8(Wide(h)); }
+        o += "],\"trackersExempt\":[";
+        first = true;
+        for (const auto& h : g_trackersExempt) { if (!first) o += ","; first = false; o += JsonUtf8(Wide(h)); }
+    }
+    o += "],\"darkExempt\":[";
+    {
+        std::wstring ds = RegGetString(L"ForceDarkExempt");
+        bool first = true;
+        for (size_t i = 0; i < ds.size();) {
+            size_t e = ds.find(L';', i); if (e == std::wstring::npos) e = ds.size();
+            std::wstring h = ds.substr(i, e - i);
+            if (!h.empty()) { if (!first) o += ","; first = false; o += JsonUtf8(h); }
+            i = e + 1;
+        }
     }
     o += "],\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
@@ -4634,7 +4670,15 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
         bool ok = false;
         if (key == L"search") ok = EngineValidId(val);
-        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons" || key == L"bookmarksBar" || key == L"httpsOnly" || key == L"blockAds" || key == L"savePasswords" || key == L"smoothScroll" || key == L"netSpeed" || key == L"forceDark") ok = (val == L"0" || val == L"1");
+        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons" || key == L"bookmarksBar" || key == L"httpsOnly" || key == L"blockAds" || key == L"blockTrackers" || key == L"savePasswords" || key == L"smoothScroll" || key == L"netSpeed" || key == L"forceDark" || key == L"bgLimit" || key == L"batterySaver" || key == L"batteryAuto" || key == L"netLimitAll") ok = (val == L"0" || val == L"1");
+        else if (key == L"ramLimitMB") { int v = _wtoi(val.c_str()); ok = (v == 0 || (v >= 512 && v <= 65536)); }
+        else if (key == L"netLimitKB") { int v = _wtoi(val.c_str()); ok = (v == 0 || (v >= 64 && v <= 102400)); }
+        else if (key == L"dockDefault") ok = (val == L"0" || val == L"1" || val == L"2");
+        else if (key == L"dockWidth") { int v = _wtoi(val.c_str()); ok = (v >= 300 && v <= 900); }
+        else if (key == L"readerTheme") ok = (val == L"neon" || val == L"dark" || val == L"sepia" || val == L"light");
+        else if (key == L"readerFont") ok = (val == L"sans" || val == L"serif" || val == L"mono");
+        else if (key == L"readerSize") { int v = _wtoi(val.c_str()); ok = (v >= 14 && v <= 28); }
+        else if (key == L"adsExemptDel" || key == L"trackersExemptDel" || key == L"darkExemptDel") ok = !val.empty() && val.size() < 256;
         else if (key == L"smoothStep") ok = (val == L"70" || val == L"120" || val == L"200");
         else if (key == L"devDock") ok = (val == L"0" || val == L"1" || val == L"2" || val == L"3");
         else if (key == L"defaultBrowser") ok = (val == L"1");
@@ -5764,7 +5808,8 @@ static void ToggleReaderMode() {
     if (sc > bestScore) { bestScore = sc; best = cands[i]; }
   }
   if (!best || bestScore < 80) best = document.body;
-
+)NNREADER1";
+    static const wchar_t READER_JS_1B[] = LR"NNREADER1B(
   const clone = best.cloneNode(true);
   const rmSel = 'script, style, noscript, iframe, nav, aside, footer, header, form, button, input, select, textarea, [role="navigation"], [role="banner"], [role="complementary"], [class*="sidebar"], [class*="comment"], [class*="share"], [class*="social"], [class*="promo"], [class*="advert"], [class*="related"], [id*="sidebar"], [id*="comment"]';
   clone.querySelectorAll(rmSel).forEach(n => n.remove());
@@ -5799,11 +5844,11 @@ static void ToggleReaderMode() {
     sepia: { bg:'#f4ecd8', fg:'#2c241b', muted:'#786855', acc:'#9a4d1c', acc2:'#b45309', bar:'#ebe0c5', border:'rgba(120,104,85,.25)', code:'#e8dcc0' },
     light: { bg:'#fafafa', fg:'#18181b', muted:'#6b7280', acc:'#0284c7', acc2:'#db2777', bar:'#f1f1f4', border:'rgba(0,0,0,.12)', code:'#f0f0f5' }
   };
-  let curTheme = localStorage.getItem('__nn_rd_theme') || 'neon';
+  let curTheme = (window.__nnReaderDef && window.__nnReaderDef.theme) || localStorage.getItem('__nn_rd_theme') || 'neon';
   if (!themes[curTheme]) curTheme = 'neon';
-  let curSize = parseInt(localStorage.getItem('__nn_rd_size') || '18', 10);
+  let curSize = parseInt((window.__nnReaderDef && window.__nnReaderDef.size) || localStorage.getItem('__nn_rd_size') || '18', 10);
   if (!(curSize >= 14 && curSize <= 28)) curSize = 18;
-  let curFont = localStorage.getItem('__nn_rd_font') || 'sans';
+  let curFont = (window.__nnReaderDef && window.__nnReaderDef.font) || localStorage.getItem('__nn_rd_font') || 'sans';
 
   const style = document.createElement('style');
   const wrap = document.createElement('div');
@@ -5817,6 +5862,10 @@ static void ToggleReaderMode() {
     style.textContent = `
       :host { all: initial; }
       .nn-wrap { position:fixed; inset:0; overflow-y:auto; background:${t.bg}; color:${t.fg}; font-family:${fam}; font-size:${curSize}px; line-height:1.78; -webkit-font-smoothing:antialiased; }
+      .nn-wrap::-webkit-scrollbar { width:7px; }
+      .nn-wrap::-webkit-scrollbar-track { background:${t.bar}; border-left:1px solid ${t.border}; }
+      .nn-wrap::-webkit-scrollbar-thumb { background:${t.acc}; opacity:.6; }
+      .nn-wrap::-webkit-scrollbar-thumb:hover { background:${t.acc2}; }
       .nn-bar { position:sticky; top:0; z-index:10; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 20px; background:${t.bar}; border-bottom:1px solid ${t.border}; font:12px "Cascadia Mono", Consolas, monospace; }
       .nn-brand { color:${t.acc}; font-weight:bold; letter-spacing:1.2px; }
       .nn-ctrls { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
@@ -5844,7 +5893,7 @@ static void ToggleReaderMode() {
       .nn-body th, .nn-body td { border:1px solid ${t.border}; padding:7px 10px; text-align:left; }
     `;
   }
-)NNREADER1";
+)NNREADER1B";
     static const wchar_t READER_JS_2[] = LR"NNREADER2(
   const bar = document.createElement('div');
   bar.className = 'nn-bar';
@@ -5927,7 +5976,11 @@ static void ToggleReaderMode() {
   window.addEventListener('keydown', window.__nnReaderEsc, true);
 })();
 )NNREADER2";
-    std::wstring readerJs = std::wstring(READER_JS_1) + READER_JS_2;
+    std::wstring rTheme = RegGetString(L"ReaderTheme"); if (rTheme.empty()) rTheme = L"neon";
+    std::wstring rFont = RegGetString(L"ReaderFont"); if (rFont.empty()) rFont = L"sans";
+    DWORD rSize = RegGetDword(L"ReaderSize", 18); if (rSize < 14 || rSize > 28) rSize = 18;
+    std::wstring readerJs = L"window.__nnReaderDef={theme:" + JsonStr(rTheme) + L",font:" + JsonStr(rFont) + L",size:" + std::to_wstring(rSize) + L"};" +
+                            std::wstring(READER_JS_1) + READER_JS_1B + READER_JS_2;
     a->browser->GetMainFrame()->ExecuteJavaScript(readerJs, u, 0);
     SendState();
 }
@@ -8095,6 +8148,56 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         g.savePasswords = v != 0;
     } else if (key == L"blockAds") {
         if ((val == L"1") != g.blockAds.load()) ExecCmd(CMD_BLOCKADS);
+    } else if (key == L"blockTrackers") {
+        if ((val == L"1") != g.blockTrackers.load()) ExecCmd(CMD_BLOCKTRACKERS);
+    } else if (key == L"adsExemptDel" || key == L"trackersExemptDel") {
+        {
+            std::lock_guard<std::mutex> lk(g_blockMu);
+            auto& st = (key == L"adsExemptDel") ? g_adsExempt : g_trackersExempt;
+            if (val == L"*") st.clear(); else st.erase(Utf8(val));
+        }
+        SaveShieldExempt();
+        g.lastStateJson.clear();
+        SendState();
+    } else if (key == L"darkExemptDel") {
+        if (val == L"*") g.darkExempt.clear(); else g.darkExempt.erase(val);
+        SaveDarkExempt();
+        for (auto& t : g.tabs) if (t->browser && !t->discarded) ApplyForceDark(t->browser);
+        SendState();
+    } else if (key == L"ramLimitMB") {
+        SetRamLimit((DWORD)_wtoi(val.c_str()));
+        PushPerf();
+    } else if (key == L"bgLimit") {
+        SetBgLimit(val == L"1");
+        PushPerf();
+    } else if (key == L"batterySaver") {
+        SetBatterySaver(val == L"1");
+        PushPerf();
+    } else if (key == L"batteryAuto") {
+        SetBatteryAuto(val == L"1");
+        PushPerf();
+    } else if (key == L"netLimitKB") {
+        SetNetLimit((DWORD)_wtoi(val.c_str()));
+        PushPerf();
+    } else if (key == L"netLimitAll") {
+        SetNetAll(val == L"1");
+        PushPerf();
+    } else if (key == L"dockDefault") {
+        DWORD v = (DWORD)std::max(0, std::min(2, _wtoi(val.c_str())));
+        RegSetBin(L"DockDefault", REG_DWORD, &v, sizeof(v));
+        SelectDockApp((int)v);
+    } else if (key == L"dockWidth") {
+        DWORD v = (DWORD)std::max(300, std::min(900, _wtoi(val.c_str())));
+        RegSetBin(L"DockWidth", REG_DWORD, &v, sizeof(v));
+        g.dockWidthDip = (int)v;
+        Layout();
+    } else if (key == L"readerTheme") {
+        RegSetBin(L"ReaderTheme", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
+    } else if (key == L"readerFont") {
+        RegSetBin(L"ReaderFont", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
+    } else if (key == L"readerSize") {
+        DWORD v = (DWORD)std::max(14, std::min(28, _wtoi(val.c_str())));
+        RegSetBin(L"ReaderSize", REG_DWORD, &v, sizeof(v));
     } else if (key == L"proceed") {
         // "cert|<url>" or "http|<url>" from the warning page. Only what NeonNet itself warned about
         // counts, so a web page that links to the warning page cannot open an exception.
@@ -8735,6 +8838,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     g.batterySaver = RegGetDword(L"BatterySaver", 0) != 0;
     g.batteryAuto = RegGetDword(L"BatteryAuto", 0) != 0;
     { DWORD dw = RegGetDword(L"DockWidth", 500); g.dockWidthDip = (dw >= 300 && dw <= 900) ? (int)dw : 500; }
+    { DWORD dd = RegGetDword(L"DockDefault", 0); g.dockActive = (dd <= 2) ? (int)dd : 0; }
     { DWORD n = RegGetDword(L"NetLimitKB", 0); g.netLimitKB = (n >= 64 && n <= 102400) ? n : 0; }
     g.netLimitAll = RegGetDword(L"NetLimitAll", 0) != 0;
     {

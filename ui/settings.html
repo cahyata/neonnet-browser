@@ -266,6 +266,11 @@ button{cursor:pointer;border:0}
 .tog.on{border-color:var(--green);color:var(--green);box-shadow:0 0 10px rgba(53,255,160,.16)}
 .tog:hover:not(:disabled){background:var(--cyan);color:var(--bg);border-color:var(--cyan)}
 .tog:disabled{opacity:.4;cursor:default}
+.chip-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;background:var(--bg2);border:1px solid rgba(0,229,255,.4);color:#e8d8ff;font-size:11px}
+.chip .ctag{color:var(--pink);font-weight:bold;font-size:10px}
+.chip button{color:var(--muted);background:none;padding:0 2px;font-size:12px}
+.chip button:hover{color:var(--pink)}
 
 select,.txt{
   height:32px;
@@ -396,8 +401,9 @@ select option{background:var(--bg2);color:var(--cyan)}
       <a href="#sec-ext"><span class="num">05</span>Extensions &amp; Security</a>
       <a href="#sec-scroll"><span class="num">06</span>Scrolling &amp; DevTools</a>
       <a href="#sec-look"><span class="num">07</span>Downloads &amp; Look</a>
-      <a href="#sec-keys"><span class="num">08</span>Keybindings</a>
-      <a href="#sec-updates"><span class="num">09</span>Updates &amp; About</a>
+      <a href="#sec-perf"><span class="num">08</span>Performance &amp; Dock</a>
+      <a href="#sec-keys"><span class="num">09</span>Keybindings</a>
+      <a href="#sec-updates"><span class="num">10</span>Updates &amp; About</a>
     </nav>
     <div class="aside-stats">
       <div><b>ENGINE</b> &rarr; <span id="statSearch">...</span></div>
@@ -517,8 +523,16 @@ select option{background:var(--bg2);color:var(--cyan)}
         <button class="tog" id="httpsOnly">OFF</button>
       </div>
       <div class="row">
-        <div class="lab"><b>Block trackers and ads</b><span id="adHint"></span></div>
-        <button class="tog" id="blockAds">OFF</button>
+        <div class="lab"><b>Block ads (including YouTube)</b><span id="adHint"></span></div>
+        <button class="tog" id="blockAds">ON</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Block trackers</b><span>Cancels analytics, telemetry, and tracking scripts across all websites.</span></div>
+        <button class="tog" id="blockTrackers">ON</button>
+      </div>
+      <div class="row stack">
+        <div class="lab"><b>Ad &amp; tracker site exceptions</b><span>Sites where you turned off Ad Blocker or Tracker Blocker from the Shield popup.</span></div>
+        <div class="chip-list" id="shieldExemptList"></div>
       </div>
       <div class="row" id="doh">
         <div class="lab"><b>DNS-over-HTTPS (DoH)</b><span id="dohModeHint">Encrypts domain name lookups over HTTPS instead of sending plain DNS queries to your ISP or local network.</span></div>
@@ -619,9 +633,26 @@ select option{background:var(--bg2);color:var(--cyan)}
         <div class="lab"><b>Force dark mode</b><span>Automatically turns light websites dark using Chromium's built-in Auto Dark Mode while keeping images and NeonNet pages unchanged.</span></div>
         <button class="tog" id="forceDark">OFF</button>
       </div>
+      <div class="row stack">
+        <div class="lab"><b>Force dark mode exceptions</b><span>Sites excluded from Force Dark Mode (toggle from the address bar DARK button or site panel).</span></div>
+        <div class="chip-list" id="darkExemptList"></div>
+      </div>
       <div class="row">
         <div class="lab"><b>Scanlines</b><span>A thin CRT line effect over every page. Purely visual.</span></div>
         <button class="tog" id="scan">ON</button>
+      </div>
+      <h2 class="subhead" id="reader">READER MODE DEFAULTS</h2>
+      <div class="row">
+        <div class="lab"><b>Default reader theme</b><span>Color palette used when opening Reader Mode (Ctrl+Alt+R).</span></div>
+        <select id="readerTheme"><option value="neon">NEON</option><option value="dark">DARK</option><option value="sepia">SEPIA</option><option value="light">LIGHT</option></select>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Default reader font</b><span>Typography family for clean article reading.</span></div>
+        <select id="readerFont"><option value="sans">SANS-SERIF</option><option value="serif">SERIF</option><option value="mono">MONOSPACE</option></select>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Default reader text size</b><span>Initial font size in pixels for Reader Mode.</span></div>
+        <select id="readerSize"><option value="14">14 PX</option><option value="16">16 PX</option><option value="18">18 PX</option><option value="20">20 PX</option><option value="22">22 PX</option><option value="24">24 PX</option></select>
       </div>
       <h2 class="subhead" id="theme">THEME ACCENT</h2>
       <div class="row stack">
@@ -640,8 +671,46 @@ select option{background:var(--bg2);color:var(--cyan)}
       </div>
     </section>
 
+    <section class="sec" id="sec-perf">
+      <h2>PERFORMANCE &amp; BATTERY <span class="tag">08 // RESOURCES &amp; DOCK</span></h2>
+      <div class="row">
+        <div class="lab"><b>RAM limiter</b><span>Automatically puts the longest-unused background tabs to sleep when NeonNet exceeds this memory cap.</span></div>
+        <select id="ramLimitMB"><option value="0">OFF</option><option value="1024">1 GB</option><option value="2048">2 GB</option><option value="3072">3 GB</option><option value="4096">4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option></select>
+      </div>
+      <div class="row">
+        <div class="lab"><b>CPU limiter (background tabs)</b><span>Lowers OS process priority and enables EcoQoS power throttling for background tabs.</span></div>
+        <button class="tog" id="bgLimit">OFF</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Battery saver</b><span>Throttles background tabs and automatically sleeps tabs idle for more than 3 minutes.</span></div>
+        <button class="tog" id="batterySaver">OFF</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Auto battery saver (&le;25%)</b><span>Automatically activates Battery Saver when running on battery at 25% or below.</span></div>
+        <button class="tog" id="batteryAuto">OFF</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Network limiter</b><span>Caps download throughput via DevTools network conditions.</span></div>
+        <select id="netLimitKB"><option value="0">OFF</option><option value="256">256 KB/s</option><option value="512">512 KB/s</option><option value="1024">1 MB/s</option><option value="2048">2 MB/s</option><option value="5120">5 MB/s</option><option value="10240">10 MB/s</option></select>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Network limiter scope</b><span>Apply bandwidth cap only to background tabs or to all tabs.</span></div>
+        <select id="netLimitAll"><option value="0">BACKGROUND TABS</option><option value="1">ALL TABS</option></select>
+      </div>
+
+      <h2 class="subhead">SOCIAL DOCK</h2>
+      <div class="row">
+        <div class="lab"><b>Default dock app</b><span>Which messenger opens by default when you click DOCK (Ctrl+Alt+W).</span></div>
+        <select id="dockDefault"><option value="0">WHATSAPP</option><option value="1">INSTAGRAM</option><option value="2">DISCORD</option></select>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Dock width</b><span>Sidebar width in DIP (can also be dragged directly from the dock edge).</span></div>
+        <select id="dockWidth"><option value="360">COMPACT (360)</option><option value="420">NARROW (420)</option><option value="500">DEFAULT (500)</option><option value="600">WIDE (600)</option><option value="720">EXTRA WIDE (720)</option></select>
+      </div>
+    </section>
+
     <section class="sec" id="sec-keys">
-      <h2 id="keybindings">KEYBINDINGS <span class="tag">08 // SHORTCUTS</span></h2>
+      <h2 id="keybindings">KEYBINDINGS <span class="tag">09 // SHORTCUTS</span></h2>
       <div class="row stack">
         <div class="lab"><b>Custom keyboard shortcuts</b><span>Click REBIND, then press any Ctrl/Alt shortcut or F1&ndash;F12 key. Press Esc to cancel.</span><div class="err" id="kbErr"></div></div>
         <div class="pair">
@@ -707,7 +776,23 @@ async function load(){
   $('#pwHint').textContent = cfg.incognito ? 'Incognito windows never save or fill passwords.' : cfg.passwordCount + ' saved. After you log in, NeonNet asks whether to keep the password; saved ones are offered when you click into a login field.';
   $('#extHint').textContent = (cfg.scriptEnabled || 0) + ' enabled (' + (cfg.scriptTotal || 0) + ' installed). NeonNet runs .user.js userscripts (like Tampermonkey / Greasy Fork) instead of Chrome Web Store (.crx) extensions, which depend on Chrome\'s own toolbar and window UI.' + (cfg.incognito ? ' Incognito windows run existing scripts read-only.' : '');
   setTog('#blockAds', cfg.blockAds);
-  $('#adHint').textContent = 'Cancels requests to well-known advertising and tracking sites, only when another site asks for them. Uses the EasyList, EasyPrivacy and Peter Lowe lists (about 82 000 sites). Reload a page after changing it. ' + (cfg.blocked ? cfg.blocked + ' requests blocked since NeonNet started.' : '');
+  setTog('#blockTrackers', cfg.blockTrackers);
+  $('#adHint').textContent = 'Cancels requests to well-known advertising and tracking sites, only when another site asks for them. Uses the EasyList, EasyPrivacy and Peter Lowe lists (about 82 000 sites), plus built-in YouTube ad skipping. ' + (cfg.blocked ? cfg.blocked + ' requests blocked since NeonNet started.' : '');
+  const sBox = $('#shieldExemptList'); sBox.textContent = '';
+  const adsEx = cfg.adsExempt || [], trkEx = cfg.trackersExempt || [];
+  if(!adsEx.length && !trkEx.length){
+    const em = document.createElement('span'); em.style.cssText = 'color:var(--muted);font-size:12px'; em.textContent = 'No per-site exceptions.'; sBox.appendChild(em);
+  } else {
+    const mkChip = (tag, host, key) => {
+      const c = document.createElement('span'); c.className = 'chip';
+      const t = document.createElement('span'); t.className = 'ctag'; t.textContent = tag;
+      const b = document.createElement('button'); b.textContent = '✕'; b.title = 'Remove exception';
+      b.onclick = async () => { if(await set(key, host)) load(); };
+      c.append(t, document.createTextNode(host), b); sBox.appendChild(c);
+    };
+    adsEx.forEach(h => mkChip('AD', h, 'adsExemptDel'));
+    trkEx.forEach(h => mkChip('TRK', h, 'trackersExemptDel'));
+  }
   const dSel = $('#dohProvider'); dSel.innerHTML = '';
   for(const p of (cfg.dohProviders || [])){ const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; dSel.appendChild(o); }
   $('#dohMode').value = cfg.dohMode || 'automatic';
@@ -728,6 +813,33 @@ async function load(){
     ? 'All tabs of the last session come back at start-up. They load when you click them. Pinned tabs always come back.'
     : 'Off: NeonNet starts with the home page. Pinned tabs come back either way.';
   setTog('#forceDark', cfg.forceDark);
+  const dBox = $('#darkExemptList'); dBox.textContent = '';
+  const darkEx = cfg.darkExempt || [];
+  if(!darkEx.length){
+    const em = document.createElement('span'); em.style.cssText = 'color:var(--muted);font-size:12px'; em.textContent = 'No excluded sites.'; dBox.appendChild(em);
+  } else {
+    darkEx.forEach(h => {
+      const c = document.createElement('span'); c.className = 'chip';
+      const b = document.createElement('button'); b.textContent = '✕'; b.title = 'Re-enable Force Dark for ' + h;
+      b.onclick = async () => { if(await set('darkExemptDel', h)) load(); };
+      c.append(document.createTextNode(h), b); dBox.appendChild(c);
+    });
+  }
+  $('#readerTheme').value = cfg.readerTheme || 'neon';
+  $('#readerFont').value = cfg.readerFont || 'sans';
+  $('#readerSize').value = String(cfg.readerSize || 18);
+  $('#ramLimitMB').value = String(cfg.ramLimitMB || 0);
+  setTog('#bgLimit', cfg.bgLimit);
+  setTog('#batterySaver', cfg.batterySaver);
+  setTog('#batteryAuto', cfg.batteryAuto);
+  $('#netLimitKB').value = String(cfg.netLimitKB || 0);
+  $('#netLimitAll').value = cfg.netLimitAll ? '1' : '0';
+  $('#dockDefault').value = String(cfg.dockDefault || 0);
+  const dwEl = $('#dockWidth'), dwVal = String(cfg.dockWidth || 500);
+  if(![...dwEl.options].some(o => o.value === dwVal)){
+    const o = document.createElement('option'); o.value = dwVal; o.textContent = 'CUSTOM (' + dwVal + ')'; dwEl.appendChild(o);
+  }
+  dwEl.value = dwVal;
   setTog('#scan', cfg.scan);
   setTog('#autoUpdate', cfg.autoUpdate);
   $('#autoUpdate').disabled = !cfg.installed;
@@ -1156,7 +1268,7 @@ $('#checkUpdate').onclick = async () => {
   const act = lastUpdState === 'ready' ? 'restart' : lastUpdState === 'available' ? 'download' : '1';
   if(await set('checkUpdate', act)) load();
 };
-for(const k of ['smoothStep', 'smoothTime', 'devDock', 'dohMode', 'dohProvider']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
+for(const k of ['smoothStep', 'smoothTime', 'devDock', 'dohMode', 'dohProvider', 'readerTheme', 'readerFont', 'readerSize', 'ramLimitMB', 'netLimitKB', 'netLimitAll', 'dockDefault', 'dockWidth']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
 async function saveDohCustom(){
   const v = $('#dohCustom').value.trim();
   if(v && (!/^https:\/\/[^\s]+$/i.test(v) || v.length >= 300)){ $('#dohErr').textContent = 'Must be a valid https:// URL without spaces.'; return; }
@@ -1166,7 +1278,7 @@ async function saveDohCustom(){
 }
 $('#dohCustomSave').onclick = saveDohCustom;
 $('#dohCustom').addEventListener('keydown', e => { if(e.key === 'Enter') saveDohCustom(); });
-for(const [id, key] of [['#askDownload','askDownload'], ['#forceDark','forceDark'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#bookmarksBar','bookmarksBar'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds']]){
+for(const [id, key] of [['#askDownload','askDownload'], ['#forceDark','forceDark'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#bookmarksBar','bookmarksBar'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds'], ['#blockTrackers','blockTrackers'], ['#bgLimit','bgLimit'], ['#batterySaver','batterySaver'], ['#batteryAuto','batteryAuto']]){
   $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };
 }
 async function saveHome(){
