@@ -18,10 +18,6 @@ button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
 #x svg,.tab .a svg,.keep button svg,.act svg{display:block;margin:auto}
 #x:hover{background:var(--pink);color:var(--bg)}
 main{flex:1;overflow-y:auto;padding:10px 12px 16px}
-main::-webkit-scrollbar{width:5px}
-main::-webkit-scrollbar-track{background:transparent}
-main::-webkit-scrollbar-thumb{background:rgba(0,229,255,.3);border-radius:2px}
-main::-webkit-scrollbar-thumb:hover{background:var(--cyan)}
 
 .kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .card{background:var(--card);border:1px solid var(--border);padding:9px 10px;position:relative;margin-bottom:10px}
@@ -76,8 +72,17 @@ main::-webkit-scrollbar-thumb:hover{background:var(--cyan)}
 .row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0}
 .row+.row{border-top:1px solid rgba(138,111,192,.16)}
 .row label{color:#e8d8ff;font-size:11px}
-select{height:26px;background:var(--bg2);color:var(--cyan);border:1px solid rgba(0,229,255,.55);padding:0 6px;font:11px inherit;outline:0;min-width:112px}
-select option{background:var(--bg2);color:var(--cyan)}
+select{display:none}
+.nn-sel{position:relative;min-width:128px}
+.nn-sel-btn{width:100%;height:26px;padding:0 8px;background:var(--bg2);color:var(--cyan);border:1px solid rgba(0,229,255,.55);font:11px inherit;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left}
+.nn-sel-btn:hover,.nn-sel.open .nn-sel-btn{border-color:var(--pink);color:var(--pink2)}
+.nn-sel-btn .arr{font-size:9px;color:var(--muted)}
+.nn-sel.open .nn-sel-btn .arr{color:var(--pink)}
+.nn-sel-pop{position:absolute;right:0;top:calc(100% + 3px);min-width:100%;z-index:40;display:none;background:var(--bg2);border:1px solid var(--cyan);border-top:2px solid var(--pink);box-shadow:0 12px 26px rgba(0,0,0,.8);padding:3px 0;max-height:190px;overflow-y:auto}
+.nn-sel.open .nn-sel-pop{display:block}
+.nn-sel-opt{display:block;width:100%;padding:6px 10px;text-align:left;font:11px inherit;color:#e8d8ff;white-space:nowrap}
+.nn-sel-opt:hover{background:rgba(0,229,255,.14);color:var(--cyan)}
+.nn-sel-opt.on{background:rgba(255,46,151,.15);color:var(--pink2);font-weight:bold}
 .tog{min-width:58px;height:26px;padding:0 10px;border:1px solid var(--muted);color:var(--muted);font-weight:bold;font-size:11px;letter-spacing:1px}
 .tog:hover{border-color:var(--cyan);color:var(--cyan)}
 .tog.on{border-color:var(--green);color:var(--bg);background:var(--green)}
@@ -213,6 +218,47 @@ const HOT = 20;
 const ramHist = [], cpuHist = [];
 let cleaning = 0;
 
+const selSync = [];
+function initCustomSelects(){
+  document.querySelectorAll('select').forEach(sel => {
+    const wrap = document.createElement('div'); wrap.className = 'nn-sel';
+    const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'nn-sel-btn';
+    const lbl = document.createElement('span');
+    const arr = document.createElement('span'); arr.className = 'arr'; arr.textContent = '▾';
+    btn.append(lbl, arr);
+    const pop = document.createElement('div'); pop.className = 'nn-sel-pop';
+    const sync = () => {
+      const opt = sel.options[sel.selectedIndex];
+      lbl.textContent = opt ? opt.textContent : '';
+      for(const b of pop.children) b.classList.toggle('on', b.dataset.v === sel.value);
+    };
+    [...sel.options].forEach(o => {
+      const item = document.createElement('button'); item.type = 'button'; item.className = 'nn-sel-opt';
+      item.dataset.v = o.value; item.textContent = o.textContent;
+      item.onclick = e => {
+        e.stopPropagation();
+        wrap.classList.remove('open');
+        if(sel.value !== o.value){ sel.value = o.value; sel.dispatchEvent(new Event('change')); }
+        sync();
+      };
+      pop.appendChild(item);
+    });
+    btn.onclick = e => {
+      e.stopPropagation();
+      const was = wrap.classList.contains('open');
+      document.querySelectorAll('.nn-sel.open').forEach(x => x.classList.remove('open'));
+      if(!was){ sync(); wrap.classList.add('open'); }
+    };
+    sel.parentNode.insertBefore(wrap, sel.nextSibling);
+    wrap.append(btn, pop);
+    sync();
+    selSync.push(sync);
+  });
+  document.addEventListener('click', () => document.querySelectorAll('.nn-sel.open').forEach(x => x.classList.remove('open')));
+  document.addEventListener('keydown', e => { if(e.key === 'Escape') document.querySelectorAll('.nn-sel.open').forEach(x => x.classList.remove('open')); });
+}
+initCustomSelects();
+
 function drawSpark(el, data, color, fixedMax){
   if(data.length < 2){ el.innerHTML = ''; return; }
   const w = 120, h = 26;
@@ -301,6 +347,7 @@ window.nnPerf = d => {
   $('#bg').textContent = d.bg ? 'ON' : 'OFF';
   if(document.activeElement !== $('#net')) $('#net').value = String(d.net || 0);
   if(document.activeElement !== $('#netScope')) $('#netScope').value = d.netAll ? 'all' : 'bg';
+  selSync.forEach(fn => fn());
   $('#netScopeRow').style.display = d.net ? '' : 'none';
   $('#netHint').textContent = d.net
     ? (d.netAll ? 'All tabs capped at ' : 'Background tabs capped at ') + (d.net >= 1024 ? (d.net / 1024) + ' MB/s.' : d.net + ' KB/s.')
