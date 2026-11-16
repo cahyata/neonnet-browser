@@ -157,22 +157,6 @@ void LoadLocked(const std::wstring& dataDir, bool readOnly) {
 
     std::string idx;
     if (!ReadFileBytes(g_dir + L"\\index.txt", idx)) {
-        // Seed built-in YouTube Ad Skipper on first run when index.txt does not exist yet.
-        if (!readOnly && GetFileAttributesW((g_dir + L"\\index.txt").c_str()) == INVALID_FILE_ATTRIBUTES) {
-            std::string code;
-            if (LoadEmbeddedScript(IDR_YT_ADSKIP, code)) {
-                CreateDirectoryW(dataDir.c_str(), nullptr);
-                CreateDirectoryW(g_dir.c_str(), nullptr);
-                Script s = ParseMeta(code);
-                s.id = g_nextId++;
-                s.enabled = true;
-                s.code = std::move(code);
-                if (WriteFileAtomic(ScriptFilePath(s.id), s.code)) {
-                    g_scripts.push_back(std::move(s));
-                    SaveIndexLocked();
-                }
-            }
-        }
         return;
     }
     size_t pos = 0, nl = idx.find('\n');
