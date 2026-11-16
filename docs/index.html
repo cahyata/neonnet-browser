@@ -494,12 +494,20 @@ footer{
           <span>Drag tabs to reorder, middle-click or press <kbd>Ctrl</kbd>+<kbd>W</kbd> to close, right-click to pin, and restore closed tabs with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd>.</span>
         </div>
         <div class="mini-card">
-          <b>Audio Indicator &amp; Mute</b>
-          <span>Tabs playing audio pulse a speaker icon in the tab strip. Click it to mute/unmute, even across tab sleep cycles.</span>
+          <b>Command Palette (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>)</b>
+          <span>Centered quick launcher: search open tabs across all workspaces (prefix <code>@</code>), run commands (prefix <code>&gt;</code>), or jump to bookmarks and history.</span>
         </div>
         <div class="mini-card">
-          <b>CRT Scanlines</b>
-          <span>Click <code>SCAN</code> next to the address bar or toggle it in <code>&equiv; &rarr; Scanlines</code> for the retro monitor overlay.</span>
+          <b>Social Dock (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd>)</b>
+          <span>Click <code>DOCK</code> on the left of the toolbar for WhatsApp, Instagram, and Discord in a resizable side dock with unread badges, reload, and mute.</span>
+        </div>
+        <div class="mini-card">
+          <b>Split View &amp; Reader Mode</b>
+          <span>View 2 tabs side-by-side (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> or right-click tab) with a draggable divider, or click <code>READ</code> (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd>) for distraction-free reading.</span>
+        </div>
+        <div class="mini-card">
+          <b>Workspaces, Audio &amp; Scanlines</b>
+          <span>Organize tabs into colored workspaces, mute noisy tabs from the tab strip, and toggle CRT scanlines from <code>&equiv; &rarr; Scanlines</code>.</span>
         </div>
       </div>
     </section>
@@ -521,7 +529,11 @@ footer{
           <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Bookmark page / Bookmarks</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> toggles bookmarks bar</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd> / <kbd>Ctrl</kbd>+<kbd>J</kbd></td><td>History / Downloads</td><td>Opens built-in management pages</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></td><td>Extensions (Userscripts)</td><td>Manage &amp; edit <code>.user.js</code> scripts</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></td><td>Performance panel</td><td>RAM, CPU, Tab Sleep &amp; Network Limiter</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td><td>Command palette</td><td>Switch tabs across workspaces (<code>@</code>) or run commands (<code>&gt;</code>)</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd></td><td>Toggle Split View</td><td>View 2 tabs side-by-side; also in tab right-click menu</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd></td><td>Toggle Reader Mode</td><td>Clean article overlay with Neon, Dark, Sepia &amp; Light themes</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd></td><td>Toggle Social Dock</td><td>Opens WhatsApp, Instagram, and Discord side dock</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></td><td>Performance &amp; Battery</td><td>Live sparklines, Battery Saver, RAM/CPU/Network limiters</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd></td><td>Zoom in / out / reset</td><td>Per-domain zoom level</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd> / <kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Print / Settings</td><td>Opens NeonNet settings</td></tr>
           <tr><td><kbd>F11</kbd> / <kbd>F12</kbd></td><td>Fullscreen / Developer tools</td><td><kbd>Esc</kbd> exits fullscreen</td></tr>
@@ -539,7 +551,9 @@ footer{
           <tr><td><code>neonnet://history</code></td><td>Browse visited pages chronologically and clear entries</td></tr>
           <tr><td><code>neonnet://downloads</code></td><td>Track active transfers, open downloaded files, or show in Explorer</td></tr>
           <tr><td><code>neonnet://extensions</code></td><td>Install, drag-and-drop, toggle, or edit <code>.user.js</code> userscripts</td></tr>
-          <tr><td><code>neonnet://settings</code></td><td>Search engine, default browser, startup/home, ad blocker, DevTools dock, updates, and data clearing</td></tr>
+          <tr><td><code>neonnet://passwords</code></td><td>Manage Windows DPAPI-encrypted saved logins and never-save sites</td></tr>
+          <tr><td><code>neonnet://permissions</code></td><td>Manage per-site camera, mic, location, and notification permissions</td></tr>
+          <tr><td><code>neonnet://settings</code></td><td>Full customization: search, DoH, Proxy, Shield, Reader defaults, Battery Saver, Dock, Theme Accent &amp; Keybindings</td></tr>
         </tbody>
       </table>
     </section>
@@ -559,25 +573,26 @@ footer{
     </section>
 
     <section id="perf">
-      <h2>05 // PERFORMANCE &amp; NETWORK LIMITER <span class="tag">CTRL+SHIFT+M</span></h2>
+      <h2>05 // PERFORMANCE, BATTERY SAVER &amp; LIMITERS <span class="tag">CTRL+SHIFT+M</span></h2>
       <p>Click <code>PERF</code> on the toolbar or press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> to open the live resource panel:</p>
       <ul>
-        <li><strong>Live Telemetry:</strong> Real-time RAM &amp; CPU breakdown across tabs, browser shell, and Chromium helper processes. Tabs above 20% CPU are tagged <code>HOT</code>.</li>
-        <li><strong>Clean Memory:</strong> Triggers garbage collection and trims unused Windows working-set pages immediately.</li>
-        <li><strong>RAM Limiter &amp; Tab Sleep:</strong> Set a total memory cap (1&ndash;8 GB) or put idle background tabs to sleep while protecting tabs marked <code>SOUND</code>, <code>TYPING</code>, or <code>AWAKE</code>.</li>
-        <li><strong>CPU Limiter:</strong> Applies low priority and Windows Efficiency Mode to background tabs so your active tab stays responsive.</li>
-        <li><strong>Network Limiter:</strong> Throttle download bandwidth (Off, <code>KB/s</code>, or <code>MB/s</code>) for <b>All tabs</b> or <b>Background tabs only</b>.</li>
+        <li><strong>Live Telemetry &amp; Sparklines:</strong> Real-time RAM &amp; CPU KPI cards with 24-sample SVG sparklines and a segmented breakdown across Pages, App, and Engine. Tabs above 20% CPU are tagged <code>HOT</code>.</li>
+        <li><strong>Battery Saver:</strong> Displays live Windows battery percentage &amp; AC status, supports manual <code>ON/OFF</code> and <code>Auto &le;25%</code>, throttles background tabs to EcoQoS, and sleeps tabs idle for over 3 minutes.</li>
+        <li><strong>Clean Memory &amp; Tab Sleep:</strong> Collects V8 garbage, trims working sets, or puts idle background tabs to sleep while protecting <code>SOUND</code>, <code>TYPING</code>, <code>AWAKE</code>, and Split View tabs.</li>
+        <li><strong>RAM, CPU &amp; Network Limiters:</strong> Cap total RAM (1&ndash;8 GB), lower background CPU priority, or throttle download bandwidth for <b>All tabs</b> or <b>Background tabs only</b>.</li>
       </ul>
     </section>
 
     <section id="privacy">
-      <h2>06 // PRIVACY, GHOST MODE &amp; AD BLOCKER <span class="tag">LOCAL FIRST</span></h2>
+      <h2>06 // PRIVACY, SHIELD, PROXY &amp; FORCE DARK <span class="tag">LOCAL FIRST</span></h2>
       <div class="info ghost">
         <div class="info-title">&gt; GHOST MODE (INCOGNITO &bull; CTRL+SHIFT+N)</div>
         Opens a green-accented window backed by a temporary profile folder. History, cookies, and site storage from that session are deleted automatically after the window closes. Bookmarks and downloaded files remain saved.
       </div>
       <ul>
-        <li><strong>Ad &amp; Tracker Blocker:</strong> Built-in domain blocker (toggle in <code>&equiv;</code> or <code>neonnet://settings</code>) stops known ad and tracking requests before they connect.</li>
+        <li><strong>Ad &amp; Tracker Shield:</strong> Click the Shield icon on the toolbar to toggle <b>Block Ads</b> (including built-in YouTube ad skipping) and <b>Block Trackers</b> independently, configure per-site exceptions, and inspect the list of blocked trackers on the current page.</li>
+        <li><strong>Force Dark Mode &amp; Exceptions:</strong> Automatically turns light websites dark while letting you exclude specific sites in one click via the <code>DARK</code> button in the address bar or the lock panel.</li>
+        <li><strong>DNS-over-HTTPS (DoH) &amp; Proxy Tunnel:</strong> Encrypt DNS lookups (Cloudflare, Google, Quad9, AdGuard, or custom) and route browser traffic through SOCKS5/HTTPS proxy profiles with WebRTC leak protection.</li>
         <li><strong>Local Data Directory:</strong> Bookmarks, history, settings, and userscripts live locally under <code>%LOCALAPPDATA%\NeonNet\</code>. Clear browsing data anytime in <code>neonnet://settings</code>.</li>
       </ul>
     </section>

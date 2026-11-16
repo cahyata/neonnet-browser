@@ -30,8 +30,8 @@ The installer adds NeonNet to the list too, so the button is only needed for a c
 
 | Part | What it does |
 |---|---|
-| Top row | Logo, tab list (numbered 01, 02, ...), `+` button, and the minimize, maximize and close buttons |
-| Navigation row | `[◀]` back, `[▶]` forward, `[⟳]` reload (turns into `[✕]` stop while loading), `[⌂]` home, address bar with the `☆` bookmark star, `GO`, `SCAN`, `≡` menu |
+| Top row | Logo, workspace switcher (`MAIN`, `+`), tab list (numbered 01, 02, ...), `+` button, and the minimize, maximize and close buttons |
+| Navigation row | `DOCK` (Social Dock), `[◀]` back, `[▶]` forward, `[⟳]` reload (`[✕]` stop while loading), `[⌂]` home, `PROXY` tunnel, address bar (lock icon, search engine selector, `DARK` exception toggle, `READ` Reader Mode, `☆` bookmark star), `GO`, `>_` Command Palette, `PERF`, Shield (Ad & Tracker Blocker), and `≡` menu |
 | Find bar | Shown under the navigation row while you search the page (see [Find in page](#find-in-page)) |
 | Thin line under the address bar | Animated pink-cyan bar while a page is loading |
 | Status bar | Left: download and upload speed of the computer, then the status (LINK STABLE, LOADING..., SIGNAL LOST, the hovered link address, or download progress). Right: zoom (when not 100%), SCAN ON and the clock |
@@ -64,11 +64,12 @@ While you type, a list opens under the address bar with matching bookmarks (`★
 
 Matches must contain every word you typed, in the address or the title. Pages you visit often, recently, or have bookmarked rank higher. Suggestions come only from your own bookmarks and history on this computer; nothing you type is sent to a server for them. Text you submit as a search goes to your search engine, as before.
 
-## Performance panel
+## Performance panel & Battery Saver
 
-Ctrl+Shift+M, the `PERF` button next to `SCAN`, or **Performance panel** in the `≡` menu opens a panel on the right side of the window; the page gets narrower. Press the same keys, or `✕` in the panel, to close it. While it is closed it uses no memory itself.
+Ctrl+Shift+M, the `PERF` button, or **Performance** in the `≡` menu opens a panel on the right side of the window; the page gets narrower. Press the same keys, or `✕` in the panel, to close it. While it is closed it uses no memory itself.
 
-- **Memory and CPU:** the total NeonNet uses, split into **pages** (the tabs), **browser** (the window itself) and **engine** (graphics, network and other helper processes), and the CPU use of everything, as a share of the whole processor.
+- **Memory, CPU & Sparklines:** KPI cards with live 24-sample SVG sparklines and a segmented breakdown across **Pages**, **App**, and **Engine**. Tabs above 20% CPU are marked **HOT**.
+- **Battery Saver:** shows live Windows battery percentage and AC status, with manual `ON/OFF` and `Auto <=25%`. When active, it throttles background tabs to EcoQoS and puts tabs idle for over 3 minutes to sleep.
 - **Tabs:** each tab with its memory and CPU, largest first. A tab using at least 20% of the CPU is marked **HOT** and listed on top. A tab that shares a process with another one shows the shared figure with a `~`. Hover a row for the speaker (mute), the lock (keep this site awake), the moon (put to sleep) and the cross (close). Small tags show why a tab is protected: **SOUND**, **TYPING**, **AWAKE**.
 - **Clean memory:** each page collects its garbage, then NeonNet asks Windows to take back memory it no longer needs. The number drops at once, and rises again as pages are used: it helps most when another program needs the RAM. Putting tabs to sleep frees much more.
 - **Sleep background tabs / sleeping tabs:** a sleeping tab is closed to free its memory. It stays in the tab strip, dimmed and in italics, and loads again, at the same address, when you select it. What you had typed into a page, or a video playing in it, is lost when it goes to sleep, so tabs that have either are protected (see below). The tab you are looking at never sleeps.
@@ -89,7 +90,11 @@ Sound is detected from audio and video elements on the page that are playing, no
 
 | Keys | Action |
 |---|---|
-| Ctrl+Shift+M | Performance panel |
+| Ctrl+Shift+P | Command palette (`@` tabs across workspaces, `>` commands) |
+| Ctrl+Alt+S | Toggle Split View (2 tabs side-by-side) |
+| Ctrl+Alt+R | Toggle Reader Mode (clean article view) |
+| Ctrl+Alt+W | Toggle Social Dock (WhatsApp, Instagram, Discord) |
+| Ctrl+Shift+M | Performance & Battery Saver panel |
 | Ctrl+T | New tab |
 | Ctrl+W or Ctrl+F4 | Close tab |
 | Ctrl+Shift+T | Reopen the last closed tab |
@@ -186,9 +191,15 @@ When a site shows a certificate NeonNet cannot trust (expired, made for another 
 
 **HTTPS-only mode** (Settings > SECURITY, off by default) opens every `http://` address over `https://`. If the secure address fails, a warning says the site is not secure, with **GO BACK TO SAFETY** as the default and a button to continue over plain http for that site until NeonNet is closed. Addresses on this computer or the local network (`localhost`, `*.local`, IP addresses and one-word names) are never changed.
 
-## Blocking trackers and ads
+## Blocking trackers and ads (Shield)
 
-Turn it on in **Settings > SECURITY** or with **Block trackers and ads** in the `≡` menu. It is off by default, because a blocker can break a site now and then. When it is on, a request that a page makes to a known advertising or tracking site is cancelled, so the ad or tracker never loads. The list has about 82 000 domains, from EasyList, EasyPrivacy and Peter Lowe's list. What is never blocked: the page you open, and requests a site makes to itself or to its own parts (`example.com` and `cdn.example.com`). Reload a page after changing the switch. The settings page counts the requests blocked since NeonNet started. There is no per-site exception yet: if a site breaks, switch the blocker off for a moment.
+Click the **Shield** icon on the toolbar (or configure it in **Settings > SECURITY**) to toggle **Block Ads** (including built-in YouTube ad skipping) and **Block Trackers** independently. Both use the EasyList, EasyPrivacy, and Peter Lowe lists (~82,000 domains) while keeping first-party requests intact. You can disable either blocker per site directly from the Shield popup, and inspect the **List of blocked trackers** on the current page.
+
+## Split View, Reader Mode & Social Dock
+
+- **Split View (`Ctrl+Alt+S`):** View 2 tabs side-by-side with a draggable center divider. Also available from a tab's right-click menu (**Split with active tab**, **Swap split panes**, **Exit split view**) and the `≡` menu.
+- **Reader Mode (`Ctrl+Alt+R` / `READ` in address bar):** Strips ads, sidebars, and navigation into an isolated clean reading view with reading-time estimate, `A-`/`A+` font sizing, font family switcher (`SANS`/`SERIF`/`MONO`), and 4 themes (`NEON`, `DARK`, `SEPIA`, `LIGHT`). Default appearance can be set in **Settings**.
+- **Social Dock (`Ctrl+Alt+W` / `DOCK` button):** Opens a resizable left side dock for **WhatsApp**, **Instagram**, and **Discord** with unread indicators, reload, and per-app mute. External links clicked inside the dock open in the main browser.
 
 ## Extensions (Userscripts)
 
@@ -266,7 +277,7 @@ The page also shows the NeonNet and Chromium versions.
 
 ## Scanlines
 
-The `SCAN` button turns a thin CRT line effect over every page on or off. It is purely visual: it never blocks clicks, and your choice is remembered.
+Toggle **Scanlines** in the `≡` menu or **Settings > LOOK** for a thin CRT line effect over every page. It is purely visual: it never blocks clicks, and your choice is remembered.
 
 ## Downloads
 
