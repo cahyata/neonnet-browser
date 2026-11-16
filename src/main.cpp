@@ -81,6 +81,13 @@ static const wchar_t* CHROME_UI = L"https://chrome.neonnet.ui/chrome.html";
 // lives on the chrome.neonnet.ui host (own zoom, and allowed to send commands).
 static const wchar_t* PANEL_UI = L"https://chrome.neonnet.ui/performance.html";
 static const int PANEL_DIP = 340;
+static const int WA_HEAD_DIP = 30;
+struct DockAppDef { const wchar_t* label; const wchar_t* url; };
+static const DockAppDef DOCK_APPS[3] = {
+    { L"WA", L"https://web.whatsapp.com/" },
+    { L"IG", L"https://www.instagram.com/" },
+    { L"DC", L"https://discord.com/app" },
+};
 static const wchar_t* HISTORY_PAGE = L"https://neonnet.ui/history.html";
 static const wchar_t* BOOKMARKS_PAGE = L"https://neonnet.ui/bookmarks.html";
 static const wchar_t* DOWNLOADS_PAGE = L"https://neonnet.ui/downloads.html";
@@ -118,8 +125,9 @@ enum Cmd {
     CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
     CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE,
     CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_BOOKMARKS_BAR, CMD_HISTORY,
-    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS, CMD_EXTENSIONS, CMD_HELP, CMD_CARET,
-    CMD_PALETTE, CMD_PIN_TAB, CMD_MUTE_TAB, CMD_FORCEDARK, CMD_PROXY_TOGGLE
+    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS, CMD_BLOCKTRACKERS, CMD_EXTENSIONS, CMD_HELP, CMD_CARET,
+    CMD_PALETTE, CMD_PIN_TAB, CMD_MUTE_TAB, CMD_FORCEDARK, CMD_DARK_EXEMPT, CMD_PROXY_TOGGLE,
+    CMD_SPLIT_VIEW, CMD_SPLIT_SWAP, CMD_READER_MODE, CMD_WHATSAPP
 };
 enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW };
 
@@ -169,6 +177,7 @@ struct Tab {
     std::wstring upgradedFrom, upgradedTo;   // HTTPS-only mode: the http address asked for, and the https address tried instead
     std::wstring icon;             // address of the page's favicon (http/https), shown in the tab strip
     bool pinned = false;           // pinned tabs sit at the left, are narrow and come back at the next start
+    bool readerMode = false;       // reader mode overlay active on this tab
     int wsId = 1;                  // workspace this tab belongs to
 };
 
@@ -208,14 +217,27 @@ struct App {
     CefRefPtr<CefBrowser> panel;
     std::atomic<int> panelId{ 0 };
     bool panelOpen = false, creatingPanel = false, panelReady = false;
+    CefRefPtr<CefBrowser> dockBrowsers[3];
+    std::atomic<int> dockIds[3]{ {0}, {0}, {0} };
+    DWORD dockPids[3]{};
+    DWORD chromePid = 0, panelPid = 0;
+    int dockUnread[3]{};
+    bool dockMuted[3]{};
+    int dockActive = 0, dockCreating = -1;
+    int dockWidthDip = 500;
+    HWND waHeader = nullptr, waGrip = nullptr;
+    bool waOpen = false, dockDragging = false;
     perf::Snapshot perfSnap;
     unsigned long long perfTotal = 0, perfBrowser = 0;   // bytes: all processes, the browser process alone
     double perfCpu = 0;
     DWORD ramLimitMB = 0;          // 0 = off: unload idle background tabs while all processes together use more
     bool bgLimit = false;          // run background tabs at low priority
+    bool batterySaver = false;     // manual battery saver mode (registry BatterySaver)
+    bool batteryAuto = false;      // auto-enable battery saver on battery <= 25% (registry BatteryAuto)
     DWORD netLimitKB = 0;          // 0 = off: cap download speed in KB/s via DevTools network conditions
     bool netLimitAll = false;      // false = background tabs only, true = all tabs
     std::set<std::wstring> keepHosts;   // sites whose tabs never go to sleep on their own (registry KeepAwakeHosts)
+    std::set<std::wstring> darkExempt;  // hosts excluded from Force Dark Mode (registry ForceDarkExempt)
     int sleepBlocked = 0;          // background tabs the RAM limiter would have slept but must not (audio, typing, kept awake)
     int autoUnloaded = 0;          // tabs unloaded by the RAM limiter since NeonNet started
     ULONGLONG lastLimitAct = 0;
@@ -228,8 +250,11 @@ struct App {
     int creatingTab = 0;            // tab id while CreateBrowserSync runs
     bool creatingChrome = false;
     int active = 0, nextId = 1;
+    int splitLeft = 0, splitRight = 0;   // split view: 0 = off, >0 = left & right tab IDs
+    double splitRatio = 0.5;
+    bool splitDragging = false;
     std::atomic<bool> scan{ true };   // atomic: the IO thread reads it for /api/settings
-    int dropX0 = 0, dropX1 = 0;       // horizontal extent of that dropdown, CSS px (0, 0 = the whole width)
+    int dropX0 = 0, dropX1 = 0, dropY0 = 0;       // extent of dropdown/palette, CSS px (0 = default)
     int dropNeed = 0;               // address bar suggestions open: toolbar height needed, CSS px (0 = closed)
     bool fsUser = false, fsElement = false, fullscreen = false;
     WINDOWPLACEMENT fsPrev{ sizeof(WINDOWPLACEMENT) };
@@ -248,7 +273,8 @@ struct App {
     double netDown = 0, netUp = 0;    // bytes per second, last second
     ULONGLONG netTick = 0;
     std::map<DWORD, std::pair<DWORD, DWORD>> netPrev;   // per adapter: last in and out byte counters
-    std::atomic<bool> blockAds{ false };   // block trackers and ads (registry BlockAds); atomic: read on the IO thread
+    std::atomic<bool> blockAds{ true };       // block ads (registry BlockAds); atomic: read on the IO thread
+    std::atomic<bool> blockTrackers{ true };  // block trackers (registry BlockTrackers); atomic: read on the IO thread
     std::atomic<int> blockedCount{ 0 };    // requests blocked since NeonNet started
     std::set<std::wstring> certAllow;  // host:port the user chose to open despite a certificate error, until NeonNet closes
     std::set<std::wstring> httpAllow;  // hosts the user chose to open over plain http (HTTPS-only mode), until NeonNet closes
@@ -511,9 +537,29 @@ static Tab* TabOf(CefRefPtr<CefBrowser> b) {
 }
 static bool IsChrome(CefRefPtr<CefBrowser> b) { return b && b->GetIdentifier() == g.chromeId.load(); }
 static bool IsPanel(CefRefPtr<CefBrowser> b) { return b && g.panelId.load() && b->GetIdentifier() == g.panelId.load(); }
+static int DockIndexOf(CefRefPtr<CefBrowser> b) {
+    if (!b) return -1;
+    int id = b->GetIdentifier();
+    for (int i = 0; i < 3; i++) if (g.dockIds[i].load() == id && id != 0) return i;
+    return -1;
+}
+static bool IsWaPanel(CefRefPtr<CefBrowser> b) { return DockIndexOf(b) >= 0; }
+static int TotalDockUnread() { return g.dockUnread[0] + g.dockUnread[1] + g.dockUnread[2]; }
 static bool IsUiBrowser(CefRefPtr<CefBrowser> b) { return IsChrome(b) || IsPanel(b); }   // NeonNet's own UI, never a page
 static Tab* Active() { return FindTab(g.active); }
 static int IndexOf(int id) { for (size_t i = 0; i < g.tabs.size(); i++) if (g.tabs[i]->id == id) return (int)i; return -1; }
+static bool IsSplitActive() {
+    return g.splitLeft > 0 && g.splitRight > 0 && g.splitLeft != g.splitRight &&
+           FindTab(g.splitLeft) != nullptr && FindTab(g.splitRight) != nullptr;
+}
+static bool IsVisibleTab(int id) {
+    return id == g.active || (IsSplitActive() && (id == g.splitLeft || id == g.splitRight));
+}
+static bool CanReaderUrl(const std::wstring& u) {
+    if (u.empty()) return false;
+    if (u.rfind(UI_HOST, 0) == 0 || u.rfind(CHROME_UI_HOST, 0) == 0) return false;
+    return u.rfind(L"http://", 0) == 0 || u.rfind(L"https://", 0) == 0 || u.rfind(L"file://", 0) == 0;
+}
 
 // Pinned tabs always form the left end of the strip.
 static int PinnedCount() { int n = 0; for (auto& t : g.tabs) if (t->pinned) n++; return n; }
@@ -550,18 +596,47 @@ static RECT ChromeHostRect() {
     return r;
 }
 static RECT StatusRect() { RECT rc; GetClientRect(g.hwnd, &rc); int b = Frame(); return { b, rc.bottom - b - S(STATUS_DIP), rc.right - b, rc.bottom - b }; }
+static RECT WaRect() {
+    RECT c = ChromeRect(), s = StatusRect();
+    int maxW = std::max(S(300), (int)(c.right - c.left) - S(120));
+    int w = std::max(S(300), std::min(maxW, S(g.dockWidthDip)));
+    return { c.left, c.bottom, c.left + w, s.top };
+}
+static RECT WaHeaderRect() {
+    RECT w = WaRect();
+    return { w.left, w.top, w.right, std::min((int)w.bottom, (int)w.top + S(WA_HEAD_DIP)) };
+}
+static RECT WaGripRect() {
+    RECT w = WaRect(), h = WaHeaderRect();
+    return { std::max(w.left, w.right - S(4)), h.bottom, w.right, w.bottom };
+}
+static RECT WaBrowserRect() {
+    RECT w = WaRect(), h = WaHeaderRect();
+    return { w.left, h.bottom, std::max(w.left + 1, w.right - S(4)), w.bottom };
+}
 static RECT ContentRect() {
     RECT rc; GetClientRect(g.hwnd, &rc);
     if (g.fullscreen) return rc;
     RECT c = ChromeRect(), s = StatusRect();
-    int right = c.right;
-    if (g.panelOpen) right = std::max((int)c.left + S(200), (int)c.right - S(PANEL_DIP));   // the panel takes the right edge
-    return { c.left, c.bottom, right, s.top };
+    int left = c.left, right = c.right;
+    if (g.panelOpen) right = std::max(left + S(200), right - S(PANEL_DIP));   // the panel takes the right edge
+    if (g.waOpen) left = std::min(right - S(200), (int)WaRect().right);
+    return { left, c.bottom, right, s.top };
 }
 // The performance panel: right of the page, same height.
 static RECT PanelRect() {
     RECT c = ChromeRect(), s = StatusRect(), p = ContentRect();
     return { p.right, c.bottom, c.right, s.top };
+}
+static void SplitRects(const RECT& content, RECT& leftOut, RECT& rightOut, RECT& divOut) {
+    int gap = S(4);
+    int w = std::max(1, (int)(content.right - content.left));
+    int avail = std::max(2, w - gap);
+    int minPane = std::min(S(240), avail / 2);
+    int leftW = std::max(minPane, std::min(avail - minPane, (int)std::lround(avail * g.splitRatio)));
+    leftOut = { content.left, content.top, content.left + leftW, content.bottom };
+    divOut = { leftOut.right, content.top, leftOut.right + gap, content.bottom };
+    rightOut = { divOut.right, content.top, content.right, content.bottom };
 }
 
 static void UpdateRegion() {
@@ -640,7 +715,8 @@ static void UpdateChromeRegion() {
         int dropH = std::min(h, std::max(navH, S(g.dropNeed)));
         if (g.dropX1 > g.dropX0) {
             HRGN a = CreateRectRgn(0, 0, w, navH);
-            HRGN b = CreateRectRgn(std::max(0, S(g.dropX0)), navH, std::min(w, S(g.dropX1)), dropH);
+            int y0 = (g.dropY0 > 0) ? std::max(navH, S(g.dropY0)) : navH;
+            HRGN b = CreateRectRgn(std::max(0, S(g.dropX0)), y0, std::min(w, S(g.dropX1)), dropH);
             CombineRgn(a, a, b, RGN_OR);
             DeleteObject(b);
             SetWindowRgn(cw, a, TRUE);
@@ -671,10 +747,6 @@ static void Place(CefRefPtr<CefBrowser> b, const RECT& r, bool visible, bool rai
 
 static void Layout() {
     if (!g.hwnd) return;
-    if (g.chrome) {
-        Place(g.chrome, ChromeHostRect(), !g.fullscreen, true);
-        UpdateChromeRegion();
-    }
     if (g.panel) {
         Place(g.panel, PanelRect(), g.panelOpen && !g.fullscreen);
         if (HWND pw = g.panel->GetHost()->GetWindowHandle()) {
@@ -682,20 +754,57 @@ static void Layout() {
         }
     }
     RECT content = ContentRect();
+    bool split = IsSplitActive();
+    RECT leftR = content, rightR = content, divR{};
+    if (split) SplitRects(content, leftR, rightR, divR);
     for (auto& t : g.tabs) {
-        RECT pr = content;
+        bool vis = split ? (t->id == g.splitLeft || t->id == g.splitRight) : (t->id == g.active);
+        RECT base = (split && t->id == g.splitRight) ? rightR : leftR;
+        RECT pr = base;
         if (t->dev && t->devDock != 3 && !g.fullscreen) {
             // Developer tools docked in the window: they fill the whole area, underneath the page, and draw a hole where
             // the page belongs (a bottom, right or left dock, or the device toolbar's frame, only change that hole).
-            Place(t->dev, content, t->id == g.active, false, true);
+            Place(t->dev, base, vis, false, true);
             if (t->devHoleSet) {
-                pr.left = std::min(std::max(content.left + t->devHole.left, content.left), content.right - 1);
-                pr.top = std::min(std::max(content.top + t->devHole.top, content.top), content.bottom - 1);
-                pr.right = std::max(std::min(content.left + t->devHole.right, content.right), pr.left + 1);
-                pr.bottom = std::max(std::min(content.top + t->devHole.bottom, content.bottom), pr.top + 1);
+                pr.left = std::min(std::max(base.left + t->devHole.left, base.left), base.right - 1);
+                pr.top = std::min(std::max(base.top + t->devHole.top, base.top), base.bottom - 1);
+                pr.right = std::max(std::min(base.left + t->devHole.right, base.right), pr.left + 1);
+                pr.bottom = std::max(std::min(base.top + t->devHole.bottom, base.bottom), pr.top + 1);
             }
         }
-        Place(t->browser, pr, t->id == g.active);
+        Place(t->browser, pr, vis);
+    }
+    if (g.waHeader) {
+        RECT wh = WaHeaderRect();
+        bool vis = g.waOpen && !g.fullscreen;
+        if (vis) {
+            SetWindowPos(g.waHeader, HWND_TOP, wh.left, wh.top, wh.right - wh.left, wh.bottom - wh.top,
+                         SWP_NOACTIVATE | (IsWindowVisible(g.waHeader) ? 0 : SWP_SHOWWINDOW));
+            InvalidateRect(g.waHeader, nullptr, FALSE);
+        } else {
+            ShowWindow(g.waHeader, SW_HIDE);
+        }
+    }
+    if (g.waGrip) {
+        RECT wg = WaGripRect();
+        bool vis = g.waOpen && !g.fullscreen;
+        if (vis) {
+            SetWindowPos(g.waGrip, HWND_TOP, wg.left, wg.top, wg.right - wg.left, wg.bottom - wg.top,
+                         SWP_NOACTIVATE | (IsWindowVisible(g.waGrip) ? 0 : SWP_SHOWWINDOW));
+            InvalidateRect(g.waGrip, nullptr, FALSE);
+        } else {
+            ShowWindow(g.waGrip, SW_HIDE);
+        }
+    }
+    for (int i = 0; i < 3; i++) {
+        if (g.dockBrowsers[i]) {
+            bool vis = g.waOpen && !g.fullscreen && i == g.dockActive;
+            Place(g.dockBrowsers[i], WaBrowserRect(), vis, vis);
+        }
+    }
+    if (g.chrome) {
+        Place(g.chrome, ChromeHostRect(), !g.fullscreen, true);
+        UpdateChromeRegion();
     }
     UpdateRegion();
     InvalidateRect(g.hwnd, nullptr, FALSE);
@@ -713,6 +822,7 @@ static void RunInChrome(const std::wstring& js) {
 }
 
 static std::wstring SiteJson(const std::wstring& url);   // the site panel's data, below with the site permissions
+static std::wstring ShieldJsonForTab(Tab* a);
 
 static Workspace* FindWs(int id) {
     for (auto& w : g.workspaces) if (w.id == id) return &w;
@@ -883,6 +993,15 @@ static void SendState() {
         j += L",\"engines\":" + Wide(EnginesJsonArray(false));
     }
     j += L",\"site\":" + SiteJson(cur);
+    j += L",\"splitActive\":" + std::wstring(IsSplitActive() ? L"true" : L"false");
+    j += L",\"splitLeft\":" + std::to_wstring(IsSplitActive() ? g.splitLeft : 0);
+    j += L",\"splitRight\":" + std::to_wstring(IsSplitActive() ? g.splitRight : 0);
+    j += L",\"canReader\":" + std::wstring(a && CanReaderUrl(cur) ? L"true" : L"false");
+    j += L",\"readerMode\":" + std::wstring(a && a->readerMode ? L"true" : L"false");
+    j += L",\"forceDark\":" + std::wstring(g.forceDark ? L"true" : L"false");
+    j += L",\"waOpen\":" + std::wstring(g.waOpen ? L"true" : L"false");
+    j += L",\"waUnread\":" + std::to_wstring(TotalDockUnread());
+    j += L",\"shield\":" + ShieldJsonForTab(a);
     j += L",\"proxy\":" + ProxyStateJson();
     j += L",\"theme\":" + ThemeStateJson();
     j += L",\"keys\":" + KeybindsMapJson();
@@ -971,7 +1090,7 @@ static std::wstring ScanScript(bool on) {
          L"if(!on){if(e)e.remove();return;}if(e)return;"
          L"const d=document.createElement('div');d.id=ID;const st=d.style;"
          L"st.position='fixed';st.left='0';st.top='0';st.right='0';st.bottom='0';"
-         L"st.pointerEvents='none';st.zIndex='2147483647';"
+         L"st.pointerEvents='none';st.zIndex='2147483647';st.willChange='transform';st.contain='strict';"
          L"st.background='repeating-linear-gradient(0deg,rgba(0,0,0,0) 0px,rgba(0,0,0,0) 2px,rgba(0,0,0,.09) 2px,rgba(0,0,0,.09) 3px)';"
          L"(document.documentElement||document.body).appendChild(d);}"
          L"if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ap);else ap();"
@@ -983,12 +1102,16 @@ static void ApplyScan(CefRefPtr<CefBrowser> b) {
     if (b) b->GetMainFrame()->ExecuteJavaScript(ScanScript(g.scan), b->GetMainFrame()->GetURL(), 0);
 }
 
+static std::wstring DarkHostOf(const std::wstring& url);
+static bool IsDarkExempt(const std::wstring& url);
+
 static void ApplyForceDark(CefRefPtr<CefBrowser> b, const std::wstring& knownUrl = L"") {
     if (!b) return;
     std::wstring url = !knownUrl.empty() ? knownUrl : (b->GetMainFrame() ? b->GetMainFrame()->GetURL().ToWString() : L"");
     bool isUi = url.rfind(UI_HOST, 0) == 0 || url.rfind(L"https://chrome.neonnet.ui/", 0) == 0;
+    bool exempt = IsDarkExempt(url);
     CefRefPtr<CefDictionaryValue> p = CefDictionaryValue::Create();
-    if (g.forceDark && !isUi) p->SetBool("enabled", true);
+    if (g.forceDark && !isUi && !exempt) p->SetBool("enabled", true);
     b->GetHost()->ExecuteDevToolsMethod(0, "Emulation.setAutoDarkModeOverride", p);
 }
 
@@ -1708,6 +1831,8 @@ static const KeyBindDef KEY_DEFS[] = {
     { "prevtab",       L"Previous tab",            L"Tabs",       CMD_PREVTAB,       L"Ctrl+Shift+Tab" },
     { "pin",           L"Pin / Unpin tab",         L"Tabs",       CMD_PIN_TAB,       L"" },
     { "mute",          L"Mute / Unmute tab",       L"Tabs",       CMD_MUTE_TAB,      L"" },
+    { "split",         L"Toggle Split View",       L"Tabs",       CMD_SPLIT_VIEW,    L"Ctrl+Alt+S" },
+    { "splitswap",     L"Swap Split View Panes",   L"Tabs",       CMD_SPLIT_SWAP,    L"" },
     { "palette",       L"Command palette",         L"Navigation", CMD_PALETTE,       L"Ctrl+Shift+P" },
     { "focusurl",      L"Focus address bar",       L"Navigation", CMD_FOCUSURL,      L"Ctrl+L" },
     { "reload",        L"Reload page",             L"Navigation", CMD_RELOAD,        L"Ctrl+R" },
@@ -1726,8 +1851,12 @@ static const KeyBindDef KEY_DEFS[] = {
     { "settings",      L"Settings",                L"Pages",      CMD_SETTINGS,      L"Ctrl+," },
     { "incognito",     L"New incognito window",    L"Windows",    CMD_INCOGNITO,     L"Ctrl+Shift+N" },
     { "proxy",         L"Toggle Proxy Tunnel",     L"Features",   CMD_PROXY_TOGGLE,  L"" },
+    { "reader",        L"Toggle Reader Mode",      L"Features",   CMD_READER_MODE,   L"Ctrl+Alt+R" },
+    { "wa",            L"Toggle Social Dock",      L"Features",   CMD_WHATSAPP,      L"Ctrl+Alt+W" },
     { "forcedark",     L"Toggle Force Dark Mode",  L"Features",   CMD_FORCEDARK,     L"" },
-    { "blockads",      L"Toggle Ad & Tracker Block",L"Features",  CMD_BLOCKADS,      L"" },
+    { "darkexempt",    L"Exclude Site from Force Dark", L"Features", CMD_DARK_EXEMPT, L"" },
+    { "blockads",      L"Toggle Ad Blocker",       L"Features",   CMD_BLOCKADS,      L"" },
+    { "blocktrackers", L"Toggle Tracker Blocker",  L"Features",   CMD_BLOCKTRACKERS, L"" },
     { "scan",          L"Toggle Scanlines",        L"Features",   CMD_SCAN,          L"" },
     { "perf",          L"Performance panel",       L"Tools",      CMD_PERFORMANCE,   L"Ctrl+Shift+M" },
     { "devtools",      L"Developer tools",         L"Tools",      CMD_DEVTOOLS,      L"F12" },
@@ -2500,12 +2629,18 @@ static std::wstring SiteJson(const std::wstring& url) {
     std::wstring j = L"{\"origin\":" + JsonStr(origin) + L",\"host\":" + JsonStr(h) + L",\"kind\":" +
                      JsonStr(internal ? L"internal" : sc == L"https" ? L"secure" : L"insecure") +
                      L",\"warn\":" + (!internal && sc == L"https" && g.certAllow.count(HostPortKey(url)) ? L"true" : L"false");
-    if (!internal) j += L",\"perms\":" + SpPermsJson(origin);
+    if (!internal) {
+        j += L",\"perms\":" + SpPermsJson(origin);
+        j += L",\"darkHost\":" + JsonStr(DarkHostOf(url));
+        j += L",\"darkExempt\":" + std::wstring(IsDarkExempt(url) ? L"true" : L"false");
+    }
     return j + L"}";
 }
 
 // Smooth scrolling is done by SMOOTH_JS in the page; the browser process tells it whether it is on and how
 // far and how long to scroll (message nn.cfg), when the page starts and when the setting changes.
+static bool IsBatterySaverActive();
+
 static void SendSmooth(CefRefPtr<CefFrame> f) {
     if (!f) return;
     CefRefPtr<CefProcessMessage> m = CefProcessMessage::Create("nn.cfg");
@@ -2593,6 +2728,9 @@ static void SelectTab(int id, bool focus) {
     Tab* sel = FindTab(id);
     if (!sel) return;
     if (id != g.active) { HideFind(); g_kbCapturing = false; }
+    if (IsSplitActive() && id != g.splitLeft && id != g.splitRight) {
+        g.splitLeft = 0; g.splitRight = 0;
+    }
     g.active = id;
     if (FindWs(sel->wsId)) {
         g.activeWs = sel->wsId;
@@ -2608,6 +2746,57 @@ static void SelectTab(int id, bool focus) {
     ApplyBackgroundLimit();
     ApplyNetworkLimit();
     if (focus) FocusPage();
+}
+
+static void SplitWithTab(int otherId) {
+    Tab* cur = Active();
+    if (!cur) return;
+    Tab* other = FindTab(otherId);
+    if (!other || other->id == cur->id) return;
+    if (cur->discarded) RestoreTab(cur);
+    if (other->discarded) RestoreTab(other);
+    g.splitLeft = cur->id;
+    g.splitRight = other->id;
+    g.splitRatio = 0.5;
+    Layout();
+    SendState();
+    FocusPage();
+}
+
+static void ToggleSplitView() {
+    if (IsSplitActive()) {
+        g.splitLeft = 0;
+        g.splitRight = 0;
+        Layout();
+        SendState();
+        FocusPage();
+        return;
+    }
+    Tab* cur = Active();
+    if (!cur) return;
+    std::vector<int> vis;
+    int curIdx = -1;
+    for (auto& t : g.tabs) {
+        if (t->wsId != g.activeWs) continue;
+        if (t->id == cur->id) curIdx = (int)vis.size();
+        vis.push_back(t->id);
+    }
+    int otherId = 0;
+    if (vis.size() >= 2 && curIdx >= 0) {
+        otherId = vis[(curIdx + 1) % (int)vis.size()];
+    } else {
+        int before = g.nextId;
+        CreateTab(NEWTAB, false);
+        if (FindTab(before)) otherId = before;
+    }
+    if (otherId && otherId != cur->id) SplitWithTab(otherId);
+}
+
+static void SwapSplitPanes() {
+    if (!IsSplitActive()) return;
+    std::swap(g.splitLeft, g.splitRight);
+    Layout();
+    SendState();
 }
 
 static CefWindowInfo ChildInfo(const RECT& r) {
@@ -2685,9 +2874,14 @@ static void CloseTab(int id) {
     }
     std::vector<int> sameWs;
     for (auto& o : g.tabs) if (o->wsId == g.activeWs) sameWs.push_back(o->id);
+    int splitKeep = 0;
+    if (id == g.splitLeft || id == g.splitRight) {
+        splitKeep = (id == g.splitLeft) ? g.splitRight : g.splitLeft;
+        g.splitLeft = 0; g.splitRight = 0;
+    }
     if (sameWs.empty()) { if (g.active == id) g.active = 0; CreateTab(NEWTAB, true); return; }
-    if (g.active == id) SelectTab(sameWs[std::min(wsPos, (int)sameWs.size() - 1)], true);
-    else SendState();
+    if (g.active == id) SelectTab(FindTab(splitKeep) ? splitKeep : sameWs[std::min(wsPos, (int)sameWs.size() - 1)], true);
+    else { if (splitKeep) Layout(); SendState(); }
 }
 
 // Pin or unpin a tab. A pinned tab goes to the end of the pinned tabs; an unpinned one to the
@@ -2732,6 +2926,7 @@ static void SwitchWorkspace(int wsId) {
     Workspace* target = FindWs(wsId);
     if (!target) return;
     if (Workspace* cur = FindWs(g.activeWs)) cur->activeTabId = g.active;
+    g.splitLeft = 0; g.splitRight = 0;
     g.activeWs = wsId;
     SaveWorkspaces();
     int pick = 0;
@@ -3123,8 +3318,11 @@ static std::string g_blockArena;                     // single contiguous backin
 static std::vector<std::string_view> g_blockSorted;   // sorted unique domains (filled once before g_blocklistReady)
 static std::atomic<bool> g_blocklistReady{ false };    // set after the fill: the IO thread reads the list only then
 
+static std::mutex g_blocklistMu;
+
 static void LoadBlocklist() {
-    if (g_blocklistReady.load()) return;
+    std::lock_guard<std::mutex> lk(g_blocklistMu);
+    if (g_blocklistReady.load(std::memory_order_acquire)) return;
     if (!LoadUi(IDR_BLOCKLIST, g_blockArena)) return;
     for (auto& c : g_blockArena) {
         if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
@@ -3144,7 +3342,12 @@ static void LoadBlocklist() {
     std::sort(g_blockSorted.begin(), g_blockSorted.end());
     g_blockSorted.erase(std::unique(g_blockSorted.begin(), g_blockSorted.end()), g_blockSorted.end());
     g_blockSorted.shrink_to_fit();
-    g_blocklistReady = true;
+    g_blocklistReady.store(true, std::memory_order_release);
+}
+
+static void LoadBlocklistAsync() {
+    if (g_blocklistReady.load(std::memory_order_acquire)) return;
+    std::thread([] { LoadBlocklist(); }).detach();
 }
 
 // The part of a host name a site is known by: example.com, or example.co.uk for the common two-part endings.
@@ -3168,6 +3371,7 @@ static std::string_view SiteOf(std::string_view host) {
 }
 
 static bool IsBlockedHost(std::string_view host) {
+    if (!g_blocklistReady.load(std::memory_order_acquire)) return false;
     for (size_t s = 0; s < host.size();) {
         size_t d = host.find('.', s);
         if (d == std::string_view::npos) break;   // never the bare ending (com, uk ...)
@@ -3178,12 +3382,132 @@ static bool IsBlockedHost(std::string_view host) {
     return false;
 }
 
+struct TabBlockStats {
+    int ads = 0, trackers = 0;
+    std::vector<std::string> trackerHosts;
+    std::vector<std::string> adHosts;
+};
+static std::mutex g_blockMu;
+static std::set<std::string> g_adsExempt, g_trackersExempt;
+static std::map<int, TabBlockStats> g_tabBlocks;
+
+static bool IsTrackerHost(std::string_view h) {
+    static const char* const kTrack[] = {
+        "analytics", "telemetry", "pixel", "track", "metrics", "beacon", "stats",
+        "scorecardresearch", "hotjar", "mixpanel", "segment.", "amplitude", "sentry",
+        "clarity.ms", "fullstory", "quantserve", "chartbeat", "newrelic", "datadog",
+        "bugsnag", "mouseflow", "heapanalytics", "branch.io", "appsflyer", "adjust.com",
+        "kochava", "googletagmanager", "google-analytics", "doubleverify", "moatads",
+        "omtrdc", "demdex", "krxd", "bluekai", "rlcdn", "criteo", "taboola", "outbrain"
+    };
+    for (const char* kw : kTrack) {
+        if (h.find(kw) != std::string_view::npos) return true;
+    }
+    return false;
+}
+
+static void SaveShieldExempt() {
+    auto save = [](const wchar_t* name, const std::set<std::string>& st) {
+        std::wstring s;
+        for (const auto& h : st) { if (!s.empty()) s += L';'; s += Wide(h); }
+        if (s.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, name);
+        else RegSetBin(name, REG_SZ, s.c_str(), (DWORD)((s.size() + 1) * sizeof(wchar_t)));
+    };
+    std::lock_guard<std::mutex> lk(g_blockMu);
+    save(L"AdsExemptHosts", g_adsExempt);
+    save(L"TrackersExemptHosts", g_trackersExempt);
+}
+
+static void LoadShieldExempt() {
+    auto load = [](const wchar_t* name, std::set<std::string>& st) {
+        st.clear();
+        std::string s = Utf8(RegGetString(name));
+        size_t i = 0;
+        while (i < s.size()) {
+            size_t e = s.find(';', i); if (e == std::string::npos) e = s.size();
+            std::string h = s.substr(i, e - i);
+            if (!h.empty() && h.size() < 256) st.insert(h);
+            i = e + 1;
+        }
+    };
+    std::lock_guard<std::mutex> lk(g_blockMu);
+    load(L"AdsExemptHosts", g_adsExempt);
+    load(L"TrackersExemptHosts", g_trackersExempt);
+}
+
+static std::string ActiveShieldSiteUtf8(Tab* a) {
+    if (!a) return {};
+    std::wstring u = DisplayUrl(a);
+    if (u.rfind(L"http://", 0) != 0 && u.rfind(L"https://", 0) != 0) return {};
+    if (u.rfind(UI_HOST, 0) == 0 || u.rfind(CHROME_UI_HOST, 0) == 0) return {};
+    std::wstring sc, h; int p;
+    SplitUrl(u, sc, h, p);
+    for (auto& c : h) c = (char)towlower(c);
+    std::string utf = Utf8(h);
+    return std::string(SiteOf(utf));
+}
+
+static std::wstring ShieldJsonForTab(Tab* a) {
+    std::string site = ActiveShieldSiteUtf8(a);
+    int bid = (a && a->browser) ? a->browser->GetIdentifier() : 0;
+    bool adsEx = false, trkEx = false;
+    int ads = 0, trk = 0;
+    std::vector<std::string> trkList;
+    {
+        std::lock_guard<std::mutex> lk(g_blockMu);
+        if (!site.empty()) {
+            adsEx = g_adsExempt.count(site) > 0;
+            trkEx = g_trackersExempt.count(site) > 0;
+        }
+        if (bid) {
+            auto it = g_tabBlocks.find(bid);
+            if (it != g_tabBlocks.end()) {
+                ads = it->second.ads;
+                trk = it->second.trackers;
+                trkList = it->second.trackerHosts;
+            }
+        }
+    }
+    std::wstring j = L"{\"adsOn\":" + std::wstring(g.blockAds.load() ? L"true" : L"false") +
+                     L",\"trackersOn\":" + std::wstring(g.blockTrackers.load() ? L"true" : L"false") +
+                     L",\"host\":" + JsonStr(Wide(site)) +
+                     L",\"siteAdsOff\":" + std::wstring(adsEx ? L"true" : L"false") +
+                     L",\"siteTrackersOff\":" + std::wstring(trkEx ? L"true" : L"false") +
+                     L",\"ads\":" + std::to_wstring(ads) +
+                     L",\"trackers\":" + std::to_wstring(trk) + L",\"trackerList\":[";
+    for (size_t i = 0; i < trkList.size(); i++) {
+        if (i) j += L",";
+        j += JsonStr(Wide(trkList[i]));
+    }
+    return j + L"]}";
+}
+
 class BlockHandler : public CefResourceRequestHandler {
 public:
-    ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefRefPtr<CefRequest>, CefRefPtr<CefCallback>) override {
+    BlockHandler(bool isTracker, std::string host) : isTracker_(isTracker), host_(std::move(host)) {}
+    ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, CefRefPtr<CefRequest>, CefRefPtr<CefCallback>) override {
         g.blockedCount++;
+        if (browser) {
+            int bid = browser->GetIdentifier();
+            std::lock_guard<std::mutex> lk(g_blockMu);
+            auto& st = g_tabBlocks[bid];
+            if (isTracker_) {
+                st.trackers++;
+                if (st.trackerHosts.size() < 40 && std::find(st.trackerHosts.begin(), st.trackerHosts.end(), host_) == st.trackerHosts.end()) {
+                    st.trackerHosts.push_back(host_);
+                }
+            } else {
+                st.ads++;
+                if (st.adHosts.size() < 40 && std::find(st.adHosts.begin(), st.adHosts.end(), host_) == st.adHosts.end()) {
+                    st.adHosts.push_back(host_);
+                }
+            }
+        }
         return RV_CANCEL;
     }
+private:
+    bool isTracker_;
+    std::string host_;
     IMPLEMENT_REFCOUNTING(BlockHandler);
 };
 
@@ -3219,9 +3543,19 @@ public:
 
     void OnGotFocus(CefRefPtr<CefBrowser> browser) override {
         if (!IsChrome(browser) && g.dropNeed > 0) {
-            g.dropNeed = 0; g.dropX0 = 0; g.dropX1 = 0;
+            g.dropNeed = 0; g.dropX0 = 0; g.dropX1 = 0; g.dropY0 = 0;
             UpdateChromeRegion();
             RunInChrome(L"window.__nn&&window.__nn({type:'closeDrops'})");
+        }
+        if (!IsUiBrowser(browser) && IsSplitActive()) {
+            if (Tab* t = TabOf(browser)) {
+                if ((t->id == g.splitLeft || t->id == g.splitRight) && t->id != g.active) {
+                    g.active = t->id;
+                    HideFind();
+                    SendState();
+                    InvalidateRect(g.hwnd, nullptr, FALSE);
+                }
+            }
         }
     }
 
@@ -3276,6 +3610,13 @@ public:
                        CefWindowInfo& windowInfo, CefRefPtr<CefClient>& client, CefBrowserSettings& settings,
                        CefRefPtr<CefDictionaryValue>&, bool*) override {
         if (IsUiBrowser(browser) || g.closing) return true;   // the chrome UI never opens popups
+        if (IsWaPanel(browser)) {
+            std::wstring u = target_url.ToWString();
+            if (!u.empty() && (u.rfind(L"http://", 0) == 0 || u.rfind(L"https://", 0) == 0)) {
+                CreateTab(u, true, -1);
+            }
+            return true;
+        }
         if (disp == CEF_WOD_OFF_THE_RECORD) {
             std::wstring u = target_url.ToWString();
             if (!u.empty()) { if (g.incognito) CreateTab(u, true, -1); else LaunchIncognito(u); }
@@ -3318,6 +3659,14 @@ public:
             }
             return;
         }
+        if (g.dockCreating >= 0 && g.dockCreating < 3) {
+            int idx = g.dockCreating;
+            g.dockBrowsers[idx] = browser;
+            g.dockIds[idx] = browser->GetIdentifier();
+            if (g.dockMuted[idx]) browser->GetHost()->SetAudioMuted(true);
+            Layout();
+            return;
+        }
         Tab* t = nullptr;
         if (g.creatingTab) t = FindTab(g.creatingTab);
         else if (!g.pendingPopups.empty()) { t = FindTab(g.pendingPopups.front()); g.pendingPopups.pop_front(); }
@@ -3332,10 +3681,12 @@ public:
 
     void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
         int bid = browser->GetIdentifier();
+        { std::lock_guard<std::mutex> lk(g_blockMu); g_tabBlocks.erase(bid); }
         g_all.erase(std::remove_if(g_all.begin(), g_all.end(),
             [bid](const CefRefPtr<CefBrowser>& b) { return b->GetIdentifier() == bid; }), g_all.end());
         if (IsChrome(browser)) { g.chrome = nullptr; g.chromeId = 0; }
         else if (IsPanel(browser)) { g.panel = nullptr; g.panelId = 0; }
+        else if (int di = DockIndexOf(browser); di >= 0) { g.dockBrowsers[di] = nullptr; g.dockIds[di] = 0; g.dockPids[di] = 0; g.dockUnread[di] = 0; }
         else if (Tab* t = TabOf(browser)) {
             t->browser = nullptr;
             if (t->discarding) {
@@ -3357,6 +3708,16 @@ public:
 
     // --- display ---
     void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override {
+        if (int di = DockIndexOf(browser); di >= 0) {
+            std::wstring s = title.ToWString();
+            int n = 0;
+            if (!s.empty() && s[0] == L'(') {
+                size_t close = s.find(L')');
+                if (close != std::wstring::npos && close > 1) n = std::max(0, _wtoi(s.substr(1, close - 1).c_str()));
+            }
+            if (n != g.dockUnread[di]) { g.dockUnread[di] = n; SendState(); }
+            return;
+        }
         if (Tab* t = TabOf(browser)) {
             t->title = title.ToWString();
             if (t->title.rfind(L"data:text/html", 0) == 0) t->title = L"SIGNAL LOST";
@@ -3382,6 +3743,7 @@ public:
             auto site = [](const std::wstring& u) { size_t s = u.find(L"://"); size_t e = s == std::wstring::npos ? s : u.find(L'/', s + 3); return u.substr(0, e); };
             if (site(url.ToWString()) != site(t->url)) t->icon.clear();
             t->url = url.ToWString();
+            t->readerMode = false;
             if (t->errorPending) t->errorPending = false;
             else t->errorUrl.clear();
             if (t->errorUrl.empty()) {
@@ -3424,17 +3786,36 @@ public:
     }
     void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType) override {
         if (frame->IsMain()) {
+            if (browser) { std::lock_guard<std::mutex> lk(g_blockMu); g_tabBlocks.erase(browser->GetIdentifier()); }
             if (Tab* t = TabOf(browser)) {
                 t->dirty = false;
+                t->readerMode = false;
                 ApplyScan(browser);
                 ApplyForceDark(browser, frame->GetURL().ToWString());
                 RunUserscripts(browser, frame, userscripts::RUN_START);
             }
         }   // a new page: nothing typed yet
     }
+static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
+    if (!frame || !g.blockAds.load()) return;
+    std::wstring url = frame->GetURL().ToWString();
+    if (url.rfind(L"https://www.youtube.com/", 0) != 0 && url.rfind(L"https://m.youtube.com/", 0) != 0) return;
+    {
+        std::lock_guard<std::mutex> lk(g_blockMu);
+        if (g_adsExempt.count("youtube.com") > 0) return;
+    }
+    static std::wstring ytJs;
+    if (ytJs.empty()) {
+        std::string raw;
+        if (LoadUi(IDR_YT_ADSKIP, raw)) ytJs = Wide(raw);
+    }
+    if (!ytJs.empty()) frame->ExecuteJavaScript(ytJs, url, 0);
+}
+
     void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override {
         if (!frame->IsMain() || httpStatusCode == 0) return;
         if (TabOf(browser)) {
+            MaybeRunYtAdSkip(frame);
             RunUserscripts(browser, frame, userscripts::RUN_END);
             RunUserscripts(browser, frame, userscripts::RUN_IDLE);
         }
@@ -3485,7 +3866,7 @@ public:
     // Runs on the IO thread: only the atomics and the read-only block list are used here.
     CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, CefRefPtr<CefRequest> request,
                                                                    bool is_navigation, bool, const CefString&, bool&) override {
-        if (!g.blockAds.load() || is_navigation || !browser || !g_blocklistReady.load()) return nullptr;
+        if ((!g.blockAds.load() && !g.blockTrackers.load()) || is_navigation || !browser || !g_blocklistReady.load()) return nullptr;
         int bid = browser->GetIdentifier();
         if (bid == g.chromeId.load() || bid == g.panelId.load()) return nullptr;
         std::string ru = request->GetURL().ToString();
@@ -3499,9 +3880,12 @@ public:
         size_t col = reqHost.find(':'); if (col != std::string::npos) reqHost.resize(col);
         for (auto& c : reqHost) c = (char)tolower((unsigned char)c);
         if (reqHost.empty() || !IsBlockedHost(reqHost)) return nullptr;
+        bool isTrk = IsTrackerHost(reqHost);
+        if (isTrk ? !g.blockTrackers.load() : !g.blockAds.load()) return nullptr;
         // the site that is open, from its main frame
         std::string page = browser->GetMainFrame() ? browser->GetMainFrame()->GetURL().ToString() : "";
         if (page.compare(0, 18, "https://neonnet.ui") == 0) return nullptr;
+        std::string pSite;
         size_t ps = 0;
         if (page.compare(0, 8, "https://") == 0) ps = 8;
         else if (page.compare(0, 7, "http://") == 0) ps = 7;
@@ -3511,10 +3895,16 @@ public:
             size_t pat = pHost.rfind('@'); if (pat != std::string::npos) pHost.erase(0, pat + 1);
             size_t pcol = pHost.find(':'); if (pcol != std::string::npos) pHost.resize(pcol);
             for (auto& c : pHost) c = (char)tolower((unsigned char)c);
-            if (!pHost.empty() && SiteOf(pHost) == SiteOf(reqHost)) return nullptr;   // first party
+            if (!pHost.empty()) {
+                pSite = std::string(SiteOf(pHost));
+                if (pSite == SiteOf(reqHost)) return nullptr;   // first party
+            }
         }
-        static CefRefPtr<BlockHandler> handler = new BlockHandler();
-        return handler;
+        if (!pSite.empty()) {
+            std::lock_guard<std::mutex> lk(g_blockMu);
+            if (isTrk ? g_trackersExempt.count(pSite) : g_adsExempt.count(pSite)) return nullptr;
+        }
+        return new BlockHandler(isTrk, std::move(reqHost));
     }
     bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool, bool) override {
         if (!frame->IsMain() || IsUiBrowser(browser)) return false;
@@ -3739,11 +4129,15 @@ public:
     // The renderer reports videos this build cannot play and sites that ask for DRM.
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId,
                                   CefRefPtr<CefProcessMessage> message) override {
-        if (message->GetName() == "nn.pid") {
-            if (Tab* pt = TabOf(browser)) { pt->pid = (DWORD)message->GetArgumentList()->GetInt(0); ApplyBackgroundLimit(); }
-            if (frame && frame->IsMain()) SendSmooth(frame);   // a new page: tell it the smooth scrolling settings
-            return true;
-        }
+    if (message->GetName() == "nn.pid") {
+        DWORD rpid = (DWORD)message->GetArgumentList()->GetInt(0);
+        if (Tab* pt = TabOf(browser)) { pt->pid = rpid; ApplyBackgroundLimit(); }
+        else if (IsChrome(browser)) { g.chromePid = rpid; }
+        else if (IsPanel(browser)) { g.panelPid = rpid; }
+        else if (int di = DockIndexOf(browser); di >= 0) { g.dockPids[di] = rpid; ApplyBackgroundLimit(); }
+        if (frame && frame->IsMain()) SendSmooth(frame);   // a new page: tell it the smooth scrolling settings
+        return true;
+    }
         if (message->GetName() == "nn.pw") { OnPw(browser, frame, message->GetArgumentList()); return true; }
         if (message->GetName() != "nn.media") return false;
         std::string kind = message->GetArgumentList()->GetString(0);
@@ -4838,10 +5232,23 @@ static void LaunchIncognito(const std::wstring& url) {
 // limiter unloads the longest-unused background tab while all processes use more than the limit,
 // and the background limiter runs the processes of background tabs at low priority.
 
+static bool IsBatterySaverActive() {
+    if (g.batterySaver) return true;
+    if (!g.batteryAuto) return false;
+    SYSTEM_POWER_STATUS sps{};
+    if (GetSystemPowerStatus(&sps) && sps.ACLineStatus == 0 && sps.BatteryLifePercent <= 100 && (sps.BatteryFlag & 128) == 0) {
+        return sps.BatteryLifePercent <= 25;
+    }
+    return false;
+}
+
 static void UpdatePerfTimer() {
     if (!g.hwnd) return;
-    if (g.panelOpen || g.ramLimitMB || g.bgLimit) SetTimer(g.hwnd, TIMER_PERF, g.panelOpen ? 2000 : 4000, nullptr);
-    else KillTimer(g.hwnd, TIMER_PERF);
+    if (g.panelOpen || g.ramLimitMB || g.bgLimit || g.batterySaver || g.batteryAuto) {
+        SetTimer(g.hwnd, TIMER_PERF, g.panelOpen ? 2000 : 10000, nullptr);
+    } else {
+        KillTimer(g.hwnd, TIMER_PERF);
+    }
 }
 
 static void SamplePerf() {
@@ -4862,13 +5269,34 @@ static void PushPerf() {
     auto mb = [](unsigned long long b) { return std::to_wstring((long long)(b / (1024 * 1024))); };
     std::map<DWORD, int> users;   // tabs per process
     for (auto& t : g.tabs) if (t->pid) users[t->pid]++;
+    for (int i = 0; i < 3; i++) if (g.dockPids[i]) users[g.dockPids[i]]++;
     unsigned long long tabBytes = 0;
     for (auto& u : users) { auto p = g.perfSnap.byPid.find(u.first); if (p != g.perfSnap.byPid.end()) tabBytes += p->second.bytes; }
-    unsigned long long engine = g.perfTotal > g.perfBrowser + tabBytes ? g.perfTotal - g.perfBrowser - tabBytes : 0;
+    unsigned long long uiBytes = 0;
+    if (g.chromePid && !users.count(g.chromePid)) {
+        auto p = g.perfSnap.byPid.find(g.chromePid); if (p != g.perfSnap.byPid.end()) uiBytes += p->second.bytes;
+    }
+    if (g.panelPid && g.panelPid != g.chromePid && !users.count(g.panelPid)) {
+        auto p = g.perfSnap.byPid.find(g.panelPid); if (p != g.perfSnap.byPid.end()) uiBytes += p->second.bytes;
+    }
+    unsigned long long appBytes = g.perfBrowser + uiBytes;
+    unsigned long long engine = g.perfTotal > appBytes + tabBytes ? g.perfTotal - appBytes - tabBytes : 0;
     wchar_t cpu[32]; swprintf_s(cpu, L"%.1f", g.perfCpu);
-    std::wstring j = L"{\"total\":" + mb(g.perfTotal) + L",\"browser\":" + mb(g.perfBrowser) + L",\"engine\":" + mb(engine) +
+    SYSTEM_POWER_STATUS sps{};
+    int batPct = -1; bool batAc = true;
+    if (GetSystemPowerStatus(&sps)) {
+        batAc = (sps.ACLineStatus == 1);
+        if (sps.BatteryLifePercent <= 100 && (sps.BatteryFlag & 128) == 0) batPct = (int)sps.BatteryLifePercent;
+    }
+    bool batOn = IsBatterySaverActive();
+    std::wstring j = L"{\"total\":" + mb(g.perfTotal) + L",\"browser\":" + mb(appBytes) + L",\"engine\":" + mb(engine) +
                      L",\"cpu\":" + cpu + L",\"limit\":" + std::to_wstring(g.ramLimitMB) +
                      L",\"bg\":" + (g.bgLimit ? L"true" : L"false") +
+                     L",\"bat\":" + (batOn ? L"true" : L"false") +
+                     L",\"batManual\":" + (g.batterySaver ? L"true" : L"false") +
+                     L",\"batAuto\":" + (g.batteryAuto ? L"true" : L"false") +
+                     L",\"batPct\":" + std::to_wstring(batPct) +
+                     L",\"batAc\":" + (batAc ? L"true" : L"false") +
                      L",\"net\":" + std::to_wstring(g.netLimitKB) + L",\"netAll\":" + (g.netLimitAll ? L"true" : L"false") +
                      L",\"auto\":" + std::to_wstring(g.autoUnloaded) +
                      L",\"trimmed\":" + std::to_wstring(g.lastTrimCount) + L",\"tabs\":[";
@@ -4897,14 +5325,28 @@ static void ApplyBackgroundLimit() {
     static std::map<DWORD, bool> applied;   // pid -> low priority is set
     std::set<DWORD> inUse;
     if (Tab* a = Active()) if (a->pid) inUse.insert(a->pid);   // the selected tab's process is never slowed down
+    if (IsSplitActive()) {
+        if (Tab* l = FindTab(g.splitLeft)) if (l->pid) inUse.insert(l->pid);
+        if (Tab* r = FindTab(g.splitRight)) if (r->pid) inUse.insert(r->pid);
+    }
+    if (g.waOpen && g.dockPids[g.dockActive]) inUse.insert(g.dockPids[g.dockActive]);
     std::set<DWORD> live;
     for (auto& t : g.tabs) {
         if (!t->pid) continue;
         live.insert(t->pid);
-        bool low = g.bgLimit && !inUse.count(t->pid);
+        bool low = (g.bgLimit || IsBatterySaverActive()) && !inUse.count(t->pid);
         auto it = applied.find(t->pid);
         if ((it == applied.end() && !low) || (it != applied.end() && it->second == low)) continue;
         if (perf::SetBackground(t->pid, low)) applied[t->pid] = low;
+    }
+    for (int i = 0; i < 3; i++) {
+        DWORD dpid = g.dockPids[i];
+        if (!dpid) continue;
+        live.insert(dpid);
+        bool low = !inUse.count(dpid);   // hidden dock apps always run in EcoQoS background mode
+        auto it = applied.find(dpid);
+        if ((it == applied.end() && !low) || (it != applied.end() && it->second == low)) continue;
+        if (perf::SetBackground(dpid, low)) applied[dpid] = low;
     }
     for (auto it = applied.begin(); it != applied.end();) it = live.count(it->first) ? std::next(it) : applied.erase(it);
 }
@@ -4914,7 +5356,7 @@ static void ApplyNetworkLimit() {
     if (g.closing) return;
     for (auto& t : g.tabs) {
         if (!t->browser || t->discarded) continue;
-        bool cap = g.netLimitKB > 0 && (g.netLimitAll || t->id != g.active);
+        bool cap = g.netLimitKB > 0 && (g.netLimitAll || !IsVisibleTab(t->id));
         int want = cap ? (int)g.netLimitKB : -1;
         if (t->netLimitKB == want) continue;
         if (!t->netEnabled) {
@@ -4934,7 +5376,7 @@ static void ApplyNetworkLimit() {
 
 static bool UnloadTab(int id) {
     Tab* t = FindTab(id);
-    if (!t || !t->browser || t->discarded || id == g.active) return false;
+    if (!t || !t->browser || t->discarded || IsVisibleTab(id)) return false;
     t->discarding = true;
     HWND w = t->browser->GetHost()->GetWindowHandle();
     if (w) ShowWindow(w, SW_HIDE);
@@ -4993,6 +5435,54 @@ static void ToggleKeepAwake(int id) {
     SaveKeepHosts();
 }
 
+static std::wstring DarkHostOf(const std::wstring& url) {
+    if (url.rfind(L"http://", 0) != 0 && url.rfind(L"https://", 0) != 0) return {};
+    if (url.rfind(UI_HOST, 0) == 0 || url.rfind(CHROME_UI_HOST, 0) == 0) return {};
+    std::wstring sc, h; int p;
+    SplitUrl(url, sc, h, p);
+    for (auto& c : h) c = (wchar_t)towlower(c);
+    if (h.rfind(L"www.", 0) == 0) h.erase(0, 4);
+    if (h == L"neonnet.ui") return {};
+    return h;
+}
+static bool IsDarkExempt(const std::wstring& url) {
+    std::wstring h = DarkHostOf(url);
+    return !h.empty() && g.darkExempt.count(h) > 0;
+}
+static void SaveDarkExempt() {
+    std::wstring s;
+    for (const auto& h : g.darkExempt) { if (!s.empty()) s += L';'; s += h; }
+    if (s.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, L"ForceDarkExempt");
+    else RegSetBin(L"ForceDarkExempt", REG_SZ, s.c_str(), (DWORD)((s.size() + 1) * sizeof(wchar_t)));
+}
+static void LoadDarkExempt() {
+    g.darkExempt.clear();
+    std::wstring s = RegGetString(L"ForceDarkExempt");
+    size_t i = 0;
+    while (i < s.size()) {
+        size_t e = s.find(L';', i); if (e == std::wstring::npos) e = s.size();
+        std::wstring h = s.substr(i, e - i);
+        if (!h.empty() && h.size() < 256) g.darkExempt.insert(h);
+        i = e + 1;
+    }
+}
+static void ToggleDarkExemptForActive() {
+    Tab* a = Active();
+    if (!a) return;
+    std::wstring h = DarkHostOf(DisplayUrl(a));
+    if (h.empty()) { ShowNotice(L"FORCE DARK EXCEPTION IS FOR WEB SITES ONLY"); return; }
+    bool added = false;
+    if (!g.darkExempt.erase(h)) { g.darkExempt.insert(h); added = true; }
+    SaveDarkExempt();
+    for (auto& t : g.tabs) {
+        if (t->browser && !t->discarded && DarkHostOf(DisplayUrl(t.get())) == h) {
+            ApplyForceDark(t->browser);
+        }
+    }
+    SendState();
+    ShowNotice(added ? (L"FORCE DARK: EXCLUDED " + Upper(h)) : (L"FORCE DARK: ENABLED FOR " + Upper(h)));
+}
+
 static void ToggleMute(int id) {
     Tab* t = FindTab(id);
     if (!t) return;
@@ -5002,13 +5492,27 @@ static void ToggleMute(int id) {
 }
 
 static void ApplyRamLimit() {
-    if (!g.ramLimitMB || g.closing) return;
+    if (g.closing) return;
+    if (IsBatterySaverActive() && GetTickCount64() - g.lastLimitAct >= 5000) {
+        ULONGLONG now = GetTickCount64();
+        for (auto& t : g.tabs) {
+            if (IsVisibleTab(t->id) || !t->browser || t->discarded || t->loading) continue;
+            if (now - t->lastActive < 180000) continue;
+            if (SleepProtection(t.get())) continue;
+            if (UnloadTab(t->id)) {
+                g.autoUnloaded++;
+                g.lastLimitAct = now;
+                break;
+            }
+        }
+    }
+    if (!g.ramLimitMB) return;
     g.sleepBlocked = 0;
     if (g.perfTotal <= (unsigned long long)g.ramLimitMB * 1024 * 1024) return;
     if (GetTickCount64() - g.lastLimitAct < 5000) return;   // give the last unload time to show in the figures
     Tab* oldest = nullptr;
     for (auto& t : g.tabs) {
-        if (t->id == g.active || !t->browser || t->discarded || t->loading) continue;
+        if (IsVisibleTab(t->id) || !t->browser || t->discarded || t->loading) continue;
         if (SleepProtection(t.get())) { g.sleepBlocked++; continue; }
         if (!oldest || t->lastActive < oldest->lastActive) oldest = t.get();
     }
@@ -5044,9 +5548,14 @@ static void OnPerfTimer() {
 // First every page collects its garbage (the DevTools command), then, a moment later, the
 // working sets are trimmed (TIMER_TRIM) and the figures are taken again.
 static void CleanMemory() {
-    for (auto& t : g.tabs)
-        if (t->browser) t->browser->GetHost()->ExecuteDevToolsMethod(0, "HeapProfiler.collectGarbage", CefDictionaryValue::Create());
-    if (g.hwnd) SetTimer(g.hwnd, TIMER_TRIM, 1200, nullptr);
+    auto gc = [](CefRefPtr<CefBrowser> b) {
+        if (b) b->GetHost()->ExecuteDevToolsMethod(0, "HeapProfiler.collectGarbage", CefDictionaryValue::Create());
+    };
+    gc(g.chrome);
+    gc(g.panel);
+    for (int i = 0; i < 3; i++) gc(g.dockBrowsers[i]);
+    for (auto& t : g.tabs) gc(t->browser);
+    if (g.hwnd) SetTimer(g.hwnd, TIMER_TRIM, 900, nullptr);
 }
 
 static void SetPanelOpen(bool open) {
@@ -5074,6 +5583,53 @@ static void SetPanelOpen(bool open) {
     if (!open) FocusPage();
 }
 
+static void EnsureWaHeader();
+
+static void EnsureDockBrowser(int idx) {
+    if (idx < 0 || idx >= 3 || g.dockBrowsers[idx]) return;
+    g.dockCreating = idx;
+    CefBrowserHost::CreateBrowserSync(ChildInfo(WaBrowserRect()), g_client.get(), DOCK_APPS[idx].url, BrowserSettings(), nullptr, g.reqCtx);
+    g.dockCreating = -1;
+}
+
+static void SelectDockApp(int idx) {
+    if (idx < 0 || idx >= 3) return;
+    g.dockActive = idx;
+    if (g.waOpen) {
+        EnsureDockBrowser(idx);
+        Layout();
+        ApplyBackgroundLimit();
+        if (g.dockBrowsers[idx]) {
+            if (HWND ww = g.dockBrowsers[idx]->GetHost()->GetWindowHandle()) ::SetFocus(ww);
+            g.dockBrowsers[idx]->GetHost()->SetFocus(true);
+        }
+    }
+    if (g.waHeader) InvalidateRect(g.waHeader, nullptr, FALSE);
+    SendState();
+}
+
+static void SetWaOpen(bool open) {
+    if (open == g.waOpen) return;
+    g.waOpen = open;
+    if (open) {
+        EnsureWaHeader();
+        EnsureDockBrowser(g.dockActive);
+        Layout();
+        if (g.dockBrowsers[g.dockActive]) {
+            if (HWND ww = g.dockBrowsers[g.dockActive]->GetHost()->GetWindowHandle()) ::SetFocus(ww);
+            g.dockBrowsers[g.dockActive]->GetHost()->SetFocus(true);
+        }
+    } else {
+        for (int i = 0; i < 3; i++) {
+            if (g.dockBrowsers[i]) g.dockBrowsers[i]->GetHost()->ExecuteDevToolsMethod(0, "HeapProfiler.collectGarbage", CefDictionaryValue::Create());
+        }
+        Layout();
+        ApplyBackgroundLimit();
+        FocusPage();
+    }
+    SendState();
+}
+
 static void SetRamLimit(DWORD mb) {
     g.ramLimitMB = (mb >= 512 && mb <= 65536) ? mb : 0;
     RegSetBin(L"RamLimitMB", REG_DWORD, &g.ramLimitMB, sizeof(DWORD));
@@ -5085,6 +5641,25 @@ static void SetBgLimit(bool on) {
     DWORD v = on ? 1 : 0;
     RegSetBin(L"BgLimit", REG_DWORD, &v, sizeof(v));
     ApplyBackgroundLimit();
+    UpdatePerfTimer();
+}
+
+static void SetBatterySaver(bool on) {
+    g.batterySaver = on;
+    DWORD v = on ? 1 : 0;
+    RegSetBin(L"BatterySaver", REG_DWORD, &v, sizeof(v));
+    ApplyBackgroundLimit();
+    BroadcastSmooth();
+    UpdatePerfTimer();
+    ShowNotice(IsBatterySaverActive() ? L"BATTERY SAVER ON" : L"BATTERY SAVER OFF");
+}
+
+static void SetBatteryAuto(bool on) {
+    g.batteryAuto = on;
+    DWORD v = on ? 1 : 0;
+    RegSetBin(L"BatteryAuto", REG_DWORD, &v, sizeof(v));
+    ApplyBackgroundLimit();
+    BroadcastSmooth();
     UpdatePerfTimer();
 }
 
@@ -5122,11 +5697,239 @@ static void OnPerfCommand(const std::wstring& cmd, const std::wstring& arg) {
     else if (cmd == L"perf.unkeep") { g.keepHosts.erase(arg); SaveKeepHosts(); }
     else if (cmd == L"perf.ram") SetRamLimit((DWORD)_wtoi(arg.c_str()));
     else if (cmd == L"perf.bg") SetBgLimit(arg == L"1");
+    else if (cmd == L"perf.bat") SetBatterySaver(arg == L"1");
+    else if (cmd == L"perf.batauto") SetBatteryAuto(arg == L"1");
     else if (cmd == L"perf.net") SetNetLimit((DWORD)_wtoi(arg.c_str()));
     else if (cmd == L"perf.netall") SetNetAll(arg == L"1");
     else if (cmd == L"perf.hide") SetPanelOpen(false);
     SamplePerf();
     PushPerf();
+}
+
+static void ToggleReaderMode() {
+    Tab* a = Active();
+    if (!a || !a->browser) return;
+    std::wstring u = DisplayUrl(a);
+    if (!CanReaderUrl(u)) { ShowNotice(L"READER MODE IS FOR WEB PAGES ONLY"); return; }
+    a->readerMode = !a->readerMode;
+    static const wchar_t READER_JS_1[] = LR"NNREADER1(
+(() => {
+  const HOST_ID = '__nn_reader_host';
+  const existing = document.getElementById(HOST_ID);
+  if (existing) {
+    existing.remove();
+    if (document.documentElement.dataset.nnOv !== undefined) {
+      document.documentElement.style.overflow = document.documentElement.dataset.nnOv;
+      delete document.documentElement.dataset.nnOv;
+    }
+    if (window.__nnReaderEsc) {
+      window.removeEventListener('keydown', window.__nnReaderEsc, true);
+      delete window.__nnReaderEsc;
+    }
+    return;
+  }
+
+  const badRe = /nav|sidebar|footer|header|menu|breadcrumb|comment|related|share|social|promo|banner|cookie|popup|modal|advert|sponsor|ad-|ads/i;
+  const goodRe = /article|content|entry|post|story|main|body|text|prose|markdown/i;
+
+  function scoreEl(el) {
+    if (!el || el.offsetParent === null && el.tagName !== 'BODY') return -999;
+    const cls = (el.className && typeof el.className === 'string' ? el.className : '') + ' ' + (el.id || '');
+    if (badRe.test(cls) && !goodRe.test(cls)) return -200;
+    const ps = el.querySelectorAll('p');
+    let textLen = 0;
+    for (const p of ps) {
+      const t = (p.innerText || '').trim();
+      if (t.length >= 25) textLen += t.length;
+    }
+    if (textLen < 120) {
+      const t = (el.innerText || '').trim();
+      if (t.length < 200) return 0;
+      textLen = Math.min(t.length, 600);
+    }
+    let linkLen = 0;
+    for (const a of el.querySelectorAll('a')) linkLen += (a.innerText || '').length;
+    const linkDensity = textLen > 0 ? linkLen / textLen : 1;
+    let sc = textLen * (1 - Math.min(0.85, linkDensity));
+    if (el.tagName === 'ARTICLE' || el.tagName === 'MAIN') sc *= 1.45;
+    if (goodRe.test(cls)) sc *= 1.3;
+    return sc;
+  }
+
+  let best = document.querySelector('article, main, [role="main"]');
+  let bestScore = best ? scoreEl(best) : 0;
+  const cands = document.querySelectorAll('article, main, section, div');
+  for (let i = 0; i < cands.length && i < 250; i++) {
+    const sc = scoreEl(cands[i]);
+    if (sc > bestScore) { bestScore = sc; best = cands[i]; }
+  }
+  if (!best || bestScore < 80) best = document.body;
+
+  const clone = best.cloneNode(true);
+  const rmSel = 'script, style, noscript, iframe, nav, aside, footer, header, form, button, input, select, textarea, [role="navigation"], [role="banner"], [role="complementary"], [class*="sidebar"], [class*="comment"], [class*="share"], [class*="social"], [class*="promo"], [class*="advert"], [class*="related"], [id*="sidebar"], [id*="comment"]';
+  clone.querySelectorAll(rmSel).forEach(n => n.remove());
+  clone.querySelectorAll('*').forEach(n => {
+    n.removeAttribute('style');
+    if (n.tagName === 'IMG') {
+      if (!n.getAttribute('src') && n.dataset && n.dataset.src) n.setAttribute('src', n.dataset.src);
+      n.removeAttribute('width'); n.removeAttribute('height');
+    }
+  });
+
+  const h1 = document.querySelector('article h1, main h1, h1');
+  const title = (h1 && h1.innerText.trim()) || document.title || location.hostname;
+  const firstCloneH1 = clone.querySelector('h1');
+  if (firstCloneH1 && firstCloneH1.innerText.trim() === title) firstCloneH1.remove();
+  const metaAuthor = document.querySelector('meta[name="author"], meta[property="article:author"]');
+  const author = metaAuthor ? metaAuthor.content.trim() : '';
+  const words = (clone.innerText || '').trim().split(/\s+/).filter(Boolean).length;
+  const mins = Math.max(1, Math.round(words / 200));
+
+  document.documentElement.dataset.nnOv = document.documentElement.style.overflow || '';
+  document.documentElement.style.overflow = 'hidden';
+
+  const host = document.createElement('div');
+  host.id = HOST_ID;
+  host.style.cssText = 'position:fixed;inset:0;z-index:2147483647;';
+  const shadow = host.attachShadow({ mode: 'open' });
+
+  const themes = {
+    neon:  { bg:'#0b051d', fg:'#e8dcff', muted:'#9b86c9', acc:'#00e5ff', acc2:'#ff2e97', bar:'#130930', border:'rgba(0,229,255,.28)', code:'#190c3d' },
+    dark:  { bg:'#141418', fg:'#e4e4e7', muted:'#9ca3af', acc:'#38bdf8', acc2:'#f472b6', bar:'#1c1c22', border:'rgba(255,255,255,.12)', code:'#23232b' },
+    sepia: { bg:'#f4ecd8', fg:'#2c241b', muted:'#786855', acc:'#9a4d1c', acc2:'#b45309', bar:'#ebe0c5', border:'rgba(120,104,85,.25)', code:'#e8dcc0' },
+    light: { bg:'#fafafa', fg:'#18181b', muted:'#6b7280', acc:'#0284c7', acc2:'#db2777', bar:'#f1f1f4', border:'rgba(0,0,0,.12)', code:'#f0f0f5' }
+  };
+  let curTheme = localStorage.getItem('__nn_rd_theme') || 'neon';
+  if (!themes[curTheme]) curTheme = 'neon';
+  let curSize = parseInt(localStorage.getItem('__nn_rd_size') || '18', 10);
+  if (!(curSize >= 14 && curSize <= 28)) curSize = 18;
+  let curFont = localStorage.getItem('__nn_rd_font') || 'sans';
+
+  const style = document.createElement('style');
+  const wrap = document.createElement('div');
+  wrap.className = 'nn-wrap';
+
+  function applyVars() {
+    const t = themes[curTheme];
+    const fam = curFont === 'serif' ? 'Georgia, "Times New Roman", serif'
+              : curFont === 'mono'  ? '"Cascadia Mono", Consolas, monospace'
+              : 'system-ui, -apple-system, "Segoe UI", sans-serif';
+    style.textContent = `
+      :host { all: initial; }
+      .nn-wrap { position:fixed; inset:0; overflow-y:auto; background:${t.bg}; color:${t.fg}; font-family:${fam}; font-size:${curSize}px; line-height:1.78; -webkit-font-smoothing:antialiased; }
+      .nn-bar { position:sticky; top:0; z-index:10; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 20px; background:${t.bar}; border-bottom:1px solid ${t.border}; font:12px "Cascadia Mono", Consolas, monospace; }
+      .nn-brand { color:${t.acc}; font-weight:bold; letter-spacing:1.2px; }
+      .nn-ctrls { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+      .nn-btn { background:transparent; color:${t.fg}; border:1px solid ${t.border}; padding:4px 9px; cursor:pointer; font:inherit; font-size:11px; border-radius:3px; }
+      .nn-btn:hover { border-color:${t.acc}; color:${t.acc}; }
+      .nn-btn.on { background:${t.acc}; color:${t.bg}; border-color:${t.acc}; font-weight:bold; }
+      .nn-btn.exit { border-color:${t.acc2}; color:${t.acc2}; margin-left:6px; }
+      .nn-btn.exit:hover { background:${t.acc2}; color:${t.bg}; }
+      .nn-art { max-width:740px; margin:36px auto 80px; padding:0 24px; }
+      .nn-meta { font:12px "Cascadia Mono", Consolas, monospace; color:${t.muted}; margin-bottom:10px; letter-spacing:.5px; }
+      .nn-title { font-size:1.95em; line-height:1.25; margin:0 0 18px; color:${t.fg}; font-weight:700; }
+      .nn-sep { height:2px; background:linear-gradient(90deg, ${t.acc2}, ${t.acc}, transparent); margin:0 0 28px; opacity:.7; }
+      .nn-body h1,.nn-body h2,.nn-body h3,.nn-body h4 { color:${t.acc}; line-height:1.35; margin:1.5em 0 .55em; }
+      .nn-body p { margin:0 0 1.15em; }
+      .nn-body a { color:${t.acc}; text-decoration:underline; text-underline-offset:3px; }
+      .nn-body blockquote { margin:1.3em 0; padding:10px 18px; border-left:3px solid ${t.acc2}; background:${t.code}; color:${t.fg}; }
+      .nn-body pre, .nn-body code { font-family:"Cascadia Mono", Consolas, monospace; background:${t.code}; border-radius:4px; }
+      .nn-body pre { padding:14px 16px; overflow-x:auto; font-size:.86em; line-height:1.5; border:1px solid ${t.border}; }
+      .nn-body code { padding:2px 5px; font-size:.88em; }
+      .nn-body pre code { padding:0; background:none; }
+      .nn-body img, .nn-body figure { max-width:100%; height:auto; display:block; margin:1.4em auto; border-radius:4px; }
+      .nn-body ul, .nn-body ol { padding-left:1.5em; margin:0 0 1.15em; }
+      .nn-body li { margin-bottom:.4em; }
+      .nn-body table { width:100%; border-collapse:collapse; margin:1.3em 0; font-size:.9em; }
+      .nn-body th, .nn-body td { border:1px solid ${t.border}; padding:7px 10px; text-align:left; }
+    `;
+  }
+)NNREADER1";
+    static const wchar_t READER_JS_2[] = LR"NNREADER2(
+  const bar = document.createElement('div');
+  bar.className = 'nn-bar';
+  const brand = document.createElement('span');
+  brand.className = 'nn-brand';
+  brand.textContent = 'NEONNET // READER';
+  const ctrls = document.createElement('div');
+  ctrls.className = 'nn-ctrls';
+
+  function mkBtn(txt, fn) {
+    const b = document.createElement('button');
+    b.className = 'nn-btn';
+    b.textContent = txt;
+    b.onclick = fn;
+    return b;
+  }
+
+  const themeBtns = {};
+  ['neon', 'dark', 'sepia', 'light'].forEach(k => {
+    const b = mkBtn(k.toUpperCase(), () => {
+      curTheme = k; localStorage.setItem('__nn_rd_theme', k);
+      Object.entries(themeBtns).forEach(([tk, tb]) => tb.classList.toggle('on', tk === curTheme));
+      applyVars();
+    });
+    if (k === curTheme) b.classList.add('on');
+    themeBtns[k] = b;
+    ctrls.appendChild(b);
+  });
+
+  const fontBtn = mkBtn(curFont.toUpperCase(), () => {
+    const order = ['sans', 'serif', 'mono'];
+    curFont = order[(order.indexOf(curFont) + 1) % order.length];
+    localStorage.setItem('__nn_rd_font', curFont);
+    fontBtn.textContent = curFont.toUpperCase();
+    applyVars();
+  });
+  ctrls.append(
+    mkBtn('A-', () => { curSize = Math.max(14, curSize - 2); localStorage.setItem('__nn_rd_size', curSize); applyVars(); }),
+    mkBtn('A+', () => { curSize = Math.min(28, curSize + 2); localStorage.setItem('__nn_rd_size', curSize); applyVars(); }),
+    fontBtn
+  );
+
+  function closeReader() {
+    host.remove();
+    if (document.documentElement.dataset.nnOv !== undefined) {
+      document.documentElement.style.overflow = document.documentElement.dataset.nnOv;
+      delete document.documentElement.dataset.nnOv;
+    }
+    if (window.__nnReaderEsc) {
+      window.removeEventListener('keydown', window.__nnReaderEsc, true);
+      delete window.__nnReaderEsc;
+    }
+  }
+  const exitBtn = mkBtn('EXIT (ESC)', closeReader);
+  exitBtn.classList.add('exit');
+  ctrls.appendChild(exitBtn);
+  bar.append(brand, ctrls);
+
+  const art = document.createElement('article');
+  art.className = 'nn-art';
+  const meta = document.createElement('div');
+  meta.className = 'nn-meta';
+  meta.textContent = [location.hostname.replace(/^www\./, ''), author, mins + ' MIN READ'].filter(Boolean).join('  ·  ');
+  const h1El = document.createElement('h1');
+  h1El.className = 'nn-title';
+  h1El.textContent = title;
+  const sep = document.createElement('div');
+  sep.className = 'nn-sep';
+  const body = document.createElement('div');
+  body.className = 'nn-body';
+  body.appendChild(clone);
+  art.append(meta, h1El, sep, body);
+
+  applyVars();
+  wrap.append(bar, art);
+  shadow.append(style, wrap);
+  document.documentElement.appendChild(host);
+
+  window.__nnReaderEsc = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeReader(); } };
+  window.addEventListener('keydown', window.__nnReaderEsc, true);
+})();
+)NNREADER2";
+    std::wstring readerJs = std::wstring(READER_JS_1) + READER_JS_2;
+    a->browser->GetMainFrame()->ExecuteJavaScript(readerJs, u, 0);
+    SendState();
 }
 
 static void OpenPalette() {
@@ -5152,6 +5955,8 @@ static void OpenPalette() {
              L",\"pinned\":" + (t->pinned ? L"true" : L"false") +
              L",\"muted\":" + (t->muted ? L"true" : L"false") +
              L",\"audible\":" + (t->audible ? L"true" : L"false") +
+             L",\"discarded\":" + (t->discarded ? L"true" : L"false") +
+             L",\"split\":" + JsonStr(IsSplitActive() ? (t->id == g.splitLeft ? L"L" : (t->id == g.splitRight ? L"R" : L"")) : L"") +
              L",\"active\":" + (t->id == g.active ? L"true" : L"false") + L"}";
     }
     bool proxyOn = false; std::wstring proxyName;
@@ -5167,12 +5972,19 @@ static void OpenPalette() {
          L",\"canStar\":" + std::wstring(canStar ? L"true" : L"false") +
          L",\"starred\":" + std::wstring(starred ? L"true" : L"false") +
          L",\"forceDark\":" + std::wstring(g.forceDark ? L"true" : L"false") +
+         L",\"darkHost\":" + JsonStr(DarkHostOf(curUrl)) +
+         L",\"darkExempt\":" + std::wstring(IsDarkExempt(curUrl) ? L"true" : L"false") +
          L",\"blockAds\":" + std::wstring(g.blockAds.load() ? L"true" : L"false") +
          L",\"proxyOn\":" + std::wstring(proxyOn ? L"true" : L"false") +
          L",\"proxyName\":" + JsonStr(proxyName) +
          L",\"scan\":" + std::wstring(g.scan.load() ? L"true" : L"false") +
          L",\"bookmarksBar\":" + std::wstring(g.bookmarksBar ? L"true" : L"false") +
          L",\"perf\":" + std::wstring(g.panelOpen ? L"true" : L"false") +
+         L",\"waOpen\":" + std::wstring(g.waOpen ? L"true" : L"false") +
+         L",\"waUnread\":" + std::to_wstring(TotalDockUnread()) +
+         L",\"splitActive\":" + std::wstring(IsSplitActive() ? L"true" : L"false") +
+         L",\"canReader\":" + std::wstring(a && CanReaderUrl(curUrl) ? L"true" : L"false") +
+         L",\"readerMode\":" + std::wstring(a && a->readerMode ? L"true" : L"false") +
          L",\"incognito\":" + std::wstring(g.incognito ? L"true" : L"false") + L"}}";
 
     FocusChrome();
@@ -5189,14 +6001,19 @@ static void ExecCmd(int cmd) {
     case CMD_PALETTE: OpenPalette(); break;
     case CMD_PIN_TAB: if (a) SetPinned(a->id, !a->pinned); break;
     case CMD_MUTE_TAB: if (a) ToggleMute(a->id); break;
+    case CMD_SPLIT_VIEW: ToggleSplitView(); break;
+    case CMD_SPLIT_SWAP: SwapSplitPanes(); break;
+    case CMD_READER_MODE: ToggleReaderMode(); break;
     case CMD_FORCEDARK: {
         g.forceDark = !g.forceDark;
         DWORD v = g.forceDark ? 1 : 0;
         RegSetBin(L"ForceDark", REG_DWORD, &v, sizeof(v));
         for (auto& t : g.tabs) if (t->browser && !t->discarded) ApplyForceDark(t->browser);
+        SendState();
         ShowNotice(g.forceDark ? L"FORCE DARK MODE ON" : L"FORCE DARK MODE OFF");
         break;
     }
+    case CMD_DARK_EXEMPT: ToggleDarkExemptForActive(); break;
     case CMD_PROXY_TOGGLE: {
         if (!ProxySetEnabled(-1)) {
             ApplyProxyPrefs();
@@ -5208,6 +6025,7 @@ static void ExecCmd(int cmd) {
     case CMD_CARET: ToggleCaretBrowsing(); break;
     case CMD_INCOGNITO: if (g.incognito) CreateTab(NEWTAB, true); else LaunchIncognito(L""); break;
     case CMD_PERFORMANCE: SetPanelOpen(!g.panelOpen); break;
+    case CMD_WHATSAPP: SetWaOpen(!g.waOpen); break;
     case CMD_CLOSETAB: if (a) CloseTab(a->id); break;
     case CMD_HOME: if (b) b->GetMainFrame()->LoadURL(HomeUrl()); break;
     case CMD_RELOAD:
@@ -5234,11 +6052,22 @@ static void ExecCmd(int cmd) {
     case CMD_ZOOMRESET: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_RESET); break;
     case CMD_BLOCKADS: {
         bool on = !g.blockAds.load();
-        if (on) LoadBlocklist();   // about 82 000 names: only read into memory when blocking is wanted
+        if (on) LoadBlocklistAsync();   // about 82 000 names: parse on a background thread without stalling UI
         g.blockAds = on;
         DWORD v = on ? 1 : 0;
         RegSetBin(L"BlockAds", REG_DWORD, &v, sizeof(v));
-        if (g.chrome) ShowAlert(on ? L"TRACKERS AND ADS BLOCKED - RELOAD A PAGE TO SEE THE EFFECT" : L"TRACKER AND AD BLOCKING IS OFF");
+        SendState();
+        if (g.chrome) ShowAlert(on ? L"AD BLOCKER ON - RELOAD A PAGE TO SEE THE EFFECT" : L"AD BLOCKER IS OFF");
+        break;
+    }
+    case CMD_BLOCKTRACKERS: {
+        bool on = !g.blockTrackers.load();
+        if (on) LoadBlocklistAsync();
+        g.blockTrackers = on;
+        DWORD v = on ? 1 : 0;
+        RegSetBin(L"BlockTrackers", REG_DWORD, &v, sizeof(v));
+        SendState();
+        if (g.chrome) ShowAlert(on ? L"TRACKER BLOCKER ON - RELOAD A PAGE TO SEE THE EFFECT" : L"TRACKER BLOCKER IS OFF");
         break;
     }
     case CMD_SCAN: {
@@ -6004,45 +6833,32 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
         m.push_back(std::move(it));
     };
     auto sep = [&] { m.push_back(MenuItem()); };
-    Tab* a = Active();
-    bool starred = a && store::FindBookmark(DisplayUrl(a)) != 0;
-    bool canStar = !g.incognito && a && store::Recordable(DisplayUrl(a));
     add(CMD_NEWTAB, L"New tab", KeybindDisplay(CMD_NEWTAB));
-    add(CMD_PALETTE, L"Command palette", KeybindDisplay(CMD_PALETTE));
-    add(CMD_CLOSETAB, L"Close tab", KeybindDisplay(CMD_CLOSETAB));
-    add(CMD_REOPEN, L"Reopen closed tab", KeybindDisplay(CMD_REOPEN), g.closed.empty());
     add(CMD_INCOGNITO, g.incognito ? L"New incognito tab" : L"New incognito window", KeybindDisplay(CMD_INCOGNITO));
+    add(CMD_REOPEN, L"Reopen closed tab", KeybindDisplay(CMD_REOPEN), g.closed.empty());
+    add(CMD_PALETTE, L"Command palette", KeybindDisplay(CMD_PALETTE));
     sep();
-    add(CMD_BOOKMARK, starred ? L"Remove bookmark" : L"Bookmark this page", KeybindDisplay(CMD_BOOKMARK), !canStar);
     add(CMD_BOOKMARKS, L"Bookmarks", KeybindDisplay(CMD_BOOKMARKS));
-    add(CMD_BOOKMARKS_BAR, L"Bookmarks bar", KeybindDisplay(CMD_BOOKMARKS_BAR), false, g.bookmarksBar);
     add(CMD_HISTORY, L"History", KeybindDisplay(CMD_HISTORY), g.incognito);   // nothing is recorded in an incognito window
     add(CMD_DOWNLOADS, L"Downloads", KeybindDisplay(CMD_DOWNLOADS));
-    add(CMD_EXTENSIONS, L"Extensions (Userscripts)", KeybindDisplay(CMD_EXTENSIONS));
-    add(CMD_PERFORMANCE, L"Performance panel", KeybindDisplay(CMD_PERFORMANCE), false, g.panelOpen);
+    add(CMD_EXTENSIONS, L"Extensions", KeybindDisplay(CMD_EXTENSIONS));
+    sep();
     add(CMD_FIND, L"Find in page", KeybindDisplay(CMD_FIND));
-    sep();
-    add(CMD_ZOOMIN, L"Zoom in", KeybindDisplay(CMD_ZOOMIN));
-    add(CMD_ZOOMOUT, L"Zoom out", KeybindDisplay(CMD_ZOOMOUT));
-    add(CMD_ZOOMRESET, L"Reset zoom", KeybindDisplay(CMD_ZOOMRESET));
-    sep();
-    add(CMD_PRINT, L"Print", KeybindDisplay(CMD_PRINT));
-    add(CMD_BLOCKADS, L"Block trackers and ads", KeybindDisplay(CMD_BLOCKADS), false, g.blockAds.load());
+    add(CMD_SPLIT_VIEW, IsSplitActive() ? L"Exit split view" : L"Split view", KeybindDisplay(CMD_SPLIT_VIEW), false, IsSplitActive());
     {
-        bool proxyOn = false;
-        { std::lock_guard<std::mutex> lk(g_proxyMu); proxyOn = g_proxyEnabled && !g_proxyList.empty(); }
-        add(CMD_PROXY_TOGGLE, L"Proxy tunnel", KeybindDisplay(CMD_PROXY_TOGGLE), false, proxyOn);
+        Tab* act = Active();
+        bool canR = act && CanReaderUrl(DisplayUrl(act));
+        add(CMD_READER_MODE, L"Reader mode", KeybindDisplay(CMD_READER_MODE), !canR, act && act->readerMode);
     }
+    add(CMD_PRINT, L"Print", KeybindDisplay(CMD_PRINT));
     add(CMD_SCAN, L"Scanlines", KeybindDisplay(CMD_SCAN), false, g.scan);
     add(CMD_FULLSCREEN, L"Fullscreen", KeybindDisplay(CMD_FULLSCREEN), false, g.fullscreen);
     add(CMD_DEVTOOLS, L"Developer tools", KeybindDisplay(CMD_DEVTOOLS));
     sep();
     add(CMD_SETTINGS, L"Settings", KeybindDisplay(CMD_SETTINGS));
-    if (!g.incognito) {   // updates are handled by the normal window
+    if (!g.incognito) {   // surface update action only when an update is ready or available
         if (g.upd == U_READY) add(CMD_UPDATE_RESTART, L"Restart to update to v" + g.updVersion);
-        if (g.upd == U_AVAILABLE) add(CMD_UPDATE_PAGE, L"Download v" + g.updVersion);
-        add(CMD_UPDATE_CHECK, L"Check for updates", L"", g.upd == U_CHECKING || g.upd == U_DOWNLOADING);
-        if (IsInstalledCopy()) add(CMD_UPDATE_AUTO, L"Automatic updates", L"", false, AutoUpdateEnabled());
+        else if (g.upd == U_AVAILABLE) add(CMD_UPDATE_PAGE, L"Download v" + g.updVersion);
     }
     add(CMD_HELP, L"User guide", KeybindDisplay(CMD_HELP));
     add(CMD_ABOUT, L"About NeonNet");
@@ -6063,7 +6879,7 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
 static void ShowTabMenu(int id, int cssX, int cssY, double ratio) {
     Tab* t = FindTab(id);
     if (!t || GetTickCount64() - g_menuClosedAt < 250) return;
-    enum { T_PIN = 1, T_DUP, T_MUTE, T_CLOSE_OTHERS, T_CLOSE, T_NEW_WS, T_MOVE_BASE = 100 };
+    enum { T_PIN = 1, T_DUP, T_MUTE, T_SPLIT, T_SWAP, T_CLOSE_OTHERS, T_CLOSE, T_NEW_WS, T_MOVE_BASE = 100 };
     std::vector<MenuItem> m;
     auto add = [&](int cmd, std::wstring text, bool disabled = false) {
         MenuItem it; it.cmd = cmd; it.text = std::move(text); it.disabled = disabled;
@@ -6072,6 +6888,14 @@ static void ShowTabMenu(int id, int cssX, int cssY, double ratio) {
     add(T_PIN, t->pinned ? L"Unpin tab" : L"Pin tab");
     add(T_DUP, L"Duplicate tab", DisplayUrl(t).empty());
     add(T_MUTE, t->muted ? L"Unmute tab" : L"Mute tab");
+    if (IsSplitActive() && (id == g.splitLeft || id == g.splitRight)) {
+        add(T_SWAP, L"Swap split panes");
+        add(T_SPLIT, L"Exit split view");
+    } else if (id != g.active) {
+        add(T_SPLIT, L"Split with active tab");
+    } else {
+        add(T_SPLIT, IsSplitActive() ? L"Exit split view" : L"Split view");
+    }
     m.push_back(MenuItem());
     std::vector<int> moveTargets;
     for (const auto& w : g.workspaces) {
@@ -6101,6 +6925,12 @@ static void ShowTabMenu(int id, int cssX, int cssY, double ratio) {
     case T_PIN: SetPinned(id, !FindTab(id)->pinned); break;
     case T_DUP: { Tab* s = FindTab(id); CreateTab(DisplayUrl(s), true, IndexOf(id) + 1); break; }
     case T_MUTE: ToggleMute(id); break;
+    case T_SWAP: SwapSplitPanes(); break;
+    case T_SPLIT:
+        if (IsSplitActive() && (id == g.splitLeft || id == g.splitRight || id == g.active)) ToggleSplitView();
+        else if (id != g.active) SplitWithTab(id);
+        else ToggleSplitView();
+        break;
     case T_NEW_WS: CreateWorkspace(L"WS " + std::to_wstring(g.nextWsId), L"\u26A1", L"#ff2e97", id); break;
     case T_CLOSE_OTHERS: {
         int ws = FindTab(id)->wsId;
@@ -6329,6 +7159,29 @@ static void OnChromeCommand(const std::wstring& msg) {
         if (EngineSelect(arg)) SendState();
     }
     else if (cmd == L"palette") OpenPalette();
+    else if (cmd == L"split") ExecCmd(CMD_SPLIT_VIEW);
+    else if (cmd == L"splitswap") ExecCmd(CMD_SPLIT_SWAP);
+    else if (cmd == L"splitwith") SplitWithTab(_wtoi(arg.c_str()));
+    else if (cmd == L"reader") ExecCmd(CMD_READER_MODE);
+    else if (cmd == L"wa") SetWaOpen(!g.waOpen);
+    else if (cmd == L"darkexempt") ToggleDarkExemptForActive();
+    else if (cmd == L"shield.refresh") { g.lastStateJson.clear(); SendState(); }
+    else if (cmd == L"shield.ads") ExecCmd(CMD_BLOCKADS);
+    else if (cmd == L"shield.trackers") ExecCmd(CMD_BLOCKTRACKERS);
+    else if (cmd == L"shield.siteads" || cmd == L"shield.sitetrackers") {
+        std::string site = ActiveShieldSiteUtf8(a);
+        if (!site.empty()) {
+            {
+                std::lock_guard<std::mutex> lk(g_blockMu);
+                auto& st = (cmd == L"shield.siteads") ? g_adsExempt : g_trackersExempt;
+                if (!st.erase(site)) st.insert(site);
+            }
+            SaveShieldExempt();
+            if (a && a->browser) a->browser->Reload();
+            g.lastStateJson.clear();
+            SendState();
+        }
+    }
     else if (cmd == L"exec") {
         static const struct { const wchar_t* name; int id; } kExec[] = {
             { L"newtab", CMD_NEWTAB }, { L"closetab", CMD_CLOSETAB }, { L"reopen", CMD_REOPEN },
@@ -6336,10 +7189,11 @@ static void OnChromeCommand(const std::wstring& msg) {
             { L"bookmarks_bar", CMD_BOOKMARKS_BAR }, { L"history", CMD_HISTORY }, { L"downloads", CMD_DOWNLOADS },
             { L"extensions", CMD_EXTENSIONS }, { L"settings", CMD_SETTINGS }, { L"perf", CMD_PERFORMANCE },
             { L"find", CMD_FIND }, { L"zoomin", CMD_ZOOMIN }, { L"zoomout", CMD_ZOOMOUT },
-            { L"zoomreset", CMD_ZOOMRESET }, { L"print", CMD_PRINT }, { L"blockads", CMD_BLOCKADS },
-            { L"scan", CMD_SCAN }, { L"forcedark", CMD_FORCEDARK }, { L"proxy", CMD_PROXY_TOGGLE }, { L"fullscreen", CMD_FULLSCREEN },
+            { L"zoomreset", CMD_ZOOMRESET }, { L"print", CMD_PRINT }, { L"blockads", CMD_BLOCKADS }, { L"blocktrackers", CMD_BLOCKTRACKERS },
+            { L"scan", CMD_SCAN }, { L"forcedark", CMD_FORCEDARK }, { L"darkexempt", CMD_DARK_EXEMPT }, { L"proxy", CMD_PROXY_TOGGLE }, { L"fullscreen", CMD_FULLSCREEN },
             { L"devtools", CMD_DEVTOOLS }, { L"caret", CMD_CARET }, { L"pin", CMD_PIN_TAB },
-            { L"mute", CMD_MUTE_TAB }, { L"help", CMD_HELP }, { L"about", CMD_ABOUT },
+            { L"mute", CMD_MUTE_TAB }, { L"split", CMD_SPLIT_VIEW }, { L"splitswap", CMD_SPLIT_SWAP },
+            { L"reader", CMD_READER_MODE }, { L"wa", CMD_WHATSAPP }, { L"help", CMD_HELP }, { L"about", CMD_ABOUT },
             { L"update_check", CMD_UPDATE_CHECK },
         };
         for (const auto& it : kExec) if (arg == it.name) { ExecCmd(it.id); break; }
@@ -6349,16 +7203,23 @@ static void OnChromeCommand(const std::wstring& msg) {
     else if (cmd == L"home") ExecCmd(CMD_HOME);
     else if (cmd == L"dropdown") {
         // address bar suggestions / palette: the toolbar height they need (CSS px, 0 = closed)
-        // arguments: the height, then optionally where a narrower dropdown starts and ends
-        int n = std::max(0, std::min(_wtoi(arg.c_str()), 560)), x0 = 0, x1 = 0;
+        // arguments: bottom, then optionally x0, x1, y0
+        int n = std::max(0, std::min(_wtoi(arg.c_str()), 2400)), x0 = 0, x1 = 0, y0 = 0;
         size_t p1 = arg.find(L'\n');
         if (p1 != std::wstring::npos) {
             size_t p2 = arg.find(L'\n', p1 + 1);
             x0 = std::max(0, _wtoi(arg.c_str() + p1 + 1));
-            if (p2 != std::wstring::npos) x1 = std::max(0, _wtoi(arg.c_str() + p2 + 1));
+            if (p2 != std::wstring::npos) {
+                size_t p3 = arg.find(L'\n', p2 + 1);
+                x1 = std::max(0, _wtoi(arg.c_str() + p2 + 1));
+                if (p3 != std::wstring::npos) y0 = std::max(0, _wtoi(arg.c_str() + p3 + 1));
+            }
         }
-        if (n == 0) x0 = x1 = 0;
-        if (n != g.dropNeed || x0 != g.dropX0 || x1 != g.dropX1) { g.dropNeed = n; g.dropX0 = x0; g.dropX1 = x1; UpdateChromeRegion(); }
+        if (n == 0) x0 = x1 = y0 = 0;
+        if (n != g.dropNeed || x0 != g.dropX0 || x1 != g.dropX1 || y0 != g.dropY0) {
+            g.dropNeed = n; g.dropX0 = x0; g.dropX1 = x1; g.dropY0 = y0;
+            UpdateChromeRegion();
+        }
     }
     else if (cmd == L"siteperm") {
         // "<key>\n<0|1|2>" for the page that is shown (never for an address the toolbar names): 0 ask, 1 allow, 2 block;
@@ -6582,13 +7443,13 @@ reg(function(o,s,t){on=+o===1;step=+s||120;time=+t||400;if(!on)anim=null;});
 function can(el,dy){var cs=getComputedStyle(el);if(!/^(auto|scroll)$/.test(cs.overflowY))return false;
 if(el.scrollHeight<=el.clientHeight+1)return false;
 return dy>0?el.scrollTop+el.clientHeight<el.scrollHeight-1:el.scrollTop>0;}
-function targetFor(el,dy){for(;el&&el!==document.documentElement;el=el.parentElement)if(can(el,dy))return el;
+function targetFor(el,dy){var rd=document.getElementById('__nn_reader_host');if(rd&&rd.shadowRoot){var rw=rd.shadowRoot.querySelector('.nn-wrap');if(rw)return can(rw,dy)?rw:null;}for(;el&&el!==document.documentElement;el=el.parentElement)if(can(el,dy))return el;
 var r=document.scrollingElement||document.documentElement;
 return (dy>0?r.scrollTop+r.clientHeight<r.scrollHeight-1:r.scrollTop>0)?r:null;}
 function run(el,delta){var max=el.scrollHeight-el.clientHeight,cur=el.scrollTop,base=(anim&&anim.el===el)?anim.to:cur;
 var to=Math.max(0,Math.min(max,base+delta));if(to===cur&&!anim)return;
-anim={el:el,from:cur,to:to,t0:performance.now()};if(!raf)raf=requestAnimationFrame(tick);}
-function tick(now){raf=0;if(!anim)return;var p=Math.min(1,(now-anim.t0)/time),e=1-Math.pow(1-p,3);
+anim={el:el,from:cur,to:to,t0:0};if(!raf)raf=requestAnimationFrame(tick);}
+function tick(now){raf=0;if(!anim)return;if(!anim.t0)anim.t0=now;var p=Math.max(0,Math.min(1,(now-anim.t0)/time)),e=1-Math.pow(1-p,3);
 anim.el.scrollTo({top:anim.from+(anim.to-anim.from)*e,behavior:'instant'});
 if(p<1)raf=requestAnimationFrame(tick);else anim=null;}
 // mouse wheel: the page's own handlers run first (this one is on the window, in the bubbling phase), and a page that
@@ -6768,6 +7629,7 @@ public:
         g.creatingChrome = false;
         OpenStartTabs();
         Layout();
+        if (g.hwnd) InvalidateRect(g.hwnd, nullptr, FALSE);
         {
             bool enabledAtBoot = false;
             { std::lock_guard<std::mutex> lk(g_proxyMu); enabledAtBoot = g_proxyEnabled && !g_proxyList.empty(); }
@@ -6856,6 +7718,222 @@ static std::wstring Rate(double bps) {
     return b;
 }
 
+static void WaAppBtnRectsLocal(const RECT& h, RECT out[3]) {
+    int top = h.top + S(4), btm = h.bottom - S(4), x = h.left + S(6);
+    for (int i = 0; i < 3; i++) {
+        out[i] = { x, top, x + S(28), btm };
+        x += S(32);
+    }
+}
+
+static void WaBtnRectsLocal(const RECT& h, RECT out[2]) {
+    int top = h.top + S(4), btm = h.bottom - S(4), r = h.right - S(6);
+    out[1] = { r - S(48), top, r, btm }; r -= S(52);           // MUTE
+    out[0] = { r - S(38), top, r, btm };                       // RLD
+}
+
+static void DrawDockLogo(HDC mem, int idx, const RECT& r, COLORREF col) {
+    int cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+    HPEN p = CreatePen(PS_SOLID, std::max(1, S(1)), col);
+    HGDIOBJ op = SelectObject(mem, p);
+    HGDIOBJ ob = SelectObject(mem, GetStockObject(NULL_BRUSH));
+    if (idx == 0) {
+        // WhatsApp: speech bubble + handset curve
+        int rad = S(6);
+        Ellipse(mem, cx - rad, cy - rad, cx + rad + 1, cy + rad + 1);
+        POINT tail[3] = { { cx - S(5), cy + S(3) }, { cx - S(6), cy + S(6) }, { cx - S(2), cy + S(5) } };
+        Polyline(mem, tail, 3);
+        POINT hs[3] = { { cx - S(2), cy - S(2) }, { cx - S(1), cy + S(1) }, { cx + S(2), cy + S(2) } };
+        Polyline(mem, hs, 3);
+    } else if (idx == 1) {
+        // Instagram: rounded camera + lens + viewfinder dot
+        int d = S(6);
+        RoundRect(mem, cx - d, cy - d, cx + d + 1, cy + d + 1, S(4), S(4));
+        int lr = S(3);
+        Ellipse(mem, cx - lr, cy - lr, cx + lr + 1, cy + lr + 1);
+        HBRUSH db = CreateSolidBrush(col);
+        RECT dot{ cx + S(3), cy - S(4), cx + S(5), cy - S(2) };
+        FillRect(mem, &dot, db);
+        DeleteObject(db);
+    } else {
+        // Discord: visor + two eyes
+        RoundRect(mem, cx - S(6), cy - S(4), cx + S(7), cy + S(4), S(4), S(4));
+        POINT lEar[2] = { { cx - S(5), cy + S(3) }, { cx - S(6), cy + S(5) } };
+        POINT rEar[2] = { { cx + S(5), cy + S(3) }, { cx + S(6), cy + S(5) } };
+        Polyline(mem, lEar, 2);
+        Polyline(mem, rEar, 2);
+        HBRUSH eb = CreateSolidBrush(col);
+        RECT e1{ cx - S(3), cy - S(1), cx - S(1), cy + S(2) };
+        RECT e2{ cx + S(2), cy - S(1), cx + S(4), cy + S(2) };
+        FillRect(mem, &e1, eb);
+        FillRect(mem, &e2, eb);
+        DeleteObject(eb);
+    }
+    SelectObject(mem, ob);
+    SelectObject(mem, op);
+    DeleteObject(p);
+}
+
+static LRESULT CALLBACK WaHeaderProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_ERASEBKGND) return 1;
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps; HDC hdc = BeginPaint(hwnd, &ps);
+        RECT h; GetClientRect(hwnd, &h);
+        HDC mem = CreateCompatibleDC(hdc);
+        HBITMAP bmp = CreateCompatibleBitmap(hdc, std::max(1L, h.right), std::max(1L, h.bottom));
+        HGDIOBJ ob = SelectObject(mem, bmp);
+        HBRUSH hb = CreateSolidBrush(RGB(10, 4, 32));
+        FillRect(mem, &h, hb);
+        DeleteObject(hb);
+        HPEN wpPen = CreatePen(PS_SOLID, 1, Accent());
+        HGDIOBJ op = SelectObject(mem, wpPen);
+        MoveToEx(mem, 0, h.bottom - 1, nullptr); LineTo(mem, h.right, h.bottom - 1);
+        MoveToEx(mem, h.right - 1, 0, nullptr); LineTo(mem, h.right - 1, h.bottom);
+        SelectObject(mem, op);
+        DeleteObject(wpPen);
+        SelectObject(mem, g.font);
+        SetBkMode(mem, TRANSPARENT);
+        RECT appR[3]; WaAppBtnRectsLocal(h, appR);
+        for (int i = 0; i < 3; i++) {
+            bool on = (i == g.dockActive);
+            if (on) {
+                HBRUSH ab = CreateSolidBrush(RGB(27, 11, 61));
+                FillRect(mem, &appR[i], ab);
+                DeleteObject(ab);
+            }
+            COLORREF col = on ? SecondaryAccent() : C_MUTED;
+            HPEN bp = CreatePen(PS_SOLID, 1, col);
+            HGDIOBJ obp = SelectObject(mem, bp);
+            HGDIOBJ obr = SelectObject(mem, GetStockObject(NULL_BRUSH));
+            Rectangle(mem, appR[i].left, appR[i].top, appR[i].right, appR[i].bottom);
+            SelectObject(mem, obr);
+            SelectObject(mem, obp);
+            DeleteObject(bp);
+            DrawDockLogo(mem, i, appR[i], col);
+            if (g.dockUnread[i] > 0) {
+                RECT dot{ appR[i].right - S(5), appR[i].top + S(2), appR[i].right - S(2), appR[i].top + S(5) };
+                HBRUSH db = CreateSolidBrush(Accent());
+                FillRect(mem, &dot, db);
+                DeleteObject(db);
+            }
+        }
+        RECT br[2]; WaBtnRectsLocal(h, br);
+        bool curMuted = g.dockMuted[g.dockActive];
+        const wchar_t* txt[2] = { L"RLD", curMuted ? L"MUTED" : L"MUTE" };
+        bool act[2] = { false, curMuted };
+        for (int i = 0; i < 2; i++) {
+            HPEN bp = CreatePen(PS_SOLID, 1, act[i] ? Accent() : C_MUTED);
+            HGDIOBJ obp = SelectObject(mem, bp);
+            HGDIOBJ obr = SelectObject(mem, GetStockObject(NULL_BRUSH));
+            Rectangle(mem, br[i].left, br[i].top, br[i].right, br[i].bottom);
+            SelectObject(mem, obr);
+            SelectObject(mem, obp);
+            DeleteObject(bp);
+            SetTextColor(mem, act[i] ? Accent() : C_MUTED);
+            DrawTextW(mem, txt[i], -1, &br[i], DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        BitBlt(hdc, 0, 0, h.right, h.bottom, mem, 0, 0, SRCCOPY);
+        SelectObject(mem, ob); DeleteObject(bmp); DeleteDC(mem);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    if (msg == WM_LBUTTONDOWN) {
+        POINT pt{ (short)LOWORD(lp), (short)HIWORD(lp) };
+        RECT h; GetClientRect(hwnd, &h);
+        RECT appR[3]; WaAppBtnRectsLocal(h, appR);
+        for (int i = 0; i < 3; i++) {
+            if (PtInRect(&appR[i], pt)) { SelectDockApp(i); return 0; }
+        }
+        RECT br[2]; WaBtnRectsLocal(h, br);
+        if (PtInRect(&br[0], pt)) { if (g.dockBrowsers[g.dockActive]) g.dockBrowsers[g.dockActive]->Reload(); }
+        else if (PtInRect(&br[1], pt)) {
+            int i = g.dockActive;
+            g.dockMuted[i] = !g.dockMuted[i];
+            if (g.dockBrowsers[i]) g.dockBrowsers[i]->GetHost()->SetAudioMuted(g.dockMuted[i]);
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static LRESULT CALLBACK WaGripProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_ERASEBKGND) return 1;
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps; HDC hdc = BeginPaint(hwnd, &ps);
+        RECT r; GetClientRect(hwnd, &r);
+        HBRUSH bg = CreateSolidBrush(RGB(10, 4, 32));
+        FillRect(hdc, &r, bg);
+        DeleteObject(bg);
+        HPEN p = CreatePen(PS_SOLID, 1, Accent());
+        HGDIOBJ op = SelectObject(hdc, p);
+        MoveToEx(hdc, r.right - 1, 0, nullptr); LineTo(hdc, r.right - 1, r.bottom);
+        SelectObject(hdc, op);
+        DeleteObject(p);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    if (msg == WM_LBUTTONDOWN) {
+        g.dockDragging = true;
+        SetCapture(hwnd);
+        return 0;
+    }
+    if (msg == WM_MOUSEMOVE && g.dockDragging) {
+        POINT pt; GetCursorPos(&pt); ScreenToClient(g.hwnd, &pt);
+        RECT c = ChromeRect();
+        int maxW = std::max(300, (int)std::lround(((c.right - c.left) - S(120)) * 96.0 / std::max(96U, g.dpi)));
+        int newDip = (int)std::lround((pt.x - c.left) * 96.0 / std::max(96U, g.dpi));
+        newDip = std::max(300, std::min(std::min(900, maxW), newDip));
+        if (newDip != g.dockWidthDip) {
+            g.dockWidthDip = newDip;
+            Layout();
+        }
+        return 0;
+    }
+    if (msg == WM_LBUTTONUP && g.dockDragging) {
+        g.dockDragging = false;
+        ReleaseCapture();
+        DWORD v = (DWORD)g.dockWidthDip;
+        RegSetBin(L"DockWidth", REG_DWORD, &v, sizeof(v));
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static void EnsureWaHeader() {
+    if (!g.hwnd) return;
+    if (!g.waHeader) {
+        static bool regH = false;
+        if (!regH) {
+            WNDCLASSW wc{};
+            wc.lpfnWndProc = WaHeaderProc;
+            wc.hInstance = GetModuleHandleW(nullptr);
+            wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+            wc.lpszClassName = L"NeonNetWaHeader";
+            RegisterClassW(&wc);
+            regH = true;
+        }
+        RECT wh = WaHeaderRect();
+        g.waHeader = CreateWindowExW(0, L"NeonNetWaHeader", L"", WS_CHILD,
+            wh.left, wh.top, wh.right - wh.left, wh.bottom - wh.top, g.hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+    }
+    if (!g.waGrip) {
+        static bool regG = false;
+        if (!regG) {
+            WNDCLASSW wc{};
+            wc.lpfnWndProc = WaGripProc;
+            wc.hInstance = GetModuleHandleW(nullptr);
+            wc.hCursor = LoadCursorW(nullptr, IDC_SIZEWE);
+            wc.lpszClassName = L"NeonNetWaGrip";
+            RegisterClassW(&wc);
+            regG = true;
+        }
+        RECT wg = WaGripRect();
+        g.waGrip = CreateWindowExW(0, L"NeonNetWaGrip", L"", WS_CHILD,
+            wg.left, wg.top, wg.right - wg.left, wg.bottom - wg.top, g.hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+    }
+}
+
 static void Paint(HDC hdc) {
     RECT rc; GetClientRect(g.hwnd, &rc);
     int w = rc.right, h = rc.bottom;
@@ -6865,6 +7943,22 @@ static void Paint(HDC hdc) {
     HBRUSH bg = CreateSolidBrush(C_BG); FillRect(mem, &rc, bg); DeleteObject(bg);
 
     if (!g.fullscreen) {
+        if (IsSplitActive()) {
+            RECT leftR{}, rightR{}, divR{};
+            SplitRects(ContentRect(), leftR, rightR, divR);
+            int mid = (divR.left + divR.right) / 2;
+            HPEN dp = CreatePen(PS_SOLID, std::max(1, S(1)), SecondaryAccent());
+            HGDIOBJ op = SelectObject(mem, dp);
+            MoveToEx(mem, mid, divR.top, nullptr);
+            LineTo(mem, mid, divR.bottom);
+            SelectObject(mem, op);
+            DeleteObject(dp);
+            RECT actR = (g.active == g.splitRight) ? rightR : leftR;
+            RECT barR = { actR.left, actR.top, actR.right, actR.top + std::max(2, S(2)) };
+            HBRUSH ab = CreateSolidBrush(Accent());
+            FillRect(mem, &barR, ab);
+            DeleteObject(ab);
+        }
         RECT st = StatusRect();
         HPEN pink = CreatePen(PS_SOLID, 1, Accent());
         HGDIOBJ oldPen = SelectObject(mem, pink);
@@ -6890,6 +7984,7 @@ static void Paint(HDC hdc) {
         else if (g.upd == U_READY) { left = L"UPDATE v" + g.updVersion + L" READY - INSTALLS WHEN NEONNET CLOSES"; lc = C_YELLOW; }
         else if (g.upd == U_AVAILABLE) { left = L"NEONNET v" + g.updVersion + L" IS AVAILABLE - SEE THE MENU"; lc = C_YELLOW; }
         else if (a && !a->errorUrl.empty()) { left = L"SIGNAL LOST"; lc = Accent(); }
+        else if (!g.chrome) { left = L"INITIALIZING..."; lc = C_YELLOW; }
         else if (g.incognito) { left = L"INCOGNITO - HISTORY AND COOKIES ARE NOT SAVED"; lc = C_GREEN; }
         else left = L"LINK STABLE";
 
@@ -6993,6 +8088,7 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         RegSetBin(L"ForceDark", REG_DWORD, &v, sizeof(v));
         g.forceDark = v != 0;
         for (auto& t : g.tabs) if (t->browser && !t->discarded) ApplyForceDark(t->browser);
+        SendState();
     } else if (key == L"savePasswords") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"SavePasswords", REG_DWORD, &v, sizeof(v));
@@ -7312,6 +8408,44 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return HTCLIENT;
     }
     case WM_GETMINMAXINFO: ((MINMAXINFO*)lp)->ptMinTrackSize = { S(640), S(420) }; return 0;
+    case WM_SETCURSOR:
+        if (LOWORD(lp) == HTCLIENT && IsSplitActive() && !g.fullscreen) {
+            POINT pt; GetCursorPos(&pt); ScreenToClient(hwnd, &pt);
+            RECT lR{}, rR{}, dR{}; SplitRects(ContentRect(), lR, rR, dR);
+            if (g.splitDragging || PtInRect(&dR, pt)) {
+                SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
+                return TRUE;
+            }
+        }
+        break;
+    case WM_LBUTTONDOWN:
+        if (IsSplitActive() && !g.fullscreen) {
+            POINT pt{ (short)LOWORD(lp), (short)HIWORD(lp) };
+            RECT lR{}, rR{}, dR{}; SplitRects(ContentRect(), lR, rR, dR);
+            if (PtInRect(&dR, pt)) {
+                g.splitDragging = true;
+                SetCapture(hwnd);
+                return 0;
+            }
+        }
+        break;
+    case WM_MOUSEMOVE:
+        if (g.splitDragging && IsSplitActive()) {
+            POINT pt{ (short)LOWORD(lp), (short)HIWORD(lp) };
+            RECT c = ContentRect();
+            int w = std::max(1, (int)(c.right - c.left));
+            g.splitRatio = std::max(0.25, std::min(0.75, (double)(pt.x - c.left) / (double)w));
+            Layout();
+            return 0;
+        }
+        break;
+    case WM_LBUTTONUP:
+        if (g.splitDragging) {
+            g.splitDragging = false;
+            ReleaseCapture();
+            return 0;
+        }
+        break;
     case WM_SIZE: {
         Layout();
         bool z = IsZoomed(hwnd) != FALSE;
@@ -7489,6 +8623,26 @@ static void StartIncognitoCleanup() {
     }
 }
 
+static void PrefetchCefRuntime() {
+    wchar_t exe[MAX_PATH]{};
+    DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    if (!n || n >= MAX_PATH) return;
+    std::wstring dir(exe, n);
+    size_t slash = dir.find_last_of(L"\\/");
+    if (slash == std::wstring::npos) return;
+    dir.resize(slash);
+    static const wchar_t* files[] = { L"libcef.dll", L"v8_context_snapshot.bin", L"icudtl.dat" };
+    std::vector<char> buf(1024 * 1024);
+    for (const wchar_t* f : files) {
+        HANDLE h = CreateFileW((dir + L"\\" + f).c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+        if (h == INVALID_HANDLE_VALUE) continue;
+        DWORD rd = 0;
+        while (ReadFile(h, buf.data(), (DWORD)buf.size(), &rd, nullptr) && rd > 0) {}
+        CloseHandle(h);
+    }
+}
+
 static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     {   // helper mode: wait for an incognito window's process to end, then delete its session folder
         const wchar_t* key = L"--neonnet-purge-incognito=";
@@ -7530,6 +8684,19 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     crash::Install(crashDir, APP_VERSION, chromiumVer, g.incognito);
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    HANDLE instMutex = nullptr; bool firstInstance = true;
+    if (!g.incognito) {
+        instMutex = CreateMutexW(nullptr, FALSE, L"Local\\NeonNetBrowserSession");
+        firstInstance = !instMutex || GetLastError() != ERROR_ALREADY_EXISTS;
+    }
+    HANDLE incogMutex = nullptr; bool incogOwner = false;
+    if (g.incognito) {
+        incogMutex = CreateMutexW(nullptr, FALSE, L"Local\\NeonNetIncognitoSession");
+        incogOwner = incogMutex && GetLastError() != ERROR_ALREADY_EXISTS;
+    }
+    if (g.incognito ? incogOwner : firstInstance) {
+        std::thread([] { PrefetchCefRuntime(); }).detach();
+    }
     if (g.incognito) {
         std::wstring dataRoot = KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME;
         store::LoadBookmarksReadOnly(dataRoot);
@@ -7559,10 +8726,15 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     EnginesLoad();
     ProxyLoad();
     SpLoad();
-    g.blockAds = RegGetDword(L"BlockAds", 0) != 0;
-    if (g.blockAds) LoadBlocklist();
+    g.blockAds = RegGetDword(L"BlockAds", 1) != 0;
+    g.blockTrackers = RegGetDword(L"BlockTrackers", 1) != 0;
+    LoadShieldExempt();
+    if (g.blockAds || g.blockTrackers) LoadBlocklistAsync();
     { DWORD r = RegGetDword(L"RamLimitMB", 0); g.ramLimitMB = (r >= 512 && r <= 65536) ? r : 0; }
     g.bgLimit = RegGetDword(L"BgLimit", 0) != 0;
+    g.batterySaver = RegGetDword(L"BatterySaver", 0) != 0;
+    g.batteryAuto = RegGetDword(L"BatteryAuto", 0) != 0;
+    { DWORD dw = RegGetDword(L"DockWidth", 500); g.dockWidthDip = (dw >= 300 && dw <= 900) ? (int)dw : 500; }
     { DWORD n = RegGetDword(L"NetLimitKB", 0); g.netLimitKB = (n >= 64 && n <= 102400) ? n : 0; }
     g.netLimitAll = RegGetDword(L"NetLimitAll", 0) != 0;
     {
@@ -7600,7 +8772,6 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     if (!sandbox_info) settings.no_sandbox = true;
     CefString(&settings.root_cache_path) = data;
     CefString(&settings.cache_path) = data + L"\\Default";
-    HANDLE incogMutex = nullptr; bool incogOwner = false;
     std::wstring incogDir = IncognitoDir();
     if (g.incognito) {
         // No cache_path: Chromium keeps cookies, cache and storage in memory only. root_cache_path
@@ -7609,8 +8780,6 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
         // incognito window is handed to the running one as a new tab.
         CefString(&settings.root_cache_path) = incogDir;
         CefString(&settings.cache_path) = L"";
-        incogMutex = CreateMutexW(nullptr, FALSE, L"Local\\NeonNetIncognitoSession");
-        incogOwner = incogMutex && GetLastError() != ERROR_ALREADY_EXISTS;
         if (incogOwner) PurgeDir(incogDir);   // left over from a crash
     }
     // Must stay off: with session cookies persisted CEF switches Chromium to "restore last
@@ -7619,30 +8788,38 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     settings.background_color = CEF_BG;
     settings.log_severity = LOGSEVERITY_DISABLE;
 
+    auto showMainWindow = [&] {
+        WINDOWPLACEMENT wp{ sizeof(wp) };
+        DWORD sz = sizeof(wp);
+        bool restored = false;
+        if (!g.incognito && RegGetValueW(HKEY_CURRENT_USER, REG_KEY, L"Placement", RRF_RT_REG_BINARY, nullptr, &wp, &sz) == ERROR_SUCCESS &&
+            sz == sizeof(wp) && wp.length == sizeof(wp)) {
+            if (wp.showCmd != SW_SHOWMAXIMIZED) wp.showCmd = SW_SHOWNORMAL;
+            SetWindowPlacement(g.hwnd, &wp);
+            restored = true;
+        }
+        SetWindowPos(g.hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        if (!restored) ShowWindow(g.hwnd, nShow == SW_HIDE ? SW_SHOWNORMAL : nShow);
+        UpdateWindow(g.hwnd);
+    };
+    if (g.incognito ? incogOwner : firstInstance) showMainWindow();
+
     if (!CefInitialize(main_args, settings, app.get(), sandbox_info)) {
         // another NeonNet already owns the profile; it got our URL via OnAlreadyRunningAppRelaunch
         DestroyWindow(g.hwnd);
+        if (incogMutex) CloseHandle(incogMutex);
+        if (instMutex) CloseHandle(instMutex);
         return CefGetExitCode();
     }
     crash::Install(crashDir, APP_VERSION, chromiumVer, g.incognito);   // re-assert after Chromium setup
 
-    WINDOWPLACEMENT wp{ sizeof(wp) };
-    DWORD sz = sizeof(wp);
-    bool restored = false;
-    if (!g.incognito && RegGetValueW(HKEY_CURRENT_USER, REG_KEY, L"Placement", RRF_RT_REG_BINARY, nullptr, &wp, &sz) == ERROR_SUCCESS &&
-        sz == sizeof(wp) && wp.length == sizeof(wp)) {
-        if (wp.showCmd != SW_SHOWMAXIMIZED) wp.showCmd = SW_SHOWNORMAL;
-        SetWindowPlacement(g.hwnd, &wp);
-        restored = true;
-    }
-    SetWindowPos(g.hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-    if (!restored) ShowWindow(g.hwnd, nShow == SW_HIDE ? SW_SHOWNORMAL : nShow);
-    UpdateWindow(g.hwnd);
+    if (!IsWindowVisible(g.hwnd)) showMainWindow();
     SetTimer(g.hwnd, TIMER_CLOCK, 15000, nullptr);
     UpdateStartup();
-    SweepTemp();   // copies left over from the last run (a player may have kept one open)
+    SetTimer(g.hwnd, TIMER_TEMP, 500, nullptr);   // sweep leftover temp copies after startup settles
     UpdatePerfTimer();   // the limiters run without the panel
     LoadKeepHosts();
+    LoadDarkExempt();
     SetTimer(g.hwnd, TIMER_AUDIO, 1000, nullptr);
     if (g.netSpeed) { NetSample(); SetTimer(g.hwnd, TIMER_NET, 1000, nullptr); }
 
@@ -7657,6 +8834,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     CefShutdown();
     if (incogOwner) PurgeDir(incogDir);        // normally never reached, see StartIncognitoCleanup()
     if (incogMutex) CloseHandle(incogMutex);
+    if (instMutex) CloseHandle(instMutex);
     if (g.font) DeleteObject(g.font);
     CoUninitialize();
     return 0;

@@ -78,13 +78,20 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 #go{height:30px;padding:0 14px;background:var(--pink);color:var(--bg);font-weight:bold;
   clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
 #go:hover{background:var(--cyan)}
-#scanb{height:28px;padding:0 8px;border:1px solid var(--muted);color:var(--muted)}
-#scanb.on{border-color:var(--cyan);color:var(--cyan)}
 #perfb{height:28px;padding:0 8px;border:1px solid var(--muted);color:var(--muted)}
 #perfb.on{border-color:var(--cyan);color:var(--cyan)}
+#dockb{position:relative;height:28px;padding:0 8px;border:1px solid var(--muted);color:var(--muted);display:inline-flex;align-items:center;gap:5px;font-weight:bold}
+#dockb:hover{border-color:var(--cyan);color:var(--cyan)}
+#dockb.on{border-color:var(--cyan);color:var(--cyan);background:rgba(0,229,255,.12)}
+#dockBadge{display:none;min-width:15px;height:15px;padding:0 4px;border-radius:8px;background:var(--pink);color:var(--bg);font-size:9px;font-weight:bold;line-height:15px;text-align:center}
+#dockBadge.on{display:inline-block}
 #palb{height:28px;padding:0 8px;border:1px solid var(--muted);color:var(--muted);font-weight:bold}
 #palb:hover,#palb.on{border-color:var(--cyan);color:var(--cyan)}
 .tab.discarded{opacity:.55;font-style:italic}
+.tab.split:not(.active){border-color:var(--cyan);background:rgba(0,229,255,.08)}
+.tab .sp{display:none;font-size:9px;font-weight:bold;padding:1px 4px;border:1px solid var(--cyan);color:var(--cyan);flex:none}
+.tab.split .sp{display:inline-block}
+.tab.active.split .sp{border-color:var(--pink);color:var(--pink)}
 #menu{color:var(--cyan);font-size:16px;width:32px;height:28px}
 #menu:hover{background:var(--cyan);color:var(--bg)}
 #bar{position:absolute;left:0;right:0;bottom:0;height:2px;overflow:hidden;opacity:0;transition:opacity .2s}
@@ -100,6 +107,14 @@ html.idle .tab.snd:not(.muted) .spk svg,html.idle .tab.loading .n,html.idle #bar
 #star:hover:not(:disabled){color:var(--yellow)}
 #star.on{color:var(--yellow)}
 #star:disabled{color:#3a2a5e;cursor:default}
+#readb{display:none;height:22px;padding:0 6px;margin-right:2px;border:1px solid rgba(138,111,192,.45);color:var(--muted);font-size:10px;font-weight:bold;letter-spacing:.6px;flex:none}
+#readb.show{display:inline-flex;align-items:center}
+#readb:hover{border-color:var(--cyan);color:var(--cyan)}
+#readb.on{border-color:var(--pink);color:var(--bg);background:var(--pink)}
+#darkb{display:none;height:22px;padding:0 6px;margin-right:2px;border:1px solid var(--cyan);color:var(--cyan);font-size:10px;font-weight:bold;letter-spacing:.6px;flex:none}
+#darkb.show{display:inline-flex;align-items:center}
+#darkb:hover{border-color:var(--pink);color:var(--pink)}
+#darkb.ex{border-color:var(--pink);color:var(--pink);background:rgba(255,46,151,.12);text-decoration:line-through}
 
 /* row 3: bookmarks bar (only while enabled; the host makes the chrome area taller) */
 #bmbar{height:28px;display:none;align-items:center;gap:4px;padding:0 12px;background:var(--bg2);
@@ -299,6 +314,36 @@ body.find #find{display:flex}
 #engPop .eft{display:flex;justify-content:flex-end;margin-top:8px;padding-top:6px;border-top:1px solid rgba(138,111,192,.25)}
 #engPop .eft button{height:24px;padding:0 9px;border:1px solid var(--cyan);color:var(--cyan);font-weight:bold;font-size:10px;letter-spacing:.6px}
 #engPop .eft button:hover{background:var(--cyan);color:var(--bg)}
+#shieldb{position:relative;height:28px;padding:0 8px;border:1px solid var(--muted);color:var(--muted);display:inline-flex;align-items:center;gap:5px;font-weight:bold}
+#shieldb.on{border-color:var(--pink);color:var(--pink);background:rgba(255,46,151,.12)}
+#shieldb:hover{border-color:var(--cyan);color:var(--cyan)}
+#shieldb .scnt{font-size:10px;color:var(--cyan)}
+#shieldPop{position:absolute;z-index:23;display:none;width:336px;background:var(--bg2);border:1px solid var(--pink);border-top:2px solid var(--cyan);
+  box-shadow:0 14px 32px rgba(0,0,0,.78);padding:12px 14px;font-size:12px;color:#e8d8ff}
+#shieldPop.on{display:block}
+#shieldPop .sh-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+#shieldPop .sh-title{color:var(--cyan);font-weight:bold;font-size:11px;letter-spacing:1.2px}
+#shieldPop .sh-acts{display:flex;gap:6px}
+#shieldPop .sh-acts button{color:var(--muted);width:24px;height:24px;display:flex;align-items:center;justify-content:center}
+#shieldPop .sh-acts button:hover{color:var(--pink)}
+#shieldPop .sh-sec{padding:10px 0;border-top:1px solid rgba(138,111,192,.24)}
+#shieldPop .sh-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+#shieldPop .sh-top b{font-size:13px;color:#fff}
+#shieldPop .sh-gtog{height:22px;padding:0 9px;border:1px solid var(--muted);color:var(--muted);font-size:10px;font-weight:bold}
+#shieldPop .sh-gtog.on{border-color:#35ffa0;color:#35ffa0;background:rgba(53,255,160,.1)}
+#shieldPop .sh-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;color:#cbbbe8}
+#shieldPop .sw{width:40px;height:22px;border-radius:11px;border:1px solid var(--muted);background:var(--bg);position:relative;flex:none;transition:all .15s}
+#shieldPop .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:all .15s}
+#shieldPop .sw.on{border-color:var(--pink);background:rgba(255,46,151,.25)}
+#shieldPop .sw.on::after{left:20px;background:var(--pink)}
+#shieldPop .sw:disabled{opacity:.35;cursor:default}
+#shieldPop .sh-bar{padding:7px 10px;background:rgba(255,46,151,.14);border-left:2px solid var(--pink);color:#f3e8ff;font-size:12px}
+#shieldPop .sh-bar b{color:#fff}
+#shieldPop .sh-acc{display:flex;align-items:center;justify-content:space-between;width:100%;margin-top:8px;padding:4px 0;color:#cbbbe8;font-size:11px;font-weight:bold}
+#shieldPop .sh-acc:hover{color:var(--cyan)}
+#shieldPop .sh-list{max-height:110px;overflow-y:auto;margin-top:4px;padding:6px 8px;background:var(--bg);border:1px solid rgba(138,111,192,.25);font-size:11px;color:var(--cyan)}
+#shieldPop .sh-list div{padding:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#shieldPop .sh-note{margin-top:8px;padding:8px 10px;border:1px solid rgba(138,111,192,.28);background:rgba(255,255,255,.02);color:var(--muted);font-size:11px;line-height:1.45}
 </style>
 </head>
 <body>
@@ -316,16 +361,17 @@ body.find #find{display:flex}
   </div>
 </div>
 <div id="nav">
+  <button id="dockb" title="Social Dock - WA / IG / Discord (Ctrl+Alt+W)"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2" width="13" height="12" rx="1"/><line x1="6" y1="2" x2="6" y2="14"/></svg><span>DOCK</span><span id="dockBadge"></span></button>
   <button class="nb" id="back" title="Back (Alt+Left)">[&#9664;]</button>
   <button class="nb" id="fwd" title="Forward (Alt+Right)">[&#9654;]</button>
   <button class="nb" id="reload" title="Reload (F5)">[&#10227;]</button>
   <button class="nb" id="home" title="Home">[&#8962;]</button>
   <button id="vpnBtn" title="Built-in Proxy Tunnel"><span class="vd"></span><span id="vpnTxt">PROXY</span></button>
-  <div id="addr"><button id="lock" title="Site information and permissions"></button><span id="pr">&gt;&gt;</span><button id="engBtn" type="button" title="Search engine (click to switch)"><span id="engTxt">GOOGLE</span> &#9662;</button><input id="url" spellcheck="false" autocomplete="off" placeholder="search the grid or enter address"><button id="star" title="Bookmark this page (Ctrl+D)">&#9734;</button></div>
+  <div id="addr"><button id="lock" title="Site information and permissions"></button><span id="pr">&gt;&gt;</span><button id="engBtn" type="button" title="Search engine (click to switch)"><span id="engTxt">GOOGLE</span> &#9662;</button><input id="url" spellcheck="false" autocomplete="off" placeholder="search the grid or enter address"><button id="darkb" title="Force Dark Mode exception for this site">DARK</button><button id="readb" title="Reader Mode (Ctrl+Alt+R)">READ</button><button id="star" title="Bookmark this page (Ctrl+D)">&#9734;</button></div>
   <button id="go">GO</button>
   <button id="palb" title="Command palette (Ctrl+Shift+P)">&gt;_</button>
   <button id="perfb" title="Performance panel (Ctrl+Shift+M)">PERF</button>
-  <button id="scanb" title="Toggle scanlines">SCAN</button>
+  <button id="shieldb" title="Ad & Tracker Blocker"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.5l5.5 2v4.3c0 3.4-2.3 5.7-5.5 6.7C4.8 13.5 2.5 11.2 2.5 7.8V3.5z"/><path class="sh-chk" d="M5.5 8l1.8 1.8 3.4-3.6"/></svg><span class="scnt" id="shieldCnt"></span></button>
   <button id="menu" title="Menu">&#8801;</button>
   <div id="line"></div>
   <div id="bar"><i></i></div>
@@ -349,6 +395,7 @@ body.find #find{display:flex}
 <div id="wsModal"></div>
 <div id="vpnPop"></div>
 <div id="engPop"></div>
+<div id="shieldPop"></div>
 <div id="pal">
   <div class="pal-hd">
     <span class="pal-p">CMD&gt;&gt;</span>
@@ -356,7 +403,7 @@ body.find #find{display:flex}
     <span class="pal-k">ESC</span>
   </div>
   <div id="palList"></div>
-  <div class="pal-ft"><span>&#8593;&#8595; navigate</span><span>&#9166; run</span><span>&gt; commands only</span><span>Ctrl+Shift+P</span></div>
+  <div class="pal-ft"><span>&#8593;&#8595; navigate</span><span>&#9166; run</span><span>&gt; commands</span><span>@ tabs</span><span>Ctrl+Shift+P</span></div>
 </div>
 <script>
 const $ = s => document.querySelector(s);
@@ -372,7 +419,7 @@ const send = (...a) => {
   queue = queue.then(() => fetch(u, {cache: 'no-store'})).catch(() => {});
 };
 let dropRaf = 0, dropTmr = 0, dropShown = false;
-function syncDrop(need, x0, x1){
+function syncDrop(need, x0, x1, y0){
   cancelAnimationFrame(dropRaf); clearTimeout(dropTmr);
   if(!need){ dropShown = false; send('dropdown', 0); return; }
   let fired = false;
@@ -381,7 +428,8 @@ function syncDrop(need, x0, x1){
     fired = true;
     cancelAnimationFrame(dropRaf); clearTimeout(dropTmr);
     dropShown = true;
-    if(x0 !== undefined && x1 !== undefined) send('dropdown', need, x0, x1);
+    if(x0 !== undefined && x1 !== undefined && y0 !== undefined) send('dropdown', need, x0, x1, y0);
+    else if(x0 !== undefined && x1 !== undefined) send('dropdown', need, x0, x1);
     else send('dropdown', need);
   };
   if(dropShown) dropRaf = requestAnimationFrame(fire);
@@ -457,7 +505,7 @@ function render(){
     if(!d){
       d = document.createElement('div');
       d.dataset.id = t.id;
-      d.innerHTML = '<span class="pin"></span><span class="n"></span><img class="ico" alt="" draggable="false"><span class="spk"></span><span class="t"></span><button class="x" title="Close tab (Ctrl+W)">&#10005;</button>';
+      d.innerHTML = '<span class="pin"></span><span class="n"></span><img class="ico" alt="" draggable="false"><span class="spk"></span><span class="t"></span><span class="sp"></span><button class="x" title="Close tab (Ctrl+W)">&#10005;</button>';
       d.querySelector('.pin').innerHTML = PIN;
       const ico = d.querySelector('.ico');
       ico.onerror = () => d.classList.remove('hasico');
@@ -480,8 +528,14 @@ function render(){
       if(wantIcon) ico.src = wantIcon;
       else ico.removeAttribute('src');
     }
-    d.className = 'tab' + (t.id === state.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.discarded ? ' discarded' : '') +
+    const isSplitL = state.splitActive && t.id === state.splitLeft;
+    const isSplitR = state.splitActive && t.id === state.splitRight;
+    d.className = 'tab' + (t.id === state.active ? ' active' : '') + (isSplitL || isSplitR ? ' split' : '') +
+      (t.loading ? ' loading' : '') + (t.discarded ? ' discarded' : '') +
       (t.audible ? ' snd' : '') + (t.muted ? ' muted' : '') + (t.pinned ? ' pinned' : '') + (wantIcon ? ' hasico' : '');
+    const spEl = d.querySelector('.sp');
+    const spTxt = isSplitL ? 'L' : (isSplitR ? 'R' : '');
+    if(spEl.textContent !== spTxt) spEl.textContent = spTxt;
     if(d.title !== (t.title || '')) d.title = t.title || '';
     const spk = d.querySelector('.spk');
     const wantMuted = t.muted ? '1' : '0';
@@ -510,8 +564,25 @@ function render(){
   $('#reload').innerHTML = state.loading ? '[&#10005;]' : '[&#10227;]';
   $('#reload').title = state.loading ? 'Stop (Esc)' : 'Reload (F5)';
   $('#bar').classList.toggle('on', !!state.loading);
-  $('#scanb').classList.toggle('on', !!state.scan);
   $('#perfb').classList.toggle('on', !!state.perf);
+  $('#dockb').classList.toggle('on', !!state.waOpen);
+  const dockB = $('#dockBadge');
+  const waCnt = state.waUnread || 0;
+  dockB.classList.toggle('on', waCnt > 0);
+  if(waCnt > 0) dockB.textContent = waCnt > 99 ? '99+' : String(waCnt);
+  const readb = $('#readb');
+  readb.classList.toggle('show', !!state.canReader);
+  readb.classList.toggle('on', !!state.readerMode);
+  const darkb = $('#darkb');
+  const showDark = !!(state.forceDark && state.site && state.site.darkHost);
+  darkb.classList.toggle('show', showDark);
+  if(showDark){
+    const ex = !!state.site.darkExempt;
+    darkb.classList.toggle('ex', ex);
+    darkb.textContent = ex ? 'DARK OFF' : 'DARK';
+    darkb.title = ex ? ('Force Dark excluded for ' + state.site.darkHost + ' (click to re-enable)')
+                     : ('Force Dark active on ' + state.site.darkHost + ' (click to exclude)');
+  }
   document.documentElement.classList.toggle('incog', !!state.incognito);
   document.documentElement.style.setProperty('--scan', state.scan ? 'block' : 'none');
   document.documentElement.style.setProperty('--cutline', state.max ? 'none' : 'block');
@@ -533,6 +604,7 @@ function render(){
   $('#fcase').classList.toggle('on', !!state.findCase);
   updateVpnBtn();
   updateEngBtn();
+  updateShieldBtn();
 }
 
 // --- site information and permissions: the lock icon at the left of the address bar ---
@@ -562,7 +634,7 @@ function closeSite(){
 }
 function openSite(){
   const s = siteShown(); if(!s) return;
-  closeSug(); closeBmDrop(); closePal(false); closeVpn(); closeEng(); siteOpen = true; siteOrigin = s.origin; siteChanged = false; renderSite();
+  closeSug(); closeBmDrop(); closePal(false); closeVpn(); closeEng(); closeShield(); siteOpen = true; siteOrigin = s.origin; siteChanged = false; renderSite();
 }
 function renderSite(){
   const s = siteShown(); if(!s){ closeSite(); return; }
@@ -579,6 +651,19 @@ function renderSite(){
     s.kind === 'insecure' ? 'Connection is not secure (http). Other people on the network can read and change what you exchange with this site.' :
     'Connection is secure (https).'));
   if(s.perms){
+    if(state.forceDark && s.darkHost){
+      sitePanel.appendChild(mk('h3', '', 'FORCE DARK MODE'));
+      const drow = mk('div', 'pm');
+      drow.appendChild(mk('span', 'l', s.darkHost));
+      const dseg = mk('span', 'seg');
+      [['ON', false, ''], ['EXCLUDED', true, 'blk']].forEach(([name, exVal, cls]) => {
+        const b = mk('button', (!!s.darkExempt === exVal ? 'on ' : '') + cls, name);
+        b.onclick = () => { if(!!s.darkExempt !== exVal) send('darkexempt'); };
+        dseg.appendChild(b);
+      });
+      drow.appendChild(dseg);
+      sitePanel.appendChild(drow);
+    }
     sitePanel.appendChild(mk('h3', '', 'PERMISSIONS FOR THIS SITE'));
     let any = false;
     s.perms.forEach(p => {
@@ -627,7 +712,7 @@ window.__nn = m => {
   else if(m.type === 'focusFind'){ fq.focus(); fq.select(); }
   else if(m.type === 'findResult'){ showCount(m.count, m.active); }
   else if(m.type === 'wsEdit'){ openWsModal(m.id || 0); }
-  else if(m.type === 'closeDrops'){ closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closeVpn(); closeEng(); closePal(false); }
+  else if(m.type === 'closeDrops'){ closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closeVpn(); closeEng(); closeShield(); closePal(false); }
   else if(m.type === 'togglePalette'){ if(palOpen) closePal(true); else openPal(m.data || {}); }
 };
 
@@ -1137,7 +1222,7 @@ function renderVpn(){
 
 vpnBtn.onclick = () => {
   if(vpnOpen) closeVpn();
-  else { closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closePal(false); closeEng(); vpnOpen = true; renderVpn(); }
+  else { closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closePal(false); closeEng(); closeShield(); vpnOpen = true; renderVpn(); }
 };
 document.addEventListener('mousedown', e => { if(vpnOpen && !vpnPop.contains(e.target) && !vpnBtn.contains(e.target)) closeVpn(); });
 document.addEventListener('keydown', e => { if(e.key === 'Escape' && vpnOpen){ e.preventDefault(); closeVpn(); } });
@@ -1201,15 +1286,105 @@ function renderEng(){
 }
 engBtn.onclick = () => {
   if(engOpen) closeEng();
-  else { closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closePal(false); closeVpn(); engOpen = true; renderEng(); }
+  else { closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closePal(false); closeVpn(); closeShield(); engOpen = true; renderEng(); }
 };
 document.addEventListener('mousedown', e => { if(engOpen && !engPop.contains(e.target) && !engBtn.contains(e.target)) closeEng(); });
 document.addEventListener('keydown', e => { if(e.key === 'Escape' && engOpen){ e.preventDefault(); closeEng(); } });
 window.addEventListener('blur', closeEng);
 
+// ---- Opera GX-style Ad & Tracker Shield ---------------------------------------------
+const shieldBtn = $('#shieldb'), shieldPop = $('#shieldPop'), shieldCnt = $('#shieldCnt');
+let shieldOpen = false, shieldNeed = 0, shieldListOpen = false;
+
+function updateShieldBtn(){
+  const s = state.shield || {};
+  const active = (s.adsOn && !s.siteAdsOff) || (s.trackersOn && !s.siteTrackersOff);
+  shieldBtn.classList.toggle('on', !!active);
+  const tot = (s.ads || 0) + (s.trackers || 0);
+  shieldCnt.textContent = tot > 0 ? (tot > 99 ? '99+' : String(tot)) : '';
+  shieldBtn.title = active ? ('Shield active (' + tot + ' blocked on this page)') : 'Shield disabled';
+  if(shieldOpen) renderShield();
+}
+function closeShield(){
+  if(!shieldOpen) return;
+  shieldOpen = false; shieldPop.classList.remove('on'); shieldPop.textContent = '';
+  if(shieldNeed){ shieldNeed = 0; syncDrop(0); }
+}
+function renderShield(){
+  const s = state.shield || {};
+  const mk = (tag, cls, txt) => { const e = document.createElement(tag); if(cls) e.className = cls; if(txt !== undefined) e.textContent = txt; return e; };
+  shieldPop.textContent = '';
+  const hd = mk('div', 'sh-hd');
+  hd.appendChild(mk('span', 'sh-title', s.host ? ('SHIELD // ' + s.host.toUpperCase()) : 'SHIELD PROTECTION'));
+  const acts = mk('div', 'sh-acts');
+  const gear = mk('button', '', '⚙'); gear.title = 'Blocker settings'; gear.onclick = () => { closeShield(); send('opentab', NN_BASE + 'settings.html#sec-ext'); };
+  const cls = mk('button', '', '✕'); cls.title = 'Close'; cls.onclick = closeShield;
+  acts.append(gear, cls); hd.appendChild(acts); shieldPop.appendChild(hd);
+
+  const addSec = (title, gOn, gCmd, siteOff, sCmd, count, noun) => {
+    const sec = mk('div', 'sh-sec');
+    const top = mk('div', 'sh-top');
+    top.appendChild(mk('b', '', title));
+    const sw = mk('button', 'sw' + (gOn ? ' on' : ''), '');
+    sw.title = gOn ? ('Turn OFF ' + title) : ('Turn ON ' + title);
+    sw.onclick = () => send(gCmd);
+    top.appendChild(sw);
+    sec.appendChild(top);
+
+    const row = mk('div', 'sh-row');
+    row.appendChild(mk('span', '', siteOff ? 'Disabled for this site' : 'Enabled for this site'));
+    const st = mk('button', 'sh-gtog' + (!siteOff ? ' on' : ''), siteOff ? 'EXCLUDED' : 'SITE ON');
+    st.disabled = !s.host;
+    st.title = s.host ? ('Toggle for ' + s.host) : 'Open a website to configure per-site exception';
+    st.onclick = () => send(sCmd);
+    row.appendChild(st);
+    sec.appendChild(row);
+
+    const bar = mk('div', 'sh-bar');
+    const b = mk('b', '', count + ' ' + noun + (count === 1 ? '' : 's') + ' blocked');
+    bar.append(b, document.createTextNode(' on this page'));
+    sec.appendChild(bar);
+    return sec;
+  };
+
+  shieldPop.appendChild(addSec('Block Ads', !!s.adsOn, 'shield.ads', !!s.siteAdsOff, 'shield.siteads', s.ads || 0, 'ad'));
+  const trkSec = addSec('Block Trackers', !!s.trackersOn, 'shield.trackers', !!s.siteTrackersOff, 'shield.sitetrackers', s.trackers || 0, 'tracker');
+
+  const trkList = Array.isArray(s.trackerList) ? s.trackerList : [];
+  const acc = mk('button', 'sh-acc');
+  acc.append(mk('span', '', 'List of blocked trackers (' + trkList.length + ')'), mk('span', '', shieldListOpen ? '▴' : '▾'));
+  acc.onclick = () => { shieldListOpen = !shieldListOpen; renderShield(); };
+  trkSec.appendChild(acc);
+  if(shieldListOpen){
+    const box = mk('div', 'sh-list');
+    if(!trkList.length) box.appendChild(mk('div', '', 'No trackers blocked on this page yet.'));
+    else trkList.forEach(h => box.appendChild(mk('div', '', h)));
+    trkSec.appendChild(box);
+  }
+  shieldPop.appendChild(trkSec);
+  shieldPop.appendChild(mk('div', 'sh-note', 'Blocking content can cause some websites to not work properly.'));
+
+  const r = shieldBtn.getBoundingClientRect();
+  const w = Math.min(336, Math.max(240, window.innerWidth - 16));
+  const left = Math.max(8, Math.min(window.innerWidth - w - 8, Math.round(r.right - w)));
+  shieldPop.style.left = left + 'px';
+  shieldPop.style.top = (Math.ceil(r.bottom) + 6) + 'px';
+  shieldPop.style.width = w + 'px';
+  shieldPop.classList.add('on');
+  const need = Math.ceil(shieldPop.getBoundingClientRect().bottom) + 8;
+  if(need !== shieldNeed){ shieldNeed = need; syncDrop(need, Math.floor(left), Math.ceil(left + w)); }
+}
+shieldBtn.onclick = () => {
+  if(shieldOpen) closeShield();
+  else { closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closePal(false); closeVpn(); closeEng(); shieldOpen = true; renderShield(); send('shield.refresh'); }
+};
+document.addEventListener('mousedown', e => { if(shieldOpen && !shieldPop.contains(e.target) && !shieldBtn.contains(e.target)) closeShield(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && shieldOpen){ e.preventDefault(); closeShield(); } });
+window.addEventListener('blur', closeShield);
+
 // ---- Command Palette (Ctrl+Shift+P / Ctrl+Shift+K) -----------------------------------
 const pal = $('#pal'), palIn = $('#palIn'), palList = $('#palList');
-let palOpen = false, palData = {}, palItems = [], palSel = 0, palNeed = 0, palReq = 0, palTimer = 0, palSug = [], palOpenedAt = 0;
+let palOpen = false, palData = {}, palItems = [], palSel = 0, palNeed = 0, palTop = 0, palReq = 0, palTimer = 0, palSug = [], palOpenedAt = 0;
 
 function buildPalCommands(d){
   const k = (id, fb) => (d.keys && id in d.keys) ? d.keys[id] : fb;
@@ -1219,13 +1394,19 @@ function buildPalCommands(d){
     d.canReopen ? { kind:'CMD', title:'Reopen closed tab', sub:'Restore the most recently closed tab', aliases:'undo close restore tab', badge:k('reopen','Ctrl+Shift+T'), run:() => send('exec', 'reopen') } : null,
     d.hasActive ? { kind:'CMD', title: d.activePinned ? 'Unpin current tab' : 'Pin current tab', sub:'Lock or unlock active tab on the left', aliases:'sematkan lock tab', badge: d.activePinned ? 'ON' : k('pin',''), badgeOn: !!d.activePinned, run:() => send('exec', 'pin') } : null,
     d.hasActive ? { kind:'CMD', title: d.activeMuted ? 'Unmute current tab' : 'Mute current tab', sub:'Silence or restore audio on active tab', aliases:'silence audio sound suara bisu', badge: d.activeMuted ? 'MUTED' : k('mute',''), badgeOn: !!d.activeMuted, run:() => send('exec', 'mute') } : null,
+    { kind:'CMD', title: d.splitActive ? 'Exit Split View' : 'Toggle Split View', sub:'View 2 tabs side by side in the same window', aliases:'split view dual pane side by side berdampingan bagi dua', badge: d.splitActive ? 'ON' : k('split','Ctrl+Alt+S'), badgeOn: !!d.splitActive, run:() => send('exec', 'split') },
+    d.splitActive ? { kind:'CMD', title:'Swap Split View Panes', sub:'Swap left and right tabs in Split View', aliases:'swap tukar split pane kiri kanan', badge:k('splitswap',''), run:() => send('exec', 'splitswap') } : null,
+    d.canReader ? { kind:'CMD', title: d.readerMode ? 'Exit Reader Mode' : 'Toggle Reader Mode', sub:'Clean distraction-free article view with NeonNet typography', aliases:'reader mode baca artikel clean view tipografi', badge: d.readerMode ? 'ON' : k('reader','Ctrl+Alt+R'), badgeOn: !!d.readerMode, run:() => send('exec', 'reader') } : null,
     d.canStar ? { kind:'CMD', title: d.starred ? 'Remove bookmark' : 'Bookmark this page', sub:'Save or remove current URL', aliases:'star favorite save page', badge:k('bookmark','Ctrl+D'), badgeOn: !!d.starred, run:() => send('exec', 'bookmark') } : null,
     { kind:'CMD', title:'Toggle Force Dark Mode', sub:'Auto dark mode on light websites (Blink)', aliases:'dark theme night mode gelap', badge: d.forceDark ? 'ON' : (k('forcedark','') || 'OFF'), badgeOn: !!d.forceDark, run:() => send('exec', 'forcedark') },
+    (d.forceDark && d.darkHost) ? { kind:'CMD', title: d.darkExempt ? ('Force Dark: Re-enable for ' + d.darkHost) : ('Force Dark: Exclude ' + d.darkHost), sub:'Per-site exception for Force Dark Mode', aliases:'exclude whitelist exception dark mode situs kecualikan', badge: d.darkExempt ? 'EXCLUDED' : 'ACTIVE', badgeOn: !d.darkExempt, run:() => send('exec', 'darkexempt') } : null,
     { kind:'CMD', title:'Toggle Proxy Tunnel', sub: d.proxyName ? ('Profile: ' + d.proxyName) : 'Route NeonNet traffic via configured proxy', aliases:'vpn socks5 https tunnel proxy switch', badge: d.proxyOn ? 'ON' : (k('proxy','') || 'OFF'), badgeOn: !!d.proxyOn, run:() => send('exec', 'proxy') },
-    { kind:'CMD', title:'Toggle Block trackers & ads', sub:'EasyList / EasyPrivacy filter', aliases:'adblock adblocker privacy ublock filter iklan', badge: d.blockAds ? 'ON' : (k('blockads','') || 'OFF'), badgeOn: !!d.blockAds, run:() => send('exec', 'blockads') },
+    { kind:'CMD', title:'Toggle Ad Blocker', sub:'Block banner & video ads across websites', aliases:'adblock adblocker ublock filter iklan', badge: d.blockAds ? 'ON' : (k('blockads','') || 'OFF'), badgeOn: !!d.blockAds, run:() => send('exec', 'blockads') },
+    { kind:'CMD', title:'Toggle Tracker Blocker', sub:'Block analytics, telemetry & tracking scripts', aliases:'tracker privacy analytics telemetry pelacak', badge: k('blocktrackers',''), run:() => send('exec', 'blocktrackers') },
     { kind:'CMD', title:'Toggle Scanlines', sub:'CRT visual overlay effect', aliases:'crt retro effect', badge: d.scan ? 'ON' : (k('scan','') || 'OFF'), badgeOn: !!d.scan, run:() => send('exec', 'scan') },
     { kind:'CMD', title:'Toggle Bookmarks bar', sub:'Show or hide bookmarks strip', aliases:'favorites strip', badge:k('bookmarks_bar','Ctrl+Shift+B'), badgeOn: !!d.bookmarksBar, run:() => send('exec', 'bookmarks_bar') },
     { kind:'CMD', title:'Toggle Performance panel', sub:'CPU, RAM limiter & network throttling', aliases:'ram cpu memory limiter network throttle fps', badge:k('perf','Ctrl+Shift+M'), badgeOn: !!d.perf, run:() => send('exec', 'perf') },
+    { kind:'CMD', title:'Toggle Social Dock', sub:'Open or hide side dock (WhatsApp, Instagram, Discord)', aliases:'whatsapp wa instagram ig discord social dock messenger chat', badge: d.waOpen ? 'OPEN' : k('wa','Ctrl+Alt+W'), badgeOn: !!d.waOpen, run:() => send('exec', 'wa') },
     { kind:'CMD', title:'New workspace', sub:'Create a new workspace group', aliases:'create workspace group tab group', badge:'', run:() => setTimeout(() => openWsModal(0), 20) },
     { kind:'CMD', title: d.incognito ? 'New incognito tab' : 'New incognito window', sub:'Browse without saving history or cookies', aliases:'private browsing secret mode samaran', badge:k('incognito','Ctrl+Shift+N'), run:() => send('exec', 'incognito') },
     { kind:'CMD', title:'Settings', sub:'Search, DNS/DoH, theme accent, keybindings, proxy, security', aliases:'preferences options config pengaturan setelan', badge:k('settings','Ctrl+,'), run:() => send('exec', 'settings') },
@@ -1291,21 +1472,30 @@ function palScore(q, text){
 function layoutPal(){
   if(!palOpen) return;
   const barEl = state.find ? $('#find') : state.bookmarksBar ? $('#bmbar') : $('#nav');
-  const top = Math.ceil(barEl.getBoundingClientRect().bottom) + 10;
-  const w = Math.min(600, Math.max(280, window.innerWidth - 32));
+  const barBottom = Math.ceil(barEl.getBoundingClientRect().bottom);
+  const w = Math.min(620, Math.max(300, window.innerWidth - 32));
   const left = Math.max(8, Math.round((window.innerWidth - w) / 2));
   pal.style.left = left + 'px';
-  pal.style.top = top + 'px';
   pal.style.width = w + 'px';
-  const need = Math.min(556, Math.ceil(pal.getBoundingClientRect().bottom) + 10);
-  if(need !== palNeed){ palNeed = need; syncDrop(need, Math.floor(left), Math.ceil(left + w)); }
+  pal.style.top = '0px';
+  const palH = pal.getBoundingClientRect().height || 260;
+  const maxTop = Math.max(barBottom + 24, window.innerHeight - palH - 24);
+  const top = Math.min(maxTop, Math.max(barBottom + 28, Math.round((window.innerHeight - Math.max(palH, 340)) / 2)));
+  pal.style.top = top + 'px';
+  const rect = pal.getBoundingClientRect();
+  const need = Math.ceil(rect.bottom) + 4;
+  if(need !== palNeed || top !== palTop){
+    palNeed = need; palTop = top;
+    syncDrop(need, Math.floor(rect.left) - 2, Math.ceil(rect.right) + 2, Math.floor(rect.top) - 2);
+  }
 }
 
 function renderPal(){
   if(!palOpen) return;
   const raw = palIn.value.trim();
   const cmdOnly = raw.startsWith('>');
-  const q = (cmdOnly ? raw.slice(1) : raw).trim().toLowerCase();
+  const tabOnly = !cmdOnly && raw.startsWith('@');
+  const q = ((cmdOnly || tabOnly) ? raw.slice(1) : raw).trim().toLowerCase();
   const out = [];
 
   if(!cmdOnly){
@@ -1316,41 +1506,47 @@ function renderPal(){
       if(!sc) continue;
       const flags = [];
       if(t.wsName) flags.push(t.wsName);
+      if(t.split) flags.push('SPLIT ' + t.split);
       if(t.pinned) flags.push('PIN');
+      if(t.discarded) flags.push('SLEEP');
       if(t.muted) flags.push('MUTED');
       else if(t.audible) flags.push('AUDIO');
       tabMatches.push({
         score: sc + (t.active ? 0.5 : 0),
         kind:'TAB', cls:'tab', title: t.title || 'New tab', sub: shownUrl(t.url) || 'neonnet://newtab',
-        badge: t.active ? 'ACTIVE' : flags.join(' · '), badgeOn: t.active,
+        badge: t.active ? 'ACTIVE' : flags.join(' · '), badgeOn: t.active || !!t.split,
         run: () => send('select', t.id)
       });
     }
     tabMatches.sort((a, b) => b.score - a.score);
-    out.push(...tabMatches.slice(0, q ? 8 : 5));
+    out.push(...tabMatches.slice(0, tabOnly ? 24 : (q ? 10 : 6)));
 
-    for(const w of (state.workspaces || [])){
-      const sc = palScore(q, w.name + ' workspace');
-      if(!sc || (!q && w.id === state.activeWs)) continue;
-      out.push({
-        kind:'WS', cls:'ws', title: 'Workspace: ' + w.name, sub: (w.count || 0) + ' tab' + (w.count === 1 ? '' : 's'),
-        badge: w.id === state.activeWs ? 'CURRENT' : 'SWITCH', badgeOn: w.id === state.activeWs,
-        run: () => send('wsswitch', w.id)
-      });
+    if(!tabOnly){
+      for(const w of (state.workspaces || [])){
+        const sc = palScore(q, w.name + ' workspace');
+        if(!sc || (!q && w.id === state.activeWs)) continue;
+        out.push({
+          kind:'WS', cls:'ws', title: 'Workspace: ' + w.name, sub: (w.count || 0) + ' tab' + (w.count === 1 ? '' : 's'),
+          badge: w.id === state.activeWs ? 'CURRENT' : 'SWITCH', badgeOn: w.id === state.activeWs,
+          run: () => send('wsswitch', w.id)
+        });
+      }
     }
   }
 
-  const cmdMatches = [];
-  for(const c of buildPalCommands(palData)){
-    const scAll = palScore(q, c.title + ' ' + c.sub + ' ' + (c.aliases || ''));
-    if(!scAll) continue;
-    const scTitle = q ? palScore(q, c.title) * 1.2 : 1;
-    cmdMatches.push({ score: Math.max(scTitle, scAll), kind:'CMD', cls:'cmd', title: c.title, sub: c.sub, badge: c.badge, badgeOn: c.badgeOn, run: c.run });
+  if(!tabOnly){
+    const cmdMatches = [];
+    for(const c of buildPalCommands(palData)){
+      const scAll = palScore(q, c.title + ' ' + c.sub + ' ' + (c.aliases || ''));
+      if(!scAll) continue;
+      const scTitle = q ? palScore(q, c.title) * 1.2 : 1;
+      cmdMatches.push({ score: Math.max(scTitle, scAll), kind:'CMD', cls:'cmd', title: c.title, sub: c.sub, badge: c.badge, badgeOn: c.badgeOn, run: c.run });
+    }
+    cmdMatches.sort((a, b) => b.score - a.score);
+    out.push(...cmdMatches.slice(0, cmdOnly ? 24 : (q ? 12 : 7)));
   }
-  cmdMatches.sort((a, b) => b.score - a.score);
-  out.push(...cmdMatches.slice(0, cmdOnly ? 24 : (q ? 12 : 7)));
 
-  if(!cmdOnly && q.length >= 2){
+  if(!cmdOnly && !tabOnly && q.length >= 2){
     for(const s of palSug){
       out.push({
         kind: s.bookmark ? 'BM' : 'HIS', cls: s.bookmark ? 'bm' : 'his',
@@ -1360,7 +1556,7 @@ function renderPal(){
     }
   }
 
-  if(!cmdOnly && q && !/^>/.test(raw)){
+  if(!cmdOnly && !tabOnly && q && !/^[>@]/.test(raw)){
     const u = toUrl(raw);
     if(u) out.push({ kind:'WEB', cls:'tab', title: raw, sub: u, badge:'GO', run: () => send('navigate', u) });
   }
@@ -1400,7 +1596,7 @@ function closePal(focusPg){
   palOpen = false; palItems = []; palSug = []; palSel = 0;
   pal.classList.remove('on'); palList.textContent = ''; palIn.value = '';
   $('#palb').classList.remove('on');
-  if(palNeed){ palNeed = 0; syncDrop(0); }
+  if(palNeed){ palNeed = 0; palTop = 0; syncDrop(0); }
   if(focusPg) send('focusPage');
 }
 
@@ -1412,7 +1608,7 @@ function execPal(i){
 }
 
 function openPal(data){
-  closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closeVpn(); closeEng();
+  closeSug(); closeSite(); closeBmDrop(); closeWsModal(); closeVpn(); closeEng(); closeShield();
   palData = data || {};
   palSug = []; palSel = 0;
   palIn.value = '';
@@ -1429,7 +1625,7 @@ palIn.addEventListener('input', () => {
   palSel = 0; clearTimeout(palTimer); palSug = [];
   renderPal();
   const raw = palIn.value.trim();
-  if(!raw || raw.startsWith('>') || raw.length < 2) return;
+  if(!raw || raw.startsWith('>') || raw.startsWith('@') || raw.length < 2) return;
   const my = ++palReq;
   palTimer = setTimeout(() => {
     fetch('/suggest?q=' + encodeURIComponent(raw), {cache:'no-store'}).then(r => r.json()).then(list => {
@@ -1484,7 +1680,9 @@ $('#plus').onclick = () => send('newtab');
 $('#min').onclick = () => send('min');
 $('#max').onclick = () => send('max');
 $('#close').onclick = () => send('quit');
-$('#scanb').onclick = () => send('scan');
+$('#dockb').onclick = () => send('wa');
+$('#readb').onclick = () => send('reader');
+$('#darkb').onclick = () => send('darkexempt');
 $('#perfb').onclick = () => send('perf');
 $('#menu').onclick = () => { const r = $('#menu').getBoundingClientRect(); send('menu', Math.round(document.documentElement.clientWidth - r.right), Math.round(r.bottom), window.devicePixelRatio); };
 document.addEventListener('contextmenu', e => { if(e.target !== url && e.target !== fq) e.preventDefault(); });
