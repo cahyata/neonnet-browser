@@ -157,16 +157,26 @@ html.idle .tab.snd:not(.muted) .spk svg,html.idle .tab.loading .n,html.idle #bar
 #dlPop .dl-title{color:var(--cyan);font-weight:bold;font-size:11px;letter-spacing:1.1px}
 #dlPop .dl-list{max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
 #dlPop .dl-item{padding:7px 8px;background:var(--bg);border:1px solid rgba(138,111,192,.28)}
-#dlPop .dl-name{color:#fff;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#dlPop .dl-name-row{display:flex;align-items:center;gap:6px;min-width:0}
+#dlPop .dl-name{flex:1;color:#fff;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#dlPop .dl-cat{flex:none;padding:1px 5px;border:1px solid rgba(138,111,192,.55);color:var(--muted);font-size:9px;letter-spacing:.6px;text-transform:uppercase}
+#dlPop .dl-turbo{flex:none;padding:1px 5px;border:1px solid var(--yellow);color:var(--yellow);font-size:9px;font-weight:bold;letter-spacing:.6px}
 #dlPop .dl-sub{color:var(--muted);font-size:10px;margin-top:2px}
+#dlPop .dl-bar{height:4px;background:var(--bg2);margin-top:5px;border:1px solid rgba(0,229,255,.35);overflow:hidden}
+#dlPop .dl-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--pink),var(--cyan))}
+#dlPop .dl-segs{display:flex;gap:2px;margin-top:3px;height:3px}
+#dlPop .dl-seg{flex:1;background:var(--bg);border:1px solid rgba(255,214,0,.3);overflow:hidden}
+#dlPop .dl-seg i{display:block;height:100%;width:0;background:var(--yellow)}
 #dlPop .dl-acts{display:flex;gap:6px;margin-top:6px}
 #dlPop .dl-acts button{height:22px;padding:0 7px;border:1px solid rgba(0,229,255,.45);color:var(--cyan);font-size:10px;font-weight:bold}
 #dlPop .dl-acts button:hover{background:var(--cyan);color:var(--bg)}
 #dlPop .dl-acts button.can{border-color:var(--pink);color:var(--pink)}
 #dlPop .dl-acts button.can:hover{background:var(--pink);color:var(--bg)}
-#dlPop .dl-ft{margin-top:8px;padding-top:8px;border-top:1px solid rgba(138,111,192,.25);display:flex;justify-content:flex-end}
+#dlPop .dl-ft{margin-top:8px;padding-top:8px;border-top:1px solid rgba(138,111,192,.25);display:flex;justify-content:space-between;gap:6px}
 #dlPop .dl-ft button{height:24px;padding:0 10px;border:1px solid var(--pink);color:var(--pink);font-size:10px;font-weight:bold}
 #dlPop .dl-ft button:hover{background:var(--pink);color:var(--bg)}
+#dlPop .dl-ft button.dir{border-color:var(--cyan);color:var(--cyan)}
+#dlPop .dl-ft button.dir:hover{background:var(--cyan);color:var(--bg)}
 
 /* row 3: bookmarks bar (only while enabled; the host makes the chrome area taller) */
 #bmbar{height:28px;display:none;align-items:center;gap:4px;padding:0 12px;background:var(--bg2);
@@ -1606,7 +1616,7 @@ window.addEventListener('blur', closeZoom);
 
 // ---- Toolbar Downloads Popover -------------------------------------------------------
 const dlBtn = $('#dlb'), dlPop = $('#dlPop'), dlPct = $('#dlPct'), dlProg = $('#dlProg');
-let dlOpen = false, dlNeed = 0, lastDlSeq = -1;
+let dlOpen = false, dlNeed = 0, lastDlSeq = -1, dlBusy = false, dlListEl = null, dlSig = '', dlRows = new Map();
 
 function updateDlBtn(){
   const act = !!state.dlActive;
@@ -1620,6 +1630,7 @@ function closeDl(){
   if(!dlOpen) return;
   dlOpen = false; dlBtn.classList.remove('on');
   dlPop.classList.remove('on'); dlPop.textContent = '';
+  dlListEl = null; dlSig = ''; dlRows.clear();
   if(dlNeed){ dlNeed = 0; syncDrop(0); }
 }
 function fmtBytes(n){
@@ -1629,65 +1640,146 @@ function fmtBytes(n){
   if(n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
   return (n / 1073741824).toFixed(2) + ' GB';
 }
-async function renderDl(){
+function ensureDlShell(){
+  if(dlListEl) return;
   const mk = (tag, cls, txt) => { const e = document.createElement(tag); if(cls) e.className = cls; if(txt !== undefined) e.textContent = txt; return e; };
-  let items = [];
-  try {
-    const r = await fetch('/api/downloads', {cache:'no-store'});
-    if(r.ok) items = await r.json();
-  } catch {}
-  if(!dlOpen) return;
   dlPop.textContent = '';
   const hd = mk('div', 'dl-hd');
   hd.appendChild(mk('span', 'dl-title', 'RECENT DOWNLOADS'));
   const cls = mk('button', '', '✕'); cls.style.color = 'var(--muted)'; cls.onclick = closeDl;
   hd.appendChild(cls);
   dlPop.appendChild(hd);
-  const list = mk('div', 'dl-list');
-  const top5 = (Array.isArray(items) ? items : []).slice(0, 6);
-  if(!top5.length){
-    list.appendChild(mk('div', 'dl-sub', 'No downloads yet.'));
-  } else {
-    top5.forEach(d => {
-      const it = mk('div', 'dl-item');
-      it.appendChild(mk('div', 'dl-name', d.name || d.url || 'Download'));
-      let st = '';
-      if(d.state === 0){
-        const pct = d.total > 0 ? Math.min(100, Math.round(d.received / d.total * 100)) + '%' : fmtBytes(d.received);
-        st = 'DOWNLOADING · ' + pct + (d.speed > 0 ? ' · ' + fmtBytes(d.speed) + '/s' : '');
-      } else if(d.state === 1){
-        st = (d.exists ? 'COMPLETE · ' : 'MOVED/DELETED · ') + fmtBytes(d.total || d.received);
-      } else if(d.state === 2) st = 'CANCELLED';
-      else st = 'FAILED';
-      it.appendChild(mk('div', 'dl-sub', st));
-      const acts = mk('div', 'dl-acts');
-      if(d.state === 0){
-        const cBtn = mk('button', 'can', 'CANCEL');
-        cBtn.onclick = async () => { await fetch('/api/downloads/cancel?id=' + d.id, {cache:'no-store'}); renderDl(); };
-        acts.appendChild(cBtn);
-      } else if(d.state === 1 && d.exists){
-        if(d.openable){
-          const oBtn = mk('button', '', 'OPEN');
-          oBtn.onclick = () => { fetch('/api/downloads/open?id=' + d.id, {cache:'no-store'}); closeDl(); };
-          acts.appendChild(oBtn);
-        }
-        const fBtn = mk('button', '', 'FOLDER');
-        fBtn.onclick = () => { fetch('/api/downloads/show?id=' + d.id, {cache:'no-store'}); closeDl(); };
-        acts.appendChild(fBtn);
-      }
-      if(acts.children.length) it.appendChild(acts);
-      list.appendChild(it);
-    });
-  }
-  dlPop.appendChild(list);
+  dlListEl = mk('div', 'dl-list');
+  dlPop.appendChild(dlListEl);
   const ft = mk('div', 'dl-ft');
+  const dirBtn = mk('button', 'dir', 'DOWNLOAD FOLDER');
+  dirBtn.onclick = () => { fetch('/api/downloads/folder?id=0', {cache:'no-store'}); closeDl(); };
+  ft.appendChild(dirBtn);
   const all = mk('button', '', 'ALL DOWNLOADS (Ctrl+J)');
   all.onclick = () => { closeDl(); send('exec', 'downloads'); };
   ft.appendChild(all);
   dlPop.appendChild(ft);
+}
+function buildDlRow(d){
+  const mk = (tag, cls, txt) => { const e = document.createElement(tag); if(cls) e.className = cls; if(txt !== undefined) e.textContent = txt; return e; };
+  const it = mk('div', 'dl-item');
+  const nr = mk('div', 'dl-name-row');
+  const name = mk('div', 'dl-name', d.name || d.url || 'Download');
+  const cat = mk('span', 'dl-cat');
+  const turbo = mk('span', 'dl-turbo');
+  nr.append(name, cat, turbo);
+  const sub = mk('div', 'dl-sub');
+  const bar = mk('div', 'dl-bar');
+  const barFill = mk('i');
+  bar.appendChild(barFill);
+  const segs = mk('div', 'dl-segs');
+  const acts = mk('div', 'dl-acts');
+  it.append(nr, sub, bar, segs, acts);
+  return {it, name, cat, turbo, sub, bar, barFill, segs, acts, key:''};
+}
+function fillDlRow(row, d){
+  const mk = (tag, cls, txt) => { const e = document.createElement(tag); if(cls) e.className = cls; if(txt !== undefined) e.textContent = txt; return e; };
+  row.name.textContent = d.name || d.url || 'Download';
+  row.name.title = d.name || d.url || '';
+  if(d.category){ row.cat.style.display = ''; row.cat.textContent = d.category; }
+  else row.cat.style.display = 'none';
+  if(d.connections && d.connections > 1){ row.turbo.style.display = ''; row.turbo.textContent = '\u26A1' + d.connections + 'x'; }
+  else row.turbo.style.display = 'none';
+
+  let st = '';
+  if(d.state === 0){
+    const pctNum = d.total > 0 ? Math.min(100, Math.round(d.received / d.total * 100)) : 0;
+    const pctTxt = d.total > 0 ? (pctNum + '%') : fmtBytes(d.received);
+    st = ((d.connections && d.connections > 1) ? ('TURBO ' + d.connections + 'x \u00B7 ') : 'DOWNLOADING \u00B7 ') +
+         fmtBytes(d.received) + (d.total > 0 ? ' / ' + fmtBytes(d.total) + ' (' + pctTxt + ')' : '') +
+         (d.speed > 0 ? ' \u00B7 ' + fmtBytes(d.speed) + '/s' : '');
+    row.bar.style.display = '';
+    row.barFill.style.width = pctNum + '%';
+  } else {
+    row.bar.style.display = 'none';
+    if(d.state === 1) st = (d.exists ? 'COMPLETE \u00B7 ' : 'MOVED/DELETED \u00B7 ') + fmtBytes(d.total || d.received);
+    else if(d.state === 2) st = 'CANCELLED';
+    else st = 'FAILED';
+  }
+  row.sub.textContent = st;
+
+  if(d.state === 0 && Array.isArray(d.segs) && d.segs.length > 1){
+    row.segs.style.display = 'flex';
+    while(row.segs.children.length < d.segs.length){
+      const s = mk('div', 'dl-seg');
+      s.appendChild(mk('i'));
+      row.segs.appendChild(s);
+    }
+    while(row.segs.children.length > d.segs.length) row.segs.lastChild.remove();
+    for(let i = 0; i < d.segs.length; i++){
+      row.segs.children[i].firstChild.style.width = Math.max(0, Math.min(100, d.segs[i])) + '%';
+    }
+  } else {
+    row.segs.style.display = 'none';
+  }
+
+  const key = [d.state, d.exists, d.openable].join();
+  if(row.key !== key){
+    row.key = key;
+    row.acts.textContent = '';
+    if(d.state === 0){
+      const cBtn = mk('button', 'can', 'CANCEL');
+      cBtn.onclick = async () => { await fetch('/api/downloads/cancel?id=' + d.id, {cache:'no-store'}); renderDl(); };
+      row.acts.appendChild(cBtn);
+    } else if(d.state === 1 && d.exists){
+      if(d.openable){
+        const oBtn = mk('button', '', 'OPEN');
+        oBtn.onclick = () => { fetch('/api/downloads/open?id=' + d.id, {cache:'no-store'}); closeDl(); };
+        row.acts.appendChild(oBtn);
+      }
+      const fBtn = mk('button', '', 'FOLDER');
+      fBtn.onclick = () => { fetch('/api/downloads/show?id=' + d.id, {cache:'no-store'}); closeDl(); };
+      row.acts.appendChild(fBtn);
+    } else if(d.state === 2 || d.state === 3){
+      const rBtn = mk('button', '', 'RETRY');
+      rBtn.onclick = async () => { await fetch('/api/downloads/retry?id=' + d.id, {cache:'no-store'}); renderDl(); };
+      row.acts.appendChild(rBtn);
+    }
+    row.acts.style.display = row.acts.children.length ? 'flex' : 'none';
+  }
+}
+async function renderDl(){
+  if(dlBusy || !dlOpen) return;
+  dlBusy = true;
+  let items = [];
+  try {
+    const r = await fetch('/api/downloads', {cache:'no-store'});
+    if(r.ok) items = await r.json();
+  } catch {}
+  dlBusy = false;
+  if(!dlOpen) return;
+  ensureDlShell();
+  const top5 = (Array.isArray(items) ? items : []).slice(0, 6);
+  const sig = top5.map(i => i.id).join(',');
+  if(sig !== dlSig){
+    dlSig = sig;
+    dlListEl.textContent = '';
+    if(!top5.length){
+      const em = document.createElement('div');
+      em.className = 'dl-sub';
+      em.textContent = 'No downloads yet.';
+      dlListEl.appendChild(em);
+    } else {
+      for(const d of top5){
+        let row = dlRows.get(d.id);
+        if(!row){ row = buildDlRow(d); dlRows.set(d.id, row); }
+        dlListEl.appendChild(row.it);
+      }
+    }
+    for(const k of [...dlRows.keys()]) if(!top5.some(i => i.id === k)) dlRows.delete(k);
+  }
+  for(const d of top5){
+    const row = dlRows.get(d.id);
+    if(row) fillDlRow(row, d);
+  }
 
   const r = dlBtn.getBoundingClientRect();
-  const w = Math.min(336, Math.max(240, window.innerWidth - 16));
+  const w = Math.min(346, Math.max(240, window.innerWidth - 16));
   const left = Math.max(8, Math.min(window.innerWidth - w - 8, Math.round(r.right - w)));
   dlPop.style.left = left + 'px';
   dlPop.style.top = (Math.ceil(r.bottom) + 6) + 'px';

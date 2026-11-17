@@ -50,11 +50,16 @@ std::string SuggestJson(const std::wstring& query, size_t limit);
 // Downloads. The list is saved like the others; a download that was still running when
 // NeonNet closed is listed as interrupted next time.
 enum DownloadState { DL_ACTIVE = 0, DL_COMPLETE = 1, DL_CANCELED = 2, DL_INTERRUPTED = 3 };
+// Classifies a filename / MIME type into an IDM-style category folder name:
+// "Compressed", "Programs", "Video", "Music", "Documents", "Images", or "General".
+std::wstring ClassifyCategory(const std::wstring& name, const std::wstring& mime = L"");
 // Creates the entry for cefId on first use, then updates it. Empty strings keep the old value.
 // Returns true when the entry is new or its state changed (so the caller should save).
 bool DownloadUpdate(unsigned cefId, const std::wstring& url, const std::wstring& path, const std::wstring& name,
-                    long long total, long long received, long long speed, int state);
-bool DownloadGet(long long id, std::wstring& path, int& state, unsigned& cefId);
+                    long long total, long long received, long long speed, int state,
+                    int connections = 0, const std::wstring& category = L"",
+                    const std::vector<int>* segs = nullptr);
+bool DownloadGet(long long id, std::wstring& path, int& state, unsigned& cefId, std::wstring* urlOut = nullptr);
 bool DownloadOpenable(const std::wstring& path);         // false for programs and scripts
 std::string DownloadsJson();                              // newest first
 bool DownloadRemove(long long id);                        // not while it is running

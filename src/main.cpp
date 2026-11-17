@@ -13,12 +13,14 @@
 #include <ws2tcpip.h>
 #pragma comment(lib, "ws2_32.lib")
 #include <windows.h>
+#include <winioctl.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <dwmapi.h>
 #include <atomic>
 #include <cmath>
+#include <condition_variable>
 #include <deque>
 #include <map>
 #include <memory>
@@ -43,6 +45,7 @@
 #include "include/cef_preference.h"
 #include "include/cef_sandbox_win.h"
 #include "include/cef_scheme.h"
+#include "include/cef_urlrequest.h"
 #include "include/cef_v8.h"
 #include "resource.h"
 #include "updater.h"
@@ -113,6 +116,7 @@ static const UINT WM_APP_DEVOPEN = WM_APP + 13;     // wParam = tab id: open its
 static const UINT WM_APP_CLEARSITES = WM_APP + 11;  // lParam = new ClearSites (cookies are done, site data is next)
 static const UINT WM_APP_PROXY = WM_APP + 14;       // apply proxy & WebRTC prefs after /api/proxy/* changes
 static const UINT WM_APP_THEME = WM_APP + 15;       // refresh chrome/tabs after theme accent or keybinding change
+static const UINT WM_APP_FASTDL = WM_APP + 16;      // fast multi-connection download progress, completion or save prompt
 
 static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_NOTICE = 4, TIMER_SAVE = 5,
                       TIMER_ALERT = 6, TIMER_TEMP = 7, TIMER_PERF = 8, TIMER_TRIM = 9, TIMER_AUDIO = 10,
@@ -129,7 +133,7 @@ enum Cmd {
     CMD_PALETTE, CMD_PIN_TAB, CMD_MUTE_TAB, CMD_FORCEDARK, CMD_DARK_EXEMPT, CMD_PROXY_TOGGLE,
     CMD_SPLIT_VIEW, CMD_SPLIT_SWAP, CMD_READER_MODE, CMD_WHATSAPP
 };
-enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW };
+enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW, DLA_RETRY, DLA_ROOT_FOLDER };
 
 // Updater states (see "Auto update" below)
 enum UpdState { U_IDLE, U_CHECKING, U_DOWNLOADING, U_READY, U_AVAILABLE, U_UPTODATE, U_FAILED };
@@ -496,7 +500,13 @@ static void RegSetBin(const wchar_t* name, DWORD type, const void* data, DWORD s
     }
 }
 
-static std::wstring DownloadTarget(std::wstring name);   // below, next to ApplySetting
+static std::wstring DownloadBaseDir(bool create = false);
+static std::wstring DownloadCategoryDir(const std::wstring& name, const std::wstring& mime, bool create = true);
+static std::wstring DownloadTarget(std::wstring name, const std::wstring& mime = L"");   // below, next to ApplySetting
+static void StartDownloadWithFastDl(unsigned cefId, const std::wstring& url, const std::wstring& origUrl,
+                                    const std::wstring& suggestedName, const std::wstring& mime,
+                                    long long knownTotal, CefRefPtr<CefBeforeDownloadCallback> callback);
+static bool FastDlOwns(unsigned cefId, CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback> cb);
 static void ShowAlert(const std::wstring& text);
 static void LaunchIncognito(const std::wstring& url);
 static void ApplyBackgroundLimit();   // performance panel, below
@@ -3989,16 +3999,16 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
                 return true;
             }
         }
-        // listed on the downloads page from the moment the save dialog opens
-        if (store::DownloadUpdate(item->GetId(), item->GetURL().ToWString(), L"", suggested_name.ToWString(), 0, 0, 0, store::DL_ACTIVE))
-            ScheduleSave();
-        std::wstring target = RegGetDword(L"AskDownload", 1) ? std::wstring() : DownloadTarget(suggested_name.ToWString());
-        if (target.empty()) callback->Continue("", true);   // ask where to save
-        else callback->Continue(target, false);              // settings: save to the Downloads folder
+        // listed on the downloads page from the moment the download starts
+        StartDownloadWithFastDl(item->GetId(), url, item->GetOriginalUrl().ToWString(),
+                                suggested_name.ToWString(), mime, item->GetTotalBytes(), callback);
         return true;
     }
     void OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback> cb) override {
+        if (cb) g.dlCallbacks[item->GetId()] = cb;
+        if (FastDlOwns(item->GetId(), item, cb)) return;
         std::wstring path = item->GetFullPath().ToWString();
+        if (path.empty() && item->IsInProgress() && g.tempDl.find(item->GetId()) == g.tempDl.end()) return;
         std::wstring name = path;
         size_t slash = name.find_last_of(L"\\/");
         if (slash != std::wstring::npos) name = name.substr(slash + 1);
@@ -4472,7 +4482,11 @@ static std::string SettingsJson() {
     else if (us.state == U_READY) updState = "ready";
     o += std::string(",\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
          ",\"updState\":\"" + updState + "\",\"updPercent\":" + std::to_string(us.percent) + ",\"updVersion\":" + JsonUtf8(us.version) + ",\"updResult\":" + JsonUtf8(us.result) + ",\"updError\":" + JsonUtf8(us.error) +
-         ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 1) != 0) +
+         ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 0) != 0) +
+         ",\"fastDownload\":" + b(RegGetDword(L"FastDownload", 1) != 0) +
+         ",\"fastConnections\":" + std::to_string(RegGetDword(L"FastConnections", 8)) +
+         ",\"dlSubfolder\":" + b(RegGetDword(L"DlSubfolder", 1) != 0) +
+         ",\"dlCategories\":" + b(RegGetDword(L"DlCategories", 1) != 0) +
          ",\"defaultBrowser\":" + b(browserreg::IsDefault()) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"blockTrackers\":" + b(g.blockTrackers.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
          ",\"ramLimitMB\":" + std::to_string(RegGetDword(L"RamLimitMB", 0)) +
          ",\"bgLimit\":" + b(RegGetDword(L"BgLimit", 0) != 0) +
@@ -4486,7 +4500,7 @@ static std::string SettingsJson() {
          ",\"readerFont\":" + JsonUtf8(RegGetString(L"ReaderFont").empty() ? L"sans" : RegGetString(L"ReaderFont")) +
          ",\"readerSize\":" + std::to_string(RegGetDword(L"ReaderSize", 18)) +
          ",\"scriptTotal\":" + std::to_string(scriptTotal) + ",\"scriptEnabled\":" + std::to_string(scriptEnabled) +
-         ",\"downloadDir\":" + JsonUtf8(KnownFolder(FOLDERID_Downloads)) + ",\"bookmarksBar\":" + b(RegGetDword(L"BookmarksBar", 1) != 0) + ",\"forceDark\":" + b(RegGetDword(L"ForceDark", 0) != 0) +
+         ",\"downloadDir\":" + JsonUtf8(DownloadBaseDir(false)) + ",\"bookmarksBar\":" + b(RegGetDword(L"BookmarksBar", 1) != 0) + ",\"forceDark\":" + b(RegGetDword(L"ForceDark", 0) != 0) +
          ",\"dohMode\":" + JsonUtf8(RegGetString(L"DohMode").empty() ? L"automatic" : RegGetString(L"DohMode")) +
          ",\"dohProvider\":" + JsonUtf8(RegGetString(L"DohProvider").empty() ? L"cloudflare" : RegGetString(L"DohProvider")) +
          ",\"dohCustom\":" + JsonUtf8(RegGetString(L"DohCustom")) + ",\"dohProviders\":[";
@@ -4597,11 +4611,15 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
               ",\"sites\":" + std::to_string(g.clearSites.load()) + ",\"history\":" + std::to_string(g.clearHistory.load()) + "}";
     }
     else if (path == L"api/downloads") out = store::DownloadsJson();
-    else if (path == L"api/downloads/remove") changed = store::DownloadRemove(id);
-    else if (path == L"api/downloads/clear") { store::DownloadsClear(); changed = true; }
-    else if (path == L"api/downloads/cancel" || path == L"api/downloads/open" || path == L"api/downloads/show") {
+    else if (path == L"api/downloads/remove") { changed = store::DownloadRemove(id); if (changed) g.dlSeq++; }
+    else if (path == L"api/downloads/clear") { store::DownloadsClear(); changed = true; g.dlSeq++; }
+    else if (path == L"api/downloads/cancel" || path == L"api/downloads/open" || path == L"api/downloads/show" ||
+             path == L"api/downloads/retry" || path == L"api/downloads/folder") {
         // The page sends only an id; what to open is looked up here, never taken from the request.
-        WPARAM act = path == L"api/downloads/cancel" ? DLA_CANCEL : path == L"api/downloads/open" ? DLA_OPEN : DLA_SHOW;
+        WPARAM act = path == L"api/downloads/cancel" ? DLA_CANCEL :
+                     path == L"api/downloads/open"   ? DLA_OPEN :
+                     path == L"api/downloads/show"   ? DLA_SHOW :
+                     path == L"api/downloads/retry"  ? DLA_RETRY : DLA_ROOT_FOLDER;
         PostMessageW(g.hwnd, WM_APP_DOWNLOAD, act, (LPARAM)id);
     }
     else if (path == L"api/passwords") out = PwJsonList();
@@ -4686,7 +4704,8 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
         bool ok = false;
         if (key == L"search") ok = EngineValidId(val);
-        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"restoreSession" || key == L"favicons" || key == L"bookmarksBar" || key == L"httpsOnly" || key == L"blockAds" || key == L"blockTrackers" || key == L"savePasswords" || key == L"smoothScroll" || key == L"netSpeed" || key == L"forceDark" || key == L"bgLimit" || key == L"batterySaver" || key == L"batteryAuto" || key == L"netLimitAll") ok = (val == L"0" || val == L"1");
+        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"fastDownload" || key == L"dlSubfolder" || key == L"dlCategories" || key == L"restoreSession" || key == L"favicons" || key == L"bookmarksBar" || key == L"httpsOnly" || key == L"blockAds" || key == L"blockTrackers" || key == L"savePasswords" || key == L"smoothScroll" || key == L"netSpeed" || key == L"forceDark" || key == L"bgLimit" || key == L"batterySaver" || key == L"batteryAuto" || key == L"netLimitAll") ok = (val == L"0" || val == L"1");
+        else if (key == L"fastConnections") ok = (val == L"4" || val == L"8" || val == L"16");
         else if (key == L"ramLimitMB") { int v = _wtoi(val.c_str()); ok = (v == 0 || (v >= 512 && v <= 65536)); }
         else if (key == L"netLimitKB") { int v = _wtoi(val.c_str()); ok = (v == 0 || (v >= 64 && v <= 102400)); }
         else if (key == L"dockDefault") ok = (val == L"0" || val == L"1" || val == L"2");
@@ -4809,8 +4828,10 @@ public:
             return new StringResource(store::BookmarksBarJson(QueryParam(query, L"parent")), "application/json", 200);
         }
         if (path.rfind(L"api/", 0) == 0) {
-            bool trusted = browser && browser->GetIdentifier() != g.chromeId.load() && frame && frame->IsMain() &&
-                           frame->GetURL().ToWString().rfind(UI_HOST, 0) == 0;
+            std::wstring furl = frame ? frame->GetURL().ToWString() : std::wstring();
+            bool trusted = browser && frame && frame->IsMain() &&
+                           (furl.rfind(UI_HOST, 0) == 0 ||
+                            (browser->GetIdentifier() == g.chromeId.load() && furl.rfind(CHROME_UI_HOST, 0) == 0));
             if (!trusted) return new StringResource("", "text/plain", 403);
             std::string body;
             if (CefRefPtr<CefPostData> pd = request->GetPostData()) {
@@ -8127,6 +8148,21 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
     } else if (key == L"askDownload") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"AskDownload", REG_DWORD, &v, sizeof(v));
+    } else if (key == L"fastDownload") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"FastDownload", REG_DWORD, &v, sizeof(v));
+    } else if (key == L"fastConnections") {
+        DWORD v = (DWORD)_wtoi(val.c_str());
+        if (v != 4 && v != 8 && v != 16) v = 8;
+        RegSetBin(L"FastConnections", REG_DWORD, &v, sizeof(v));
+    } else if (key == L"dlSubfolder") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"DlSubfolder", REG_DWORD, &v, sizeof(v));
+        if (v) DownloadBaseDir(true);
+    } else if (key == L"dlCategories") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"DlCategories", REG_DWORD, &v, sizeof(v));
+        if (v) DownloadBaseDir(true);
     } else if (key == L"httpsOnly") {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"HttpsOnly", REG_DWORD, &v, sizeof(v));
@@ -8300,20 +8336,734 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
     }
 }
 
-// Where a download goes when the save dialog is turned off: the Downloads folder, with
-// " (1)", " (2)" ... added to the name when a file of that name exists.
-static std::wstring DownloadTarget(std::wstring name) {
+// ---------------------------------------------------------------------------
+// Downloads: IDM-style categorized folders ("NeonNet Download\<Category>") and
+// multi-connection segmented fast downloads.
+
+static std::wstring DownloadBaseDir(bool create) {
+    std::wstring dir = KnownFolder(FOLDERID_Downloads);
+    if (dir.empty()) return {};
+    if (RegGetDword(L"DlSubfolder", 1) != 0) {
+        dir += L"\\NeonNet Download";
+        if (create) {
+            CreateDirectoryW(dir.c_str(), nullptr);
+            if (RegGetDword(L"DlCategories", 1) != 0) {
+                static const wchar_t* cats[] = {
+                    L"Compressed", L"Documents", L"General", L"Images", L"Music", L"Programs", L"Video"
+                };
+                for (auto* c : cats) CreateDirectoryW((dir + L"\\" + c).c_str(), nullptr);
+            }
+        }
+    }
+    return dir;
+}
+
+static std::wstring DownloadCategoryDir(const std::wstring& name, const std::wstring& mime, bool create) {
+    std::wstring base = DownloadBaseDir(create);
+    if (base.empty()) return {};
+    if (RegGetDword(L"DlCategories", 1) != 0) {
+        std::wstring cat = store::ClassifyCategory(name, mime);
+        std::wstring dir = base + L"\\" + cat;
+        if (create) CreateDirectoryW(dir.c_str(), nullptr);
+        return dir;
+    }
+    return base;
+}
+
+// Where a download goes: the categorized NeonNet Download subfolder (or Downloads folder),
+// with " (1)", " (2)" ... added to the name when a file of that name exists.
+static std::wstring DownloadTarget(std::wstring name, const std::wstring& mime) {
     for (auto& c : name) if (wcschr(L"\\/:*?\"<>|", c) || c < 0x20) c = L'_';
     if (name.empty() || name == L"." || name == L"..") name = L"download";
-    std::wstring dir = KnownFolder(FOLDERID_Downloads);
+    std::wstring dir = DownloadCategoryDir(name, mime, true);
     if (dir.empty()) return {};
     size_t dot = name.find_last_of(L'.');
     std::wstring stem = dot == std::wstring::npos || dot == 0 ? name : name.substr(0, dot);
     std::wstring ext = dot == std::wstring::npos || dot == 0 ? L"" : name.substr(dot);
     std::wstring path = dir + L"\\" + name;
-    for (int i = 1; i < 1000 && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; i++)
+    for (int i = 1; i < 1000 && (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES ||
+                                 GetFileAttributesW((path + L".nnpart").c_str()) != INVALID_FILE_ATTRIBUTES); i++)
         path = dir + L"\\" + stem + L" (" + std::to_wstring(i) + L")" + ext;
     return path;
+}
+
+static std::wstring PromptSaveDownload(HWND hwnd, const std::wstring& initialDir, const std::wstring& initialName) {
+    std::wstring result;
+    IFileSaveDialog* pfd = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd))) && pfd) {
+        DWORD opts = 0;
+        if (SUCCEEDED(pfd->GetOptions(&opts)))
+            pfd->SetOptions(opts | FOS_OVERWRITEPROMPT | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+        if (!initialDir.empty()) {
+            IShellItem* psiDir = nullptr;
+            if (SUCCEEDED(SHCreateItemFromParsingName(initialDir.c_str(), nullptr, IID_PPV_ARGS(&psiDir))) && psiDir) {
+                pfd->SetFolder(psiDir);
+                psiDir->Release();
+            }
+        }
+        if (!initialName.empty()) pfd->SetFileName(initialName.c_str());
+        if (SUCCEEDED(pfd->Show(hwnd))) {
+            IShellItem* psiRes = nullptr;
+            if (SUCCEEDED(pfd->GetResult(&psiRes)) && psiRes) {
+                PWSTR pszPath = nullptr;
+                if (SUCCEEDED(psiRes->GetDisplayName(SIGDN_FILESYSPATH, &pszPath)) && pszPath) {
+                    result = pszPath;
+                    CoTaskMemFree(pszPath);
+                }
+                psiRes->Release();
+            }
+        }
+        pfd->Release();
+    }
+    return result;
+}
+
+struct FastSeg {
+    long long start = 0;
+    long long pos = 0;
+    long long end = -1;
+    long long bufOffset = 0;
+    std::vector<char> buf;
+    int retries = 0;
+    int gen = 0;
+    bool active = false;
+    bool done = false;
+    CefRefPtr<CefURLRequest> req;
+};
+
+struct DiskWriteCmd {
+    enum Type { CMD_WRITE, CMD_FINISH_OK, CMD_ABORT } type = CMD_WRITE;
+    long long offset = 0;
+    std::vector<char> data;
+};
+
+struct FastDlJob {
+    unsigned cefId = 0;
+    std::wstring url, origUrl, finalUrl, targetPath, partPath, name, mime, category;
+    long long knownTotal = 0;
+    long long totalBytes = 0;
+    long long totalReceived = 0;
+    int maxConns = 8;
+    int actualConns = 1;
+    CefRefPtr<CefBeforeDownloadCallback> callback;
+    CefRefPtr<CefDownloadItemCallback> cefItemCb;
+    CefRefPtr<CefURLRequest> probeReq;
+    std::vector<FastSeg> segs;
+    std::mutex diskMu;
+    std::condition_variable diskCv;
+    std::deque<DiskWriteCmd> diskQueue;
+    std::atomic<bool> diskError{ false };
+    bool diskStarted = false;
+    ULONGLONG lastUiTick = 0;
+    ULONGLONG lastSpeedTick = 0;
+    long long lastSpeedBytes = 0;
+    long long curSpeed = 0;
+    bool turboActive = false;
+    bool probeDone = false;
+    bool canceled = false;
+    bool finished = false;
+};
+
+static std::map<unsigned, std::shared_ptr<FastDlJob>> g_fastDlJobs;
+static std::unordered_set<unsigned> g_fastDlOwned;
+
+static void StartSegmentRequest(std::shared_ptr<FastDlJob> job, int idx);
+
+static void StartDiskWorker(const std::shared_ptr<FastDlJob>& job) {
+    if (!job || job->diskStarted) return;
+    job->diskStarted = true;
+    std::thread([job]() {
+        HANDLE hf = CreateFileW(job->partPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hf == INVALID_HANDLE_VALUE) {
+            job->diskError = true;
+            if (g.hwnd) PostMessageW(g.hwnd, WM_APP_FASTDL, 4, (LPARAM)job->cefId);
+            return;
+        }
+        // Mark the .nnpart file sparse so out-of-order writes at high offsets (e.g. 1.2 GB)
+        // complete in 0 ms without NTFS synchronously zero-filling the entire file first.
+        DWORD br = 0;
+        DeviceIoControl(hf, FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &br, nullptr);
+
+        for (;;) {
+            DiskWriteCmd cmd;
+            {
+                std::unique_lock<std::mutex> lk(job->diskMu);
+                job->diskCv.wait(lk, [&] { return !job->diskQueue.empty(); });
+                cmd = std::move(job->diskQueue.front());
+                job->diskQueue.pop_front();
+            }
+            if (cmd.type == DiskWriteCmd::CMD_WRITE) {
+                if (!job->diskError.load() && !cmd.data.empty()) {
+                    LARGE_INTEGER fp; fp.QuadPart = cmd.offset;
+                    DWORD wr = 0;
+                    if (!SetFilePointerEx(hf, fp, nullptr, FILE_BEGIN) ||
+                        !WriteFile(hf, cmd.data.data(), (DWORD)cmd.data.size(), &wr, nullptr) ||
+                        wr != (DWORD)cmd.data.size()) {
+                        job->diskError = true;
+                        if (g.hwnd) PostMessageW(g.hwnd, WM_APP_FASTDL, 4, (LPARAM)job->cefId);
+                    }
+                }
+            } else if (cmd.type == DiskWriteCmd::CMD_FINISH_OK) {
+                CloseHandle(hf);
+                hf = INVALID_HANDLE_VALUE;
+                bool ok = !job->diskError.load() &&
+                          MoveFileExW(job->partPath.c_str(), job->targetPath.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+                if (!ok) DeleteFileW(job->partPath.c_str());
+                if (g.hwnd) PostMessageW(g.hwnd, WM_APP_FASTDL, ok ? 3 : 4, (LPARAM)job->cefId);
+                break;
+            } else if (cmd.type == DiskWriteCmd::CMD_ABORT) {
+                CloseHandle(hf);
+                hf = INVALID_HANDLE_VALUE;
+                DeleteFileW(job->partPath.c_str());
+                break;
+            }
+        }
+        if (hf != INVALID_HANDLE_VALUE) CloseHandle(hf);
+    }).detach();
+}
+
+static void FlushSegBuffer(const std::shared_ptr<FastDlJob>& job, int idx) {
+    if (!job || idx < 0 || idx >= (int)job->segs.size()) return;
+    FastSeg& s = job->segs[idx];
+    if (s.buf.empty()) return;
+    long long off = s.bufOffset;
+    std::vector<char> chunk;
+    chunk.swap(s.buf);
+    {
+        std::lock_guard<std::mutex> lk(job->diskMu);
+        DiskWriteCmd cmd;
+        cmd.type = DiskWriteCmd::CMD_WRITE;
+        cmd.offset = off;
+        cmd.data = std::move(chunk);
+        job->diskQueue.push_back(std::move(cmd));
+    }
+    job->diskCv.notify_one();
+}
+
+static void ReportFastDlProgress(const std::shared_ptr<FastDlJob>& job, bool force) {
+    if (!job || job->canceled || job->finished) return;
+    ULONGLONG now = GetTickCount64();
+    if (!force && now - job->lastUiTick < 120) return;
+    job->lastUiTick = now;
+
+    ULONGLONG dt = now - job->lastSpeedTick;
+    if (dt >= 400) {
+        long long db = job->totalReceived - job->lastSpeedBytes;
+        long long inst = (db > 0 && dt > 0) ? (db * 1000LL) / (long long)dt : 0;
+        job->curSpeed = job->curSpeed > 0 ? (job->curSpeed * 2 + inst * 3) / 5 : inst;
+        job->lastSpeedBytes = job->totalReceived;
+        job->lastSpeedTick = now;
+    }
+
+    int N = (int)job->segs.size();
+    std::vector<int> segPct(N, 0);
+    for (int i = 0; i < N; i++) {
+        long long span = job->segs[i].end - job->segs[i].start + 1;
+        long long done = job->segs[i].pos - job->segs[i].start;
+        if (job->segs[i].done || span <= 0) segPct[i] = 100;
+        else segPct[i] = (int)std::max(0LL, std::min(100LL, (done * 100) / span));
+    }
+
+    store::DownloadUpdate(job->cefId, job->url, job->targetPath, job->name,
+                          job->totalBytes, job->totalReceived, job->curSpeed,
+                          store::DL_ACTIVE, job->actualConns, job->category, &segPct);
+    int pct = job->totalBytes > 0 ? (int)std::min(100LL, (job->totalReceived * 100) / job->totalBytes) : 0;
+    g.dlActive = true;
+    g.dlPct = pct;
+    g.download = (job->actualConns > 1 ? (L"TURBO [" + std::to_wstring(job->actualConns) + L"x] ") : L"DOWNLOADING ") +
+                 job->name + L" " + std::to_wstring(pct) + L"%";
+    g.dlSeq++;
+    SendState();
+    InvalidateStatus();
+}
+
+static void FinalizeFastDlState(const std::shared_ptr<FastDlJob>& job, int finalState) {
+    if (!job) return;
+    store::DownloadUpdate(job->cefId, job->url, job->targetPath, job->name,
+                          job->totalBytes, finalState == store::DL_COMPLETE ? job->totalBytes : job->totalReceived, 0,
+                          finalState, job->actualConns, job->category, nullptr);
+    g_fastDlJobs.erase(job->cefId);
+    if (finalState == store::DL_COMPLETE) {
+        g.dlActive = false;
+        g.dlPct = 100;
+        g.download = L"DOWNLOADED " + job->name;
+    } else {
+        g.dlActive = false;
+        g.dlPct = 0;
+        g.download.clear();
+    }
+    g.dlSeq++;
+    store::SaveIfDirty();
+    ScheduleSave();
+    SendState();
+    InvalidateStatus();
+}
+
+static void FinishFastDlJob(const std::shared_ptr<FastDlJob>& job, int finalState) {
+    if (!job || job->finished) return;
+    job->finished = true;
+    if (job->probeReq) { job->probeReq->Cancel(); job->probeReq = nullptr; }
+    for (int i = 0; i < (int)job->segs.size(); i++) {
+        if (finalState == store::DL_COMPLETE) FlushSegBuffer(job, i);
+        else job->segs[i].buf.clear();
+        job->segs[i].gen++;
+        if (job->segs[i].req) {
+            CefRefPtr<CefURLRequest> r = job->segs[i].req;
+            job->segs[i].req = nullptr;
+            r->Cancel();
+        }
+        job->segs[i].active = false;
+    }
+    if (job->diskStarted) {
+        {
+            std::lock_guard<std::mutex> lk(job->diskMu);
+            if (finalState != store::DL_COMPLETE) job->diskQueue.clear();
+            DiskWriteCmd cmd;
+            cmd.type = (finalState == store::DL_COMPLETE) ? DiskWriteCmd::CMD_FINISH_OK : DiskWriteCmd::CMD_ABORT;
+            job->diskQueue.push_back(std::move(cmd));
+        }
+        job->diskCv.notify_one();
+        if (finalState == store::DL_COMPLETE) {
+            // Wait for background disk thread to finish flushing and renaming .nnpart -> targetPath
+            // before marking DL_COMPLETE (it will post WM_APP_FASTDL wp=3).
+            return;
+        }
+    }
+    FinalizeFastDlState(job, finalState);
+}
+
+static bool FastDlOwns(unsigned cefId, CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback> cb) {
+    if (g_fastDlOwned.count(cefId)) {
+        if (cb && item && !item->IsCanceled()) cb->Cancel();
+        g.dlCallbacks.erase(cefId);
+        return true;
+    }
+    auto it = g_fastDlJobs.find(cefId);
+    if (it != g_fastDlJobs.end() && it->second) {
+        if (cb) {
+            it->second->cefItemCb = cb;
+            if (it->second->turboActive) {
+                if (item && !item->IsCanceled()) cb->Cancel();
+                g.dlCallbacks.erase(cefId);
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+static bool FastDlCancel(unsigned cefId) {
+    auto it = g_fastDlJobs.find(cefId);
+    if (it == g_fastDlJobs.end() || !it->second) return false;
+    std::shared_ptr<FastDlJob> job = it->second;
+    job->canceled = true;
+    g_fastDlOwned.insert(cefId);
+    job->callback = nullptr;
+    if (job->cefItemCb) { job->cefItemCb->Cancel(); job->cefItemCb = nullptr; }
+    FinishFastDlJob(job, store::DL_CANCELED);
+    return true;
+}
+
+static void FastDlCancelAll() {
+    auto copy = g_fastDlJobs;
+    for (auto& kv : copy) {
+        if (kv.second) FastDlCancel(kv.first);
+    }
+}
+
+static void FallbackToCefDownload(const std::shared_ptr<FastDlJob>& job) {
+    if (!job || job->canceled || job->finished) return;
+    job->finished = true;
+    g_fastDlJobs.erase(job->cefId);
+    if (job->callback) {
+        job->callback->Continue(job->targetPath, false);
+        job->callback = nullptr;
+    }
+    if (job->cefItemCb) {
+        job->cefItemCb->Resume();
+        job->cefItemCb = nullptr;
+    }
+}
+
+static void OnSegmentFinishedRange(const std::shared_ptr<FastDlJob>& job, int idx) {
+    if (!job || job->canceled || job->finished) return;
+    FlushSegBuffer(job, idx);
+    int N = (int)job->segs.size();
+    // 1. Check for any unclaimed incomplete segment
+    int pick = -1;
+    for (int j = 0; j < N; j++) {
+        if (j != idx && !job->segs[j].active && !job->segs[j].done && job->segs[j].pos <= job->segs[j].end) {
+            pick = j; break;
+        }
+    }
+    if (pick >= 0) {
+        job->segs[idx].start = job->segs[pick].pos;
+        job->segs[idx].pos = job->segs[pick].pos;
+        job->segs[idx].end = job->segs[pick].end;
+        job->segs[idx].retries = 0;
+        job->segs[idx].done = false;
+        job->segs[pick].pos = job->segs[pick].end + 1;
+        job->segs[pick].done = true;
+        StartSegmentRequest(job, idx);
+        return;
+    }
+    // 2. Dynamic work-stealing (IDM style): split largest active segment with >= 2 MB remaining
+    long long bestRem = 2 * 1024 * 1024;
+    for (int j = 0; j < N; j++) {
+        if (j != idx && job->segs[j].active) {
+            long long rem = job->segs[j].end - job->segs[j].pos + 1;
+            if (rem >= bestRem) { bestRem = rem; pick = j; }
+        }
+    }
+    if (pick >= 0) {
+        long long rem = job->segs[pick].end - job->segs[pick].pos + 1;
+        long long split = job->segs[pick].pos + rem / 2;
+        job->segs[idx].start = split;
+        job->segs[idx].pos = split;
+        job->segs[idx].end = job->segs[pick].end;
+        job->segs[idx].retries = 0;
+        job->segs[idx].done = false;
+        job->segs[pick].end = split - 1;
+        StartSegmentRequest(job, idx);
+        return;
+    }
+
+    job->segs[idx].active = false;
+    job->segs[idx].done = true;
+    ReportFastDlProgress(job, true);
+
+    bool anyActive = false;
+    bool allDone = true;
+    for (int j = 0; j < N; j++) {
+        if (job->segs[j].active) anyActive = true;
+        if (!job->segs[j].done && job->segs[j].pos <= job->segs[j].end) allDone = false;
+    }
+    if (allDone && job->totalReceived >= job->totalBytes) {
+        FinishFastDlJob(job, store::DL_COMPLETE);
+    } else if (!anyActive) {
+        FinishFastDlJob(job, store::DL_INTERRUPTED);
+    }
+}
+
+static void OnSegmentError(const std::shared_ptr<FastDlJob>& job, int idx) {
+    if (!job || job->canceled || job->finished) return;
+    FlushSegBuffer(job, idx);
+    if (job->segs[idx].pos > job->segs[idx].end) {
+        OnSegmentFinishedRange(job, idx);
+        return;
+    }
+    if (job->segs[idx].retries < 3) {
+        job->segs[idx].retries++;
+        StartSegmentRequest(job, idx);
+        return;
+    }
+    // Leave unclaimed so a working connection can pick up its remaining bytes
+    job->segs[idx].active = false;
+    job->segs[idx].done = false;
+    bool anyActive = false;
+    for (const auto& s : job->segs) if (s.active) anyActive = true;
+    if (!anyActive) {
+        FinishFastDlJob(job, store::DL_INTERRUPTED);
+    }
+}
+
+class FastSegClient : public CefURLRequestClient {
+public:
+    FastSegClient(std::shared_ptr<FastDlJob> j, int idx, int gen) : job_(std::move(j)), idx_(idx), gen_(gen) {}
+    void OnRequestComplete(CefRefPtr<CefURLRequest> request) override {
+        CefRefPtr<FastSegClient> self(this);
+        std::shared_ptr<FastDlJob> job = job_;
+        int idx = idx_;
+        if (!job || job->canceled || job->finished) return;
+        if (job->segs[idx].gen != gen_) return;
+        job->segs[idx].req = nullptr;
+        if (job->segs[idx].pos > job->segs[idx].end) OnSegmentFinishedRange(job, idx);
+        else OnSegmentError(job, idx);
+    }
+    void OnUploadProgress(CefRefPtr<CefURLRequest>, int64_t, int64_t) override {}
+    void OnDownloadProgress(CefRefPtr<CefURLRequest>, int64_t, int64_t) override {}
+    void OnDownloadData(CefRefPtr<CefURLRequest> request, const void* data, size_t data_length) override {
+        CefRefPtr<FastSegClient> self(this);
+        std::shared_ptr<FastDlJob> job = job_;
+        int idx = idx_;
+        if (!job || job->canceled || job->finished || data_length == 0) return;
+        if (job->segs[idx].gen != gen_) return;
+        CefRefPtr<CefResponse> resp = request->GetResponse();
+        int status = resp ? resp->GetStatus() : 0;
+        if (status != 206 && !(status == 200 && job->segs[idx].pos == 0 && job->segs[idx].end == job->totalBytes - 1)) {
+            job->segs[idx].gen++;
+            job->segs[idx].req = nullptr;
+            request->Cancel();
+            OnSegmentError(job, idx);
+            return;
+        }
+        long long rem = job->segs[idx].end - job->segs[idx].pos + 1;
+        if (rem <= 0) {
+            job->segs[idx].gen++;
+            job->segs[idx].req = nullptr;
+            request->Cancel();
+            OnSegmentFinishedRange(job, idx);
+            return;
+        }
+        DWORD toWrite = (DWORD)std::min<long long>((long long)data_length, rem);
+        if (job->diskError.load()) {
+            FinishFastDlJob(job, store::DL_INTERRUPTED);
+            return;
+        }
+        FastSeg& seg = job->segs[idx];
+        if (seg.buf.empty()) {
+            seg.bufOffset = seg.pos;
+            seg.buf.reserve(256 * 1024);
+        }
+        const char* p = static_cast<const char*>(data);
+        seg.buf.insert(seg.buf.end(), p, p + toWrite);
+        seg.pos += toWrite;
+        job->totalReceived += toWrite;
+        if (seg.buf.size() >= 256 * 1024 || seg.pos > seg.end) {
+            FlushSegBuffer(job, idx);
+        }
+        if (seg.pos > seg.end) {
+            seg.gen++;
+            seg.req = nullptr;
+            request->Cancel();
+            OnSegmentFinishedRange(job, idx);
+        } else {
+            ReportFastDlProgress(job, false);
+        }
+    }
+    bool GetAuthCredentials(bool, const CefString&, int, const CefString&, const CefString&, CefRefPtr<CefAuthCallback>) override {
+        return false;
+    }
+private:
+    std::shared_ptr<FastDlJob> job_;
+    int idx_;
+    int gen_;
+    IMPLEMENT_REFCOUNTING(FastSegClient);
+};
+
+static void StartSegmentRequest(std::shared_ptr<FastDlJob> job, int idx) {
+    if (!job || job->canceled || job->finished) return;
+    FastSeg& s = job->segs[idx];
+    if (s.pos > s.end) {
+        OnSegmentFinishedRange(job, idx);
+        return;
+    }
+    s.active = true;
+    int gen = ++s.gen;
+    CefRefPtr<CefRequest> req = CefRequest::Create();
+    req->SetURL(job->finalUrl.empty() ? job->url : job->finalUrl);
+    req->SetMethod("GET");
+    req->SetFlags(UR_FLAG_SKIP_CACHE | UR_FLAG_DISABLE_CACHE | UR_FLAG_ALLOW_STORED_CREDENTIALS);
+    CefRequest::HeaderMap hm;
+    hm.insert(std::make_pair("Range", "bytes=" + std::to_string(s.pos) + "-" + std::to_string(s.end)));
+    hm.insert(std::make_pair("Accept", "*/*"));
+    req->SetHeaderMap(hm);
+    CefRefPtr<CefRequestContext> ctx = g.reqCtx ? g.reqCtx : CefRequestContext::GetGlobalContext();
+    s.req = CefURLRequest::Create(req, new FastSegClient(job, idx, gen), ctx);
+    if (!s.req) {
+        OnSegmentError(job, idx);
+    }
+}
+
+static void StartTurboSegments(const std::shared_ptr<FastDlJob>& job, long long total) {
+    if (!job || job->canceled || job->finished) return;
+    job->totalBytes = total;
+    job->partPath = job->targetPath + L".nnpart";
+
+    // Take ownership from CEF and cancel CEF's initial stream
+    job->turboActive = true;
+    g_fastDlOwned.insert(job->cefId);
+    job->callback = nullptr;
+    if (job->cefItemCb) {
+        job->cefItemCb->Cancel();
+        job->cefItemCb = nullptr;
+    }
+    auto cbIt = g.dlCallbacks.find(job->cefId);
+    if (cbIt != g.dlCallbacks.end()) {
+        if (cbIt->second) cbIt->second->Cancel();
+        g.dlCallbacks.erase(cbIt);
+    }
+
+    StartDiskWorker(job);
+
+    int N = std::max(1, std::min(16, job->maxConns));
+    if (total / N < 256 * 1024) N = (int)std::max(1LL, total / (256 * 1024));
+    job->actualConns = N;
+    job->segs.resize(N);
+    ULONGLONG now = GetTickCount64();
+    job->lastUiTick = now;
+    job->lastSpeedTick = now;
+
+    for (int i = 0; i < N; i++) {
+        job->segs[i].start = (total * i) / N;
+        job->segs[i].pos = job->segs[i].start;
+        job->segs[i].end = (i == N - 1) ? (total - 1) : ((total * (i + 1)) / N - 1);
+        job->segs[i].retries = 0;
+        job->segs[i].active = true;
+        job->segs[i].done = false;
+    }
+    ReportFastDlProgress(job, true);
+    for (int i = 0; i < N; i++) {
+        StartSegmentRequest(job, i);
+    }
+}
+
+class FastProbeClient : public CefURLRequestClient {
+public:
+    explicit FastProbeClient(std::shared_ptr<FastDlJob> j) : job_(std::move(j)) {}
+    void CheckResponse(CefRefPtr<CefURLRequest> request, bool fromComplete) {
+        CefRefPtr<FastProbeClient> self(this);
+        std::shared_ptr<FastDlJob> job = job_;
+        if (!job || job->probeDone || job->canceled || job->finished) return;
+        CefRefPtr<CefResponse> resp = request->GetResponse();
+        int status = resp ? resp->GetStatus() : 0;
+        if (!fromComplete && (status == 0 || (status >= 300 && status < 400))) return;
+        job->probeDone = true;
+        long long total = 0;
+        if (status == 206 && resp) {
+            std::wstring cr = resp->GetHeaderByName("Content-Range").ToWString();
+            const wchar_t* slash = wcschr(cr.c_str(), L'/');
+            if (slash && slash[1] && slash[1] != L'*') total = _wtoi64(slash + 1);
+            if (total <= 0 && job->knownTotal > 0) total = job->knownTotal;
+        }
+        std::wstring rurl = resp ? resp->GetURL().ToWString() : L"";
+        job->finalUrl = rurl.empty() ? job->url : rurl;
+        job->probeReq = nullptr;
+        if (!fromComplete) request->Cancel();
+
+        if (status == 206 && total >= 256 * 1024) {
+            StartTurboSegments(job, total);
+        } else {
+            FallbackToCefDownload(job);
+        }
+    }
+    void OnRequestComplete(CefRefPtr<CefURLRequest> request) override {
+        CheckResponse(request, true);
+    }
+    void OnUploadProgress(CefRefPtr<CefURLRequest>, int64_t, int64_t) override {}
+    void OnDownloadProgress(CefRefPtr<CefURLRequest> request, int64_t, int64_t) override {
+        CheckResponse(request, false);
+    }
+    void OnDownloadData(CefRefPtr<CefURLRequest> request, const void*, size_t) override {
+        CheckResponse(request, false);
+    }
+    bool GetAuthCredentials(bool, const CefString&, int, const CefString&, const CefString&, CefRefPtr<CefAuthCallback>) override {
+        return false;
+    }
+private:
+    std::shared_ptr<FastDlJob> job_;
+    IMPLEMENT_REFCOUNTING(FastProbeClient);
+};
+
+static void StartFastOrCefDownload(std::shared_ptr<FastDlJob> job) {
+    if (!job || job->canceled || job->finished) return;
+    if (store::DownloadUpdate(job->cefId, job->url, job->targetPath, job->name,
+                              job->knownTotal, 0, 0, store::DL_ACTIVE, 1, job->category, nullptr))
+        ScheduleSave();
+    g.dlActive = true; g.dlPct = 0; g.dlSeq++;
+    SendState();
+    InvalidateStatus();
+
+    bool fastEnabled = RegGetDword(L"FastDownload", 1) != 0;
+    int conns = (int)RegGetDword(L"FastConnections", 8);
+    if (conns != 4 && conns != 8 && conns != 16) conns = 8;
+    job->maxConns = conns;
+
+    std::wstring lowUrl = job->url;
+    for (auto& c : lowUrl) c = (wchar_t)towlower(c);
+    bool isHttp = (lowUrl.rfind(L"https://", 0) == 0 || lowUrl.rfind(L"http://", 0) == 0) &&
+                  lowUrl.rfind(UI_HOST, 0) != 0 && lowUrl.rfind(CHROME_UI_HOST, 0) != 0;
+    bool tooSmall = (job->knownTotal > 0 && job->knownTotal < 256 * 1024);
+
+    if (!fastEnabled || conns <= 1 || !isHttp || tooSmall) {
+        FallbackToCefDownload(job);
+        return;
+    }
+
+    CefRefPtr<CefRequest> req = CefRequest::Create();
+    req->SetURL(job->url);
+    req->SetMethod("GET");
+    req->SetFlags(UR_FLAG_SKIP_CACHE | UR_FLAG_DISABLE_CACHE | UR_FLAG_ALLOW_STORED_CREDENTIALS);
+    CefRequest::HeaderMap hm;
+    hm.insert(std::make_pair("Range", "bytes=0-0"));
+    hm.insert(std::make_pair("Accept", "*/*"));
+    req->SetHeaderMap(hm);
+    CefRefPtr<CefRequestContext> ctx = g.reqCtx ? g.reqCtx : CefRequestContext::GetGlobalContext();
+    job->probeReq = CefURLRequest::Create(req, new FastProbeClient(job), ctx);
+    if (!job->probeReq) {
+        FallbackToCefDownload(job);
+    }
+}
+
+static void StartDownloadWithFastDl(unsigned cefId, const std::wstring& url, const std::wstring& origUrl,
+                                    const std::wstring& suggestedName, const std::wstring& mime,
+                                    long long knownTotal, CefRefPtr<CefBeforeDownloadCallback> callback) {
+    std::wstring cleanName = suggestedName;
+    for (auto& c : cleanName) if (wcschr(L"\\/:*?\"<>|", c) || c < 0x20) c = L'_';
+    if (cleanName.empty() || cleanName == L"." || cleanName == L"..") cleanName = L"download";
+
+    auto job = std::make_shared<FastDlJob>();
+    job->cefId = cefId;
+    job->url = url;
+    job->origUrl = origUrl;
+    job->name = cleanName;
+    job->mime = mime;
+    job->category = store::ClassifyCategory(cleanName, mime);
+    job->knownTotal = knownTotal;
+    job->callback = callback;
+    auto cbIt = g.dlCallbacks.find(cefId);
+    if (cbIt != g.dlCallbacks.end() && cbIt->second) {
+        job->cefItemCb = cbIt->second;
+    }
+    g_fastDlJobs[cefId] = job;
+
+    if (RegGetDword(L"AskDownload", 0) != 0) {
+        auto* heapJob = new std::shared_ptr<FastDlJob>(job);
+        if (!g.hwnd || !PostMessageW(g.hwnd, WM_APP_FASTDL, 2, (LPARAM)heapJob)) {
+            delete heapJob;
+            job->targetPath = DownloadTarget(cleanName, mime);
+            StartFastOrCefDownload(job);
+        }
+        return;
+    }
+    job->targetPath = DownloadTarget(cleanName, mime);
+    StartFastOrCefDownload(job);
+}
+
+static void OnFastDlMsg(WPARAM wp, LPARAM lp) {
+    if (wp == 3 || wp == 4) {
+        unsigned cefId = (unsigned)lp;
+        auto it = g_fastDlJobs.find(cefId);
+        if (it == g_fastDlJobs.end() || !it->second) return;
+        std::shared_ptr<FastDlJob> job = it->second;
+        if (wp == 3) {
+            FinalizeFastDlState(job, store::DL_COMPLETE);
+        } else {
+            if (!job->finished) FinishFastDlJob(job, store::DL_INTERRUPTED);
+            else FinalizeFastDlState(job, store::DL_INTERRUPTED);
+        }
+        return;
+    }
+    if (wp == 2) {
+        std::unique_ptr<std::shared_ptr<FastDlJob>> holder((std::shared_ptr<FastDlJob>*)lp);
+        std::shared_ptr<FastDlJob> job = holder ? *holder : nullptr;
+        if (!job || g.closing) return;
+        std::wstring catDir = DownloadCategoryDir(job->name, job->mime, true);
+        std::wstring chosen = PromptSaveDownload(g.hwnd, catDir, job->name);
+        if (chosen.empty() || g.closing) {
+            g_fastDlOwned.insert(job->cefId);
+            g_fastDlJobs.erase(job->cefId);
+            job->callback = nullptr;
+            if (job->cefItemCb) { job->cefItemCb->Cancel(); job->cefItemCb = nullptr; }
+            return;
+        }
+        job->targetPath = chosen;
+        size_t sl = chosen.find_last_of(L"\\/");
+        if (sl != std::wstring::npos) job->name = chosen.substr(sl + 1);
+        job->category = store::ClassifyCategory(job->name, job->mime);
+        StartFastOrCefDownload(job);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -8445,20 +9195,38 @@ static void AskMedia(std::unique_ptr<MediaAsk> m) {
         r = IDNO;
     }
     if (r != IDNO) return;   // Cancel: releasing the callback cancels the download
-    if (store::DownloadUpdate(m->id, m->url, L"", m->name, 0, 0, 0, store::DL_ACTIVE)) ScheduleSave();
-    std::wstring target = RegGetDword(L"AskDownload", 1) ? std::wstring() : DownloadTarget(m->name);
-    if (target.empty()) m->callback->Continue("", true);
-    else m->callback->Continue(target, false);
+    StartDownloadWithFastDl(m->id, m->url, m->url, m->name, m->mime, 0, m->callback);
 }
 
-// Cancel, open or show a download for the downloads page. Only the id comes from the page;
+// Cancel, open, show, retry or open root folder for the downloads page. Only the id comes from the page;
 // the file is looked up in the list, and programs and scripts are never opened.
 static void DoDownloadAction(int act, long long id) {
-    std::wstring path; int state = 0; unsigned cefId = 0;
-    if (!store::DownloadGet(id, path, state, cefId)) return;
+    if (act == DLA_ROOT_FOLDER) {
+        std::wstring dir = DownloadBaseDir(true);
+        if (!dir.empty()) ShellExecuteW(g.hwnd, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        return;
+    }
+    std::wstring path, url; int state = 0; unsigned cefId = 0;
+    if (!store::DownloadGet(id, path, state, cefId, &url)) return;
     if (act == DLA_CANCEL) {
-        auto it = g.dlCallbacks.find(cefId);
-        if (state == store::DL_ACTIVE && it != g.dlCallbacks.end()) it->second->Cancel();
+        if (state == store::DL_ACTIVE) {
+            if (!FastDlCancel(cefId)) {
+                auto it = g.dlCallbacks.find(cefId);
+                if (it != g.dlCallbacks.end()) it->second->Cancel();
+            }
+        }
+        return;
+    }
+    if (act == DLA_RETRY) {
+        if (state != store::DL_ACTIVE && !url.empty()) {
+            store::DownloadRemove(id);
+            Tab* t = FindTab(g.active);
+            CefRefPtr<CefBrowser> b = (t && t->browser) ? t->browser : g.chrome;
+            if (b) b->GetHost()->StartDownload(url);
+            g.dlSeq++;
+            ScheduleSave();
+            SendState();
+        }
         return;
     }
     if (state != store::DL_COMPLETE || path.empty() || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return;
@@ -8481,6 +9249,7 @@ static void SavePlacement() {
 
 static void BeginClose() {
     if (g.closing) return;
+    FastDlCancelAll();
     SavePlacement();
     store::SaveIfDirty();
     SaveWorkspaces();
@@ -8601,6 +9370,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APP_UPDATE: { std::unique_ptr<UpdateMsg> m((UpdateMsg*)lp); if (!g.closing) OnUpdateMsg(*m); return 0; }
     case WM_APP_STORE: g.bmBarDirty = true; ScheduleSave(); SendState(); return 0;
     case WM_APP_DOWNLOAD: DoDownloadAction((int)wp, (long long)lp); return 0;
+    case WM_APP_FASTDL: OnFastDlMsg(wp, lp); return 0;
     case WM_APP_MEDIA: AskMedia(std::unique_ptr<MediaAsk>((MediaAsk*)lp)); return 0;
     case WM_APP_DIALOG: OnDialogMsg(std::unique_ptr<DlgReq>((DlgReq*)lp)); return 0;
     case WM_APP_DEVOPEN: if (Tab* t = FindTab((int)wp)) if (!t->dev) OpenDevTools(t, CefPoint()); return 0;
@@ -8826,6 +9596,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
         std::wstring dataRoot = KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME;
         store::Load(dataRoot);
         userscripts::Load(dataRoot);
+        DownloadBaseDir(true);
     }
     EnableDarkMenus();
     g.scan = RegGetDword(L"Scanlines", 1) != 0;

@@ -616,8 +616,27 @@ select option{background:var(--bg2);color:var(--cyan)}
     <section class="sec" id="sec-look">
       <h2>DOWNLOADS <span class="tag">07 // FILES &amp; APPEARANCE</span></h2>
       <div class="row">
+        <div class="lab"><b>Fast multi-connection downloads (IDM mode)</b><span>Accelerates HTTP/HTTPS downloads (&ge;256 KB) by splitting files into parallel byte-range connections with dynamic work-stealing. Automatically falls back to standard single-stream download when a server does not support Range requests.</span></div>
+        <button class="tog" id="fastDownload">ON</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Parallel connections per download</b><span>Maximum simultaneous range streams used by the Turbo Download Engine.</span></div>
+        <select id="fastConnections"><option value="4">4 CONNECTIONS</option><option value="8">8 CONNECTIONS (DEFAULT)</option><option value="16">16 CONNECTIONS (MAX)</option></select>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Save inside &ldquo;NeonNet Download&rdquo; folder</b><span>Keeps all browser downloads neatly inside a dedicated <b>NeonNet Download</b> folder inside your Windows Downloads directory.</span></div>
+        <div class="pair">
+          <button class="btn" id="openDlFolder" type="button">OPEN FOLDER</button>
+          <button class="tog" id="dlSubfolder">ON</button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Auto-categorize into subfolders (IDM style)</b><span>Automatically sorts downloads into <b>Compressed</b>, <b>Programs</b>, <b>Video</b>, <b>Music</b>, <b>Documents</b>, <b>Images</b>, and <b>General</b> folders by file type.</span></div>
+        <button class="tog" id="dlCategories">ON</button>
+      </div>
+      <div class="row">
         <div class="lab"><b>Ask where to save each file</b><span id="dlHint"></span></div>
-        <button class="tog" id="askDownload">ON</button>
+        <button class="tog" id="askDownload">OFF</button>
       </div>
 
       <h2 class="subhead">LOOK</h2>
@@ -757,9 +776,16 @@ async function load(){
   $('#statScripts').textContent = (cfg.scriptEnabled || 0) + '/' + (cfg.scriptTotal || 0);
   $('#statBlocked').textContent = String(cfg.blocked || 0);
   $('#home').value = cfg.home || '';
+  setTog('#fastDownload', cfg.fastDownload !== false);
+  $('#fastConnections').value = String(cfg.fastConnections || 8);
+  $('#fastConnections').disabled = cfg.fastDownload === false;
+  setTog('#dlSubfolder', cfg.dlSubfolder !== false);
+  setTog('#dlCategories', cfg.dlCategories !== false);
   setTog('#askDownload', cfg.askDownload);
-  $('#dlHint').textContent = cfg.askDownload ? 'A save dialog opens for every download.'
-    : 'Files are saved straight into ' + cfg.downloadDir + ' (a number is added if the name is taken).';
+  const catNote = (cfg.dlCategories !== false) ? ' grouped by category (Compressed, Programs, Video, Music, Documents, Images, General)' : '';
+  $('#dlHint').textContent = cfg.askDownload
+    ? 'A Save As dialog opens for every download (defaulting to ' + cfg.downloadDir + catNote + ').'
+    : 'Files are saved straight into ' + cfg.downloadDir + catNote + ' (a number is added if the name is taken).';
   setTog('#favicons', cfg.favicons);
   setTog('#httpsOnly', cfg.httpsOnly);
   setTog('#smoothScroll', cfg.smoothScroll);
@@ -1268,7 +1294,8 @@ $('#checkUpdate').onclick = async () => {
   const act = lastUpdState === 'ready' ? 'restart' : lastUpdState === 'available' ? 'download' : '1';
   if(await set('checkUpdate', act)) load();
 };
-for(const k of ['smoothStep', 'smoothTime', 'devDock', 'dohMode', 'dohProvider', 'readerTheme', 'readerFont', 'readerSize', 'ramLimitMB', 'netLimitKB', 'netLimitAll', 'dockDefault', 'dockWidth']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
+for(const k of ['fastConnections', 'smoothStep', 'smoothTime', 'devDock', 'dohMode', 'dohProvider', 'readerTheme', 'readerFont', 'readerSize', 'ramLimitMB', 'netLimitKB', 'netLimitAll', 'dockDefault', 'dockWidth']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
+$('#openDlFolder').onclick = () => { fetch('/api/downloads/folder?id=0', {cache:'no-store'}).catch(() => {}); };
 async function saveDohCustom(){
   const v = $('#dohCustom').value.trim();
   if(v && (!/^https:\/\/[^\s]+$/i.test(v) || v.length >= 300)){ $('#dohErr').textContent = 'Must be a valid https:// URL without spaces.'; return; }
@@ -1278,7 +1305,7 @@ async function saveDohCustom(){
 }
 $('#dohCustomSave').onclick = saveDohCustom;
 $('#dohCustom').addEventListener('keydown', e => { if(e.key === 'Enter') saveDohCustom(); });
-for(const [id, key] of [['#askDownload','askDownload'], ['#forceDark','forceDark'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#bookmarksBar','bookmarksBar'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds'], ['#blockTrackers','blockTrackers'], ['#bgLimit','bgLimit'], ['#batterySaver','batterySaver'], ['#batteryAuto','batteryAuto']]){
+for(const [id, key] of [['#fastDownload','fastDownload'], ['#dlSubfolder','dlSubfolder'], ['#dlCategories','dlCategories'], ['#askDownload','askDownload'], ['#forceDark','forceDark'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#bookmarksBar','bookmarksBar'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds'], ['#blockTrackers','blockTrackers'], ['#bgLimit','bgLimit'], ['#batterySaver','batterySaver'], ['#batteryAuto','batteryAuto']]){
   $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };
 }
 async function saveHome(){

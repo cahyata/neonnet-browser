@@ -6,6 +6,11 @@
 <style>
 :root{--bg:#12062c;--bg2:#0a0420;--row:#1b0b3d;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0;--green:#35ffa0}
 *{box-sizing:border-box}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:var(--bg2);border-left:1px solid rgba(138,111,192,.18)}
+::-webkit-scrollbar-thumb{background:rgba(138,111,192,.45);border:1px solid rgba(0,229,255,.35)}
+::-webkit-scrollbar-thumb:hover{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
+::-webkit-scrollbar-corner{background:var(--bg2)}
 html,body{margin:0;min-height:100%;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
 body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.15) 2px 3px)}
 .topbar{position:sticky;top:0;z-index:30;background:var(--bg);border-bottom:1px solid var(--cyan);box-shadow:0 4px 24px rgba(10,4,32,.85)}
@@ -34,21 +39,37 @@ main{max-width:1100px;margin:0 auto;padding:22px 18px 60px}
 .search input{flex:1;height:100%;background:none;border:0;outline:0;color:var(--cyan);font:14px "Cascadia Mono","Consolas",monospace}
 .search input::placeholder{color:#5a4a8a}
 button{font:inherit;cursor:pointer;border:0}
+.tool-btns{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn-folder{height:36px;padding:0 14px;background:rgba(0,229,255,.08);border:1px solid var(--cyan);color:var(--cyan);font-weight:bold;letter-spacing:.8px}
+.btn-folder:hover{background:var(--cyan);color:var(--bg)}
 .danger{height:36px;padding:0 16px;background:none;border:1px solid var(--pink);color:var(--pink);font-weight:bold}
 .danger:hover,.danger.arm{background:var(--pink);color:var(--bg)}
+.cats{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid rgba(138,111,192,.25)}
+.cat-btn{height:28px;padding:0 10px;background:var(--bg2);border:1px solid rgba(138,111,192,.4);color:var(--muted);font:bold 11px "Cascadia Mono","Consolas",monospace;letter-spacing:.8px;display:inline-flex;align-items:center;gap:6px}
+.cat-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+.cat-btn.on{border-color:var(--cyan);background:rgba(0,229,255,.14);color:var(--cyan)}
+.cat-btn i{font-style:normal;font-size:10px;color:var(--yellow);opacity:.85}
 .row{display:flex;align-items:center;gap:12px;padding:10px 10px;border-bottom:1px solid rgba(138,111,192,.25)}
 .row:hover{background:var(--row)}
 .info{flex:1;min-width:0}
+.name-row{display:flex;align-items:center;gap:8px;min-width:0}
 .name{color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:bold}
+.badge-cat{flex:none;padding:1px 6px;border:1px solid rgba(138,111,192,.55);background:rgba(10,4,32,.7);color:var(--muted);font-size:10px;letter-spacing:.8px;text-transform:uppercase}
+.badge-turbo{flex:none;padding:1px 6px;border:1px solid var(--yellow);background:rgba(255,214,0,.1);color:var(--yellow);font-size:10px;font-weight:bold;letter-spacing:.8px}
 .row.dead .name{color:var(--muted);text-decoration:line-through}
 .meta{color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .meta b{font-weight:normal}
 .ok b{color:var(--green)} .bad b{color:var(--pink2)} .run b{color:var(--yellow)}
-.bar{height:4px;background:var(--bg2);margin-top:6px;border:1px solid rgba(0,229,255,.35)}
+.bar{height:5px;background:var(--bg2);margin-top:6px;border:1px solid rgba(0,229,255,.35)}
 .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--pink),var(--cyan))}
+.segs{display:flex;gap:3px;margin-top:4px;height:4px}
+.seg{flex:1;background:var(--bg2);border:1px solid rgba(255,214,0,.3);overflow:hidden}
+.seg i{display:block;height:100%;width:0;background:var(--yellow)}
 .acts{display:flex;gap:6px;flex:none}
 .acts button{height:28px;padding:0 10px;background:none;border:1px solid var(--cyan);color:var(--cyan);font-weight:bold;font-size:12px}
 .acts button:hover{background:var(--cyan);color:var(--bg)}
+.acts button.retry{border-color:var(--yellow);color:var(--yellow)}
+.acts button.retry:hover{background:var(--yellow);color:var(--bg)}
 .acts button.stop{border-color:var(--pink);color:var(--pink)}
 .acts button.stop:hover{background:var(--pink);color:var(--bg)}
 .acts .x{width:28px;padding:0;border-color:transparent;color:var(--muted);visibility:hidden}
@@ -78,16 +99,21 @@ button{font:inherit;cursor:pointer;border:0}
 </header>
 <main>
   <div class="tools">
-    <div class="sub">&gt; INCOMING TRANSFERS // FILES STAY WHERE YOU SAVED THEM</div>
-    <button class="danger" id="clear">CLEAR LIST</button>
+    <div class="sub">&gt; TURBO MULTI-CONNECTION DOWNLOAD MANAGER // AUTO-CATEGORIZED FOLDERS</div>
+    <div class="tool-btns">
+      <button class="btn-folder" id="openRoot" title="Open NeonNet Download folder in Explorer">OPEN DOWNLOAD FOLDER</button>
+      <button class="danger" id="clear">CLEAR LIST</button>
+    </div>
   </div>
+  <div class="cats" id="cats"></div>
   <div id="list"></div>
-  <div class="note">Programs and scripts (.exe, .msi, .bat, .ps1 ...) cannot be opened from here. Use FOLDER and check them first.</div>
+  <div class="note">Files are automatically sorted into <b>NeonNet Download\Compressed, Programs, Video, Music, Documents, Images, General</b>. Programs and scripts (.exe, .msi, .bat, .ps1 ...) cannot be launched directly; use FOLDER to inspect them first.</div>
 </main>
 <script>
 const $ = s => document.querySelector(s);
 const ST = {ACTIVE:0, DONE:1, CANCELED:2, FAILED:3};
-let items = [], sig = '', rows = new Map();
+const CATS = ['ALL', 'Compressed', 'Programs', 'Video', 'Music', 'Documents', 'Images', 'General'];
+let items = [], sig = '', activeCat = 'ALL', rows = new Map();
 
 function size(n){
   if(!(n > 0)) return '0 B';
@@ -107,7 +133,8 @@ function when(t){
 function status(it){
   if(it.state === ST.ACTIVE){
     const pct = it.total > 0 ? Math.min(100, Math.floor(it.received * 100 / it.total)) : -1;
-    return ['run', 'DOWNLOADING', size(it.received) + (it.total > 0 ? ' / ' + size(it.total) + ' (' + pct + '%)' : '') + (it.speed > 0 ? ' - ' + size(it.speed) + '/s' : '')];
+    const lbl = (it.connections && it.connections > 1) ? ('TURBO ' + it.connections + 'x') : 'DOWNLOADING';
+    return ['run', lbl, size(it.received) + (it.total > 0 ? ' / ' + size(it.total) + ' (' + pct + '%)' : '') + (it.speed > 0 ? ' - ' + size(it.speed) + '/s' : '')];
   }
   if(it.state === ST.DONE) return it.exists ? ['ok', 'DONE', size(it.total)] : ['bad', 'FILE MISSING', 'moved or deleted'];
   if(it.state === ST.CANCELED) return ['bad', 'CANCELED', ''];
@@ -115,22 +142,55 @@ function status(it){
 }
 async function act(path, id){ await fetch('/api/downloads/' + path + '?id=' + id, {cache:'no-store'}).catch(() => {}); }
 
+function renderCats(){
+  const box = $('#cats');
+  const counts = {ALL: items.length};
+  for(const c of CATS.slice(1)) counts[c] = 0;
+  for(const it of items){
+    const c = it.category || 'General';
+    counts[c] = (counts[c] || 0) + 1;
+  }
+  box.textContent = '';
+  for(const c of CATS){
+    const b = document.createElement('button');
+    b.className = 'cat-btn' + (activeCat === c ? ' on' : '');
+    b.textContent = c.toUpperCase() + ' ';
+    const cnt = document.createElement('i');
+    cnt.textContent = '(' + (counts[c] || 0) + ')';
+    b.appendChild(cnt);
+    b.onclick = () => { activeCat = c; sig = ''; renderCats(); render(); };
+    box.appendChild(b);
+  }
+}
+
 function build(it){
   const row = document.createElement('div'); row.className = 'row';
   const info = document.createElement('div'); info.className = 'info';
+  const nameRow = document.createElement('div'); nameRow.className = 'name-row';
   const name = document.createElement('div'); name.className = 'name'; name.textContent = it.name; name.title = it.name;
+  const catBadge = document.createElement('span'); catBadge.className = 'badge-cat';
+  const turboBadge = document.createElement('span'); turboBadge.className = 'badge-turbo';
+  nameRow.append(name, catBadge, turboBadge);
   const meta = document.createElement('div'); meta.className = 'meta';
   const bar = document.createElement('div'); bar.className = 'bar'; bar.innerHTML = '<i></i>';
-  info.append(name, meta, bar);
+  const segs = document.createElement('div'); segs.className = 'segs';
+  info.append(nameRow, meta, bar, segs);
   const acts = document.createElement('div'); acts.className = 'acts';
   row.append(info, acts);
-  const r = {row, name, meta, bar, acts, key: ''};
+  const r = {row, name, catBadge, turboBadge, meta, bar, segs, acts, key: ''};
   return r;
 }
 
 function fill(r, it){
   const [cls, label, extra] = status(it);
-  r.name.textContent = it.name; r.name.title = it.name;   // the real name is known only after the save dialog
+  r.name.textContent = it.name; r.name.title = it.name;
+  r.catBadge.textContent = (it.category || 'General').toUpperCase();
+  if(it.connections && it.connections > 1){
+    r.turboBadge.style.display = '';
+    r.turboBadge.textContent = '\u26A1 ' + it.connections + ' CONNECTIONS';
+  } else {
+    r.turboBadge.style.display = 'none';
+  }
   r.row.classList.toggle('dead', it.state === ST.DONE && !it.exists);
   r.meta.className = 'meta ' + cls;
   r.meta.textContent = '';
@@ -140,6 +200,19 @@ function fill(r, it){
   r.bar.style.display = it.state === ST.ACTIVE ? '' : 'none';
   const pct = it.total > 0 ? Math.min(100, it.received * 100 / it.total) : 0;
   r.bar.firstChild.style.width = pct + '%';
+  if(it.state === ST.ACTIVE && Array.isArray(it.segs) && it.segs.length > 1){
+    r.segs.style.display = 'flex';
+    while(r.segs.children.length < it.segs.length){
+      const s = document.createElement('div'); s.className = 'seg'; s.innerHTML = '<i></i>';
+      r.segs.appendChild(s);
+    }
+    while(r.segs.children.length > it.segs.length) r.segs.lastChild.remove();
+    for(let i = 0; i < it.segs.length; i++){
+      r.segs.children[i].firstChild.style.width = Math.max(0, Math.min(100, it.segs[i])) + '%';
+    }
+  } else {
+    r.segs.style.display = 'none';
+  }
   const key = [it.state, it.exists, it.openable].join();
   if(r.key === key) return;
   r.key = key; r.acts.textContent = '';
@@ -147,19 +220,23 @@ function fill(r, it){
   if(it.state === ST.ACTIVE) btn('CANCEL', 'stop', () => act('cancel', it.id));
   if(it.openable) btn('OPEN', '', () => act('open', it.id));
   if(it.exists) btn('FOLDER', '', () => act('show', it.id));
-  if(it.state !== ST.ACTIVE) btn('✕', 'x', async () => { await act('remove', it.id); poll(); }).title = 'Remove from the list (the file is kept)';
+  if(it.state === ST.CANCELED || it.state === ST.FAILED) btn('RETRY', 'retry', async () => { await act('retry', it.id); sig = ''; poll(); });
+  if(it.state !== ST.ACTIVE) btn('✕', 'x', async () => { await act('remove', it.id); sig = ''; poll(); }).title = 'Remove from the list (the file is kept)';
 }
 
 function render(){
   const q = $('#q').value.trim().toLowerCase();
-  const shown = items.filter(it => !q || it.name.toLowerCase().includes(q) || it.url.toLowerCase().includes(q));
+  const shown = items.filter(it => {
+    if(activeCat !== 'ALL' && (it.category || 'General') !== activeCat) return false;
+    return !q || it.name.toLowerCase().includes(q) || it.url.toLowerCase().includes(q);
+  });
   const list = $('#list');
   const ids = shown.map(i => i.id).join();
   if(ids !== sig){
     sig = ids; list.textContent = '';
     if(!shown.length){
       const e = document.createElement('div'); e.className = 'empty';
-      e.textContent = q ? 'NO MATCHES FOR "' + q.toUpperCase() + '"' : 'NOTHING DOWNLOADED YET.';
+      e.textContent = q ? 'NO MATCHES FOR "' + q.toUpperCase() + '"' : (activeCat !== 'ALL' ? 'NO DOWNLOADS IN CATEGORY [' + activeCat.toUpperCase() + '].' : 'NOTHING DOWNLOADED YET.');
       list.appendChild(e);
     } else for(const it of shown){
       let r = rows.get(it.id); if(!r){ r = build(it); rows.set(it.id, r); }
@@ -173,9 +250,10 @@ function render(){
 let busy = false;
 async function poll(){
   if(busy) return; busy = true;
-  try { items = await (await fetch('/api/downloads', {cache:'no-store'})).json(); render(); } catch(e){}
+  try { items = await (await fetch('/api/downloads', {cache:'no-store'})).json(); renderCats(); render(); } catch(e){}
   busy = false;
 }
+$('#openRoot').onclick = () => act('folder', 0);
 function syncClear(){ $('#qClear').classList.toggle('show', $('#q').value.length > 0); }
 $('#q').addEventListener('input', () => { syncClear(); sig = ''; render(); });
 $('#qClear').onclick = () => { $('#q').value = ''; syncClear(); sig = ''; render(); $('#q').focus(); };

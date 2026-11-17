@@ -40,7 +40,9 @@ struct Download {
     long long id = 0, time = 0, total = 0, received = 0, speed = 0;
     unsigned cefId = 0;   // CEF's id for a running download; 0 for entries loaded from disk
     int state = 0;
-    std::wstring url, path, name;
+    int connections = 1;  // number of parallel connections (1 = single stream, >1 = Turbo Fast Download)
+    std::wstring url, path, name, category;
+    std::vector<int> segs; // per-segment progress 0..100 while active
 };
 const size_t MAX_DOWNLOADS = 500;
 std::vector<Download> downloads;   // oldest first
@@ -414,6 +416,9 @@ void ReadDownloads(const std::wstring& path) {
         d.url = Unesc(p[1]); d.name = Unesc(p[2]); d.path = Unesc(p[3]);
         d.total = _atoi64(p[4].c_str());
         d.state = atoi(p[5].c_str());
+        if (p.size() >= 7) d.connections = std::max(1, atoi(p[6].c_str()));
+        if (p.size() >= 8) d.category = Unesc(p[7]);
+        if (d.category.empty()) d.category = ClassifyCategory(d.name);
         if (d.state == DL_ACTIVE) d.state = DL_INTERRUPTED;
         if (d.state < DL_ACTIVE || d.state > DL_INTERRUPTED || d.time <= 0 || d.name.empty()) continue;
         d.received = d.state == DL_COMPLETE ? d.total : 0;
@@ -426,7 +431,8 @@ bool WriteDownloads(const std::wstring& path, const std::vector<Download>& items
     std::string data;
     for (const Download& d : items)
         data += std::to_string(d.time) + '\t' + Esc(d.url) + '\t' + Esc(d.name) + '\t' + Esc(d.path) + '\t' +
-                std::to_string(d.total) + '\t' + std::to_string(d.state) + '\n';
+                std::to_string(d.total) + '\t' + std::to_string(d.state) + '\t' +
+                std::to_string(std::max(1, d.connections)) + '\t' + Esc(d.category) + '\n';
     std::wstring tmp = path + L".tmp";
     HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE) return false;
@@ -953,8 +959,43 @@ std::string SuggestJson(const std::wstring& query, size_t limit) {
     return o + "]";
 }
 
+std::wstring ClassifyCategory(const std::wstring& name, const std::wstring& mime) {
+    std::wstring low = Lower(FileName(name));
+    size_t dot = low.find_last_of(L'.');
+    std::wstring ext = dot != std::wstring::npos ? low.substr(dot) : L"";
+    static const wchar_t* comp[] = { L".zip", L".rar", L".7z", L".tar", L".gz", L".tgz", L".bz2", L".xz", L".iso", L".img", L".cab", L".lzma", L".zst" };
+    static const wchar_t* prog[] = { L".exe", L".msi", L".msix", L".appx", L".bat", L".cmd", L".ps1", L".sh", L".jar", L".apk", L".dmg", L".deb", L".rpm", L".bin", L".vbs", L".scr", L".com" };
+    static const wchar_t* vid[]  = { L".mp4", L".mkv", L".avi", L".mov", L".wmv", L".flv", L".webm", L".m4v", L".mpg", L".mpeg", L".ts", L".3gp", L".3g2", L".ogv" };
+    static const wchar_t* mus[]  = { L".mp3", L".wav", L".flac", L".aac", L".ogg", L".opus", L".m4a", L".wma", L".alac", L".aiff", L".mid", L".midi" };
+    static const wchar_t* doc[]  = { L".pdf", L".doc", L".docx", L".xls", L".xlsx", L".ppt", L".pptx", L".txt", L".rtf", L".csv", L".odt", L".ods", L".odp", L".epub", L".mobi", L".md", L".json", L".xml", L".sql", L".chm" };
+    static const wchar_t* img[]  = { L".jpg", L".jpeg", L".png", L".gif", L".webp", L".svg", L".bmp", L".ico", L".tiff", L".tif", L".psd", L".ai", L".heic", L".avif" };
+    if (!ext.empty()) {
+        for (auto* e : comp) if (ext == e) return L"Compressed";
+        for (auto* e : prog) if (ext == e) return L"Programs";
+        for (auto* e : vid)  if (ext == e) return L"Video";
+        for (auto* e : mus)  if (ext == e) return L"Music";
+        for (auto* e : doc)  if (ext == e) return L"Documents";
+        for (auto* e : img)  if (ext == e) return L"Images";
+    }
+    std::wstring m = Lower(mime);
+    if (m.rfind(L"video/", 0) == 0) return L"Video";
+    if (m.rfind(L"audio/", 0) == 0) return L"Music";
+    if (m.rfind(L"image/", 0) == 0) return L"Images";
+    if (m.find(L"pdf") != std::wstring::npos || m.find(L"word") != std::wstring::npos ||
+        m.find(L"excel") != std::wstring::npos || m.find(L"spreadsheet") != std::wstring::npos ||
+        m.find(L"presentation") != std::wstring::npos || m.rfind(L"text/", 0) == 0) return L"Documents";
+    if (m.find(L"zip") != std::wstring::npos || m.find(L"rar") != std::wstring::npos ||
+        m.find(L"7z") != std::wstring::npos || m.find(L"compressed") != std::wstring::npos ||
+        m.find(L"tar") != std::wstring::npos || m.find(L"gzip") != std::wstring::npos) return L"Compressed";
+    if (m.find(L"msdownload") != std::wstring::npos || m.find(L"x-executable") != std::wstring::npos ||
+        m.find(L"x-msi") != std::wstring::npos) return L"Programs";
+    return L"General";
+}
+
 bool DownloadUpdate(unsigned cefId, const std::wstring& url, const std::wstring& path, const std::wstring& name,
-                    long long total, long long received, long long speed, int state) {
+                    long long total, long long received, long long speed, int state,
+                    int connections, const std::wstring& category,
+                    const std::vector<int>* segs) {
     if (!cefId) return false;
     Excl x;
     Download* d = nullptr;
@@ -964,7 +1005,7 @@ bool DownloadUpdate(unsigned cefId, const std::wstring& url, const std::wstring&
     if (!d) {
         downloads.emplace_back();
         d = &downloads.back();
-        d->id = nextId++; d->time = UnixMs(); d->cefId = cefId; d->state = DL_ACTIVE;
+        d->id = nextId++; d->time = UnixMs(); d->cefId = cefId; d->state = DL_ACTIVE; d->connections = 1;
         changed = true; dlDirty = true;
         TrimDownloads();
         d = &downloads.back();
@@ -973,19 +1014,24 @@ bool DownloadUpdate(unsigned cefId, const std::wstring& url, const std::wstring&
     if (!path.empty()) { d->path = path; d->name = Clean(FileName(path), 260); }
     if (!name.empty() && d->name.empty()) d->name = Clean(name, 260);
     if (d->name.empty()) d->name = L"download";
+    if (connections > 0) d->connections = connections;
+    if (!category.empty()) d->category = category;
+    if (d->category.empty()) d->category = ClassifyCategory(d->name);
+    if (segs) d->segs = *segs;
     if (total > 0) d->total = total;
     d->received = received;
     d->speed = speed;
     if (d->state != state) { d->state = state; changed = true; dlDirty = true; }
-    if (state != DL_ACTIVE) d->cefId = 0;
+    if (state != DL_ACTIVE) { d->cefId = 0; d->segs.clear(); }
     return changed;
 }
 
-bool DownloadGet(long long id, std::wstring& path, int& state, unsigned& cefId) {
+bool DownloadGet(long long id, std::wstring& path, int& state, unsigned& cefId, std::wstring* urlOut) {
     Shared s;
     for (const Download& d : downloads) {
         if (d.id != id) continue;
         path = d.path; state = d.state; cefId = d.cefId;
+        if (urlOut) *urlOut = d.url;
         return true;
     }
     return false;
@@ -1016,8 +1062,16 @@ std::string DownloadsJson() {
         bool exists = d.state == DL_COMPLETE && !d.path.empty() && GetFileAttributesW(d.path.c_str()) != INVALID_FILE_ATTRIBUTES;
         o += "{\"id\":" + std::to_string(d.id) + ",\"time\":" + std::to_string(d.time) + ",\"state\":" + std::to_string(d.state) +
              ",\"total\":" + std::to_string(d.total) + ",\"received\":" + std::to_string(d.received) +
-             ",\"speed\":" + std::to_string(d.speed) + ",\"exists\":" + (exists ? "true" : "false") +
-             ",\"openable\":" + (exists && DownloadOpenable(d.path) ? "true" : "false") + ",\"name\":";
+             ",\"speed\":" + std::to_string(d.speed) + ",\"connections\":" + std::to_string(std::max(1, d.connections)) +
+             ",\"exists\":" + (exists ? "true" : "false") +
+             ",\"openable\":" + (exists && DownloadOpenable(d.path) ? "true" : "false") + ",\"category\":";
+        Json(o, d.category.empty() ? L"General" : d.category);
+        o += ",\"segs\":[";
+        for (size_t si = 0; si < d.segs.size(); si++) {
+            if (si) o += ',';
+            o += std::to_string(d.segs[si]);
+        }
+        o += "],\"name\":";
         Json(o, d.name);
         o += ",\"url\":";
         Json(o, d.url);
