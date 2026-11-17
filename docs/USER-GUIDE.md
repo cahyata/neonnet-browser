@@ -31,7 +31,7 @@ The installer adds NeonNet to the list too, so the button is only needed for a c
 | Part | What it does |
 |---|---|
 | Top row | Logo, workspace switcher (`MAIN`, `+`), tab list (numbered 01, 02, ...), `+` button, and the minimize, maximize and close buttons |
-| Navigation row | `DOCK` (Social Dock), `[◀]` back, `[▶]` forward, `[⟳]` reload (`[✕]` stop while loading), `[⌂]` home, `PROXY` tunnel, address bar (lock icon, search engine selector, `DARK` exception toggle, `READ` Reader Mode, `☆` bookmark star), `GO`, `>_` Command Palette, `PERF`, Shield (Ad & Tracker Blocker), and `≡` menu |
+| Navigation row | `DOCK` (Social Dock), `[◀]` back, `[▶]` forward, `[⟳]` reload (`[✕]` stop while loading), `[⌂]` home, `PROXY` tunnel, address bar (lock icon, search engine selector, `DARK` exception toggle, `READ` Reader Mode, clickable zoom badge when not `100%`, `☆` bookmark star), `GO`, `>_` Command Palette, `PERF`, `⬇` Downloads popover, Shield (Ad & Tracker Blocker), and `≡` menu |
 | Find bar | Shown under the navigation row while you search the page (see [Find in page](#find-in-page)) |
 | Thin line under the address bar | Animated pink-cyan bar while a page is loading |
 | Status bar | Left: download and upload speed of the computer, then the status (LINK STABLE, LOADING..., SIGNAL LOST, the hovered link address, or download progress). Right: zoom (when not 100%), SCAN ON and the clock |
@@ -269,7 +269,7 @@ Ctrl+, , the `≡` menu (**Settings**), or **SETTINGS** on the new tab page open
 | **Network speed in the status bar** | On (default). See [Network speed](#network-speed). |
 | **Continue where you left off** | Off (default): NeonNet starts with the home page. On: the tabs of the last session come back, asleep, and the home page is not opened. Pinned tabs come back either way. See [Tabs of the last session](#tabs-of-the-last-session). |
 | **Clear browsing data** | Deletes cookies and site data, the cache and the browsing history, in any combination, for the last hour, 24 hours, 7 days, 4 weeks or all time. History goes by the time of the visit. Cookies and site data also sign you out of sites. Cookies go by the time they were created. Site data (local storage, offline data) is cleared for the sites that lost a cookie, the sites in your history for that period and the pages open now, so it can miss a site you have not visited recently. The cache is always cleared completely. Single visits, or everything at once, can also be removed on the history page. In an incognito window the incognito session is cleared. |
-| **Ask where to save each file** | On (default): a save dialog opens for every download. Off: files go straight into your Downloads folder, and a number is added when the name is taken (`report (1).pdf`). |
+| **Turbo multi-connection downloads**, **Auto-categorized folders**, **Ask where to save each file** | See [Downloads](#downloads). By default, files are downloaded using parallel connections (`4`, `8`, or `16`) and sorted into `Downloads\NeonNet Download\{Compressed,Programs,Video,Music,Documents,Images,General}` without a save prompt. Turn on **Ask where to save each file** to choose the folder manually for every download. |
 | **Scanlines** | The same switch as the `SCAN` button. |
 | **Automatic updates** | See [Updates](#updates). Only the installed copy updates itself, so the switch is disabled in a copy started from another folder. |
 
@@ -281,11 +281,12 @@ Toggle **Scanlines** in the `≡` menu or **Settings > LOOK** for a thin CRT lin
 
 ## Downloads
 
-NeonNet asks where to save each download. Progress appears in the status bar ("DOWNLOADING file-name 42%").
+By default, NeonNet uses **Turbo Multi-Connection Downloads** (up to `4`, `8`, or `16` parallel `HTTP 206` byte-range connections with dynamic segment splitting) and automatically organizes files into categorized subfolders inside `Downloads\NeonNet Download` (`Compressed`, `Programs`, `Video`, `Music`, `Documents`, `Images`, and `General`). You can customize connection count, subfolder grouping, or enable **Ask where to save each file** in **Settings > FILES & APPEARANCE**.
 
-Ctrl+J, the `≡` menu, or **DOWNLOADS** on the new tab page opens the downloads page. It lists every download, newest first, with size, speed, source and time. You can search it, and each row has buttons:
+Click the `⬇` button on the toolbar for a quick **Recent Downloads** popover with live segmented progress bars, or press Ctrl+J (`neonnet://downloads`) for the full Downloads manager with category filter pills (`ALL`, `COMPRESSED`, `PROGRAMS`, `VIDEO`, `MUSIC`, `DOCUMENTS`, `IMAGES`, `GENERAL`) and **OPEN DOWNLOAD FOLDER**:
 
 - **CANCEL** stops a running download.
+- **RETRY** restarts a canceled or interrupted download.
 - **OPEN** opens a finished file with its default program.
 - **FOLDER** shows the file in File Explorer.
 - `✕` removes the row from the list. The file itself is kept.

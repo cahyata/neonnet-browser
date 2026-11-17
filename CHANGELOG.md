@@ -2,6 +2,19 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] - 2026-11-17
+
+### Features
+- **Turbo Multi-Connection Downloads (IDM Mode) & Auto-Categorized Folders:** parallel byte-range downloads (`HTTP 206 Partial Content`, configurable `4` / `8` / `16` connections) routed through Chromium's network stack (inheriting DoH, proxy, cookies, and TLS 1.3/ECH) with dynamic segment splitting, live per-segment progress bars, retry support, and automatic sorting into `Downloads\NeonNet Download\{Compressed,Programs,Video,Music,Documents,Images,General}`.
+- **Toolbar Downloads Popover, Address Bar Zoom Badge & Tab Ergonomics:** added a toolbar downloads button (`⬇`) with live badge, segmented progress bars, and quick actions (`OPEN`, `FOLDER`, `RETRY`, `CANCEL`, `DOWNLOAD FOLDER`); a clickable zoom percentage badge in the address bar (`Ctrl`+wheel zoom in tabs); full title + URL hover tooltips on tabs; and horizontal mouse-wheel scrolling across the tab strip.
+- **Split View (`Ctrl+Alt+S`), Reader Mode (`Ctrl+Alt+R`) & Social Dock (`Ctrl+Alt+W`):** view two tabs side-by-side with a draggable divider, toggle a clean Reader Mode overlay with four themes (`NEON`, `DARK`, `SEPIA`, `LIGHT`) and font controls, and open a resizable left Social Dock for WhatsApp, Instagram, and Discord.
+- **Ad & Tracker Shield & Built-in YouTube Ad Skipper:** toolbar Shield popover with independent **Block Ads** and **Block Trackers** switches, per-site exceptions, blocked-domain list, and a native C++ YouTube ad skipper.
+- **Performance Sidebar Sparklines & Battery Saver:** redesigned `PERF` panel (`Ctrl+Shift+M`) with 24-sample SVG RAM/CPU sparklines, segmented memory breakdown, custom-themed dropdowns, and Battery Saver (`ON/OFF` and `Auto <=25%`).
+- **Force Dark Mode Exceptions & Full Settings Customization:** one-click per-site Force Dark Mode exclusion (`DARK` button in the address bar and lock panel), unified design-system scrollbars across all internal UI pages, and complete settings controls in `neonnet://settings`.
+
+### Performance & Fixes
+- **Zero-freeze large file downloads:** marked `.nnpart` download files as NTFS sparse files (`FSCTL_SET_SPARSE`), added 256 KB per-segment RAM write coalescing buffers, and offloaded all disk I/O onto a dedicated background disk worker thread so multi-gigabyte multi-connection downloads start immediately without UI stalls.
+
 ## [1.9.0] - 2026-11-14
 
 ### Features
