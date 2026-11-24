@@ -1,37 +1,39 @@
 # NeonNet
 
-A synthwave / cyber-HUD themed web browser for Windows. Dark purple, neon pink and cyan, clipped window corners, CRT scanlines, and a new tab page with a sunset and a moving grid.
+A synthwave / cyber-HUD themed web browser for Windows. Available in **Dark Synthwave** and **Light (Cyber Paper)** themes with customizable neon accents, clipped window corners, CRT scanlines, and an animated new tab page with a sunset, moving grid, Speed Dial, and Quick Notes.
 
 NeonNet ships its own Chromium engine. It does not need Edge, WebView2 or any other runtime.
 
 > Built and vibecoded with **Claude** and **Antigravity (Gemini)**.
 
-![New tab page](docs/images/new-tab.png)
+![New tab page (Dark Synthwave)](docs/images/new-tab.png)
+
+![New tab page (Light Cyber Paper)](docs/images/new-tab-light.png)
 
 ![Browsing](docs/images/browsing.png)
 
+![Settings (Light Mode)](docs/images/settings-light.png)
+
+![Signal Lost error page](docs/images/signal-lost.png)
+
 ## Features
 
-- **Tabs:** open, close, switch, drag to reorder, pin, and open links in a new tab. Popups (for example sign-in windows) open as tabs. Optionally the tabs of the last session come back at start-up.
-- **Address bar:** type an address or search words (Google search).
-- **Theme:** clipped-corner window frame and a HUD-style status bar.
-- **Scanlines:** a CRT line effect over every page, toggled with the `SCAN` button.
-- **"SIGNAL LOST" error page:** shown when a site fails to load, with a RETRY button.
-- **Standard browser features:** fullscreen (including video), zoom, print, downloads with a save dialog, and developer tools.
-- **Privacy and security:** incognito window, clear browsing data, certificate warnings, HTTPS-only mode, tracker and ad blocking, and saved passwords locked with your Windows account.
-- **Site permissions:** a lock icon in the address bar shows the connection state and lets you allow, block or be asked about camera, microphone, location and more, per site.
-- **Smooth scrolling and network speed:** an animated mouse wheel and keyboard scroll, and live download and upload speed in the status bar, both with a switch in the settings.
-- **Single window:** running `NeonNet.exe <url>` while NeonNet is open adds a tab to the existing window.
-- **Chromium sandbox enabled:** renderer and GPU processes run isolated.
-- **Installer:** per user by default (no admin rights needed), with a choice of folder and an option to install for all users. Uninstall from Settings > Apps. NeonNet can be set as the default browser.
-- **Find in page, bookmarks and history:** Ctrl+F, Ctrl+D, Ctrl+H, Ctrl+Shift+O for bookmarks (with folders, bookmarks bar via Ctrl+Shift+B, and HTML import/export), and Ctrl+Shift+T to reopen a closed tab.
-- **Incognito window:** Ctrl+Shift+N opens a window whose cookies, cache and sign-ins live in memory only and disappear when it closes. No history is recorded.
-- **Performance panel:** Ctrl+Shift+M opens a side panel with memory and CPU per tab, a memory cleaner, sleeping tabs, and optional RAM, CPU and network download limiters.
-- **Extensions (Userscripts):** Ctrl+Shift+E (`neonnet://extensions`) manages `.user.js` userscripts with `@match`/`@include`/`@exclude`, `@run-at`, and `GM_*` APIs.
-- **Downloads page:** Ctrl+J lists every download with progress, cancel, open and show-in-folder.
-- **Address bar suggestions:** matches from your bookmarks and history appear as you type, with inline completion.
-- **Settings page:** Ctrl+, for the search engine, home page, download behaviour, scanlines and automatic updates.
-- **Automatic updates:** new releases are downloaded in the background, checked against a SHA-256 checksum, and installed when NeonNet closes. Can be turned off.
+- **Tabs & Workspaces:** open, close, switch, drag to reorder, pin, mute, duplicate, horizontal wheel scroll, hover tooltips, and Opera GX-style **Workspaces** for organizing tab groups. Popups open as tabs, and you can optionally restore your last session on startup.
+- **Split View (`Ctrl+Alt+S`), Reader Mode (`Ctrl+Alt+R`) & Social Dock (`Ctrl+Alt+W`):** view two tabs side-by-side with a draggable divider, switch any article into a clean Reader Mode (`NEON`, `DARK`, `SEPIA`, `LIGHT` themes), and open a resizable left Social Dock for WhatsApp, Instagram, and Discord.
+- **Dark & Light Themes + Custom Accents:** switch between **Dark Synthwave** and **Light (Cyber Paper)** UI modes, pick or customize neon accent colors, enable **Force Dark Mode** on websites with per-site exceptions, and remap keyboard shortcuts in Settings.
+- **Turbo Multi-Connection Downloads:** IDM-style parallel byte-range downloads (`4` / `8` / `16` connections) routed through Chromium's network stack with zero-freeze NTFS sparse file I/O, a toolbar Downloads popover with live segmented progress bars, and auto-categorized folders in `Downloads\NeonNet Download`.
+- **Command Palette (`Ctrl+K`):** instant fuzzy search across open tabs, workspaces, bookmarks, history, settings, and browser commands.
+- **Ad & Tracker Shield & YouTube Ad Skipper:** toolbar Shield popover with independent **Block Ads** and **Block Trackers** toggles, per-site exceptions, and a native C++ YouTube ad skipper.
+- **Performance Panel (`Ctrl+Shift+M`):** docked sidebar with 24-sample SVG RAM/CPU sparklines, memory cleaner, sleeping tabs, Battery Saver (`ON/OFF` and `Auto <=25%`), and optional RAM, CPU, and network download limiters.
+- **New Tab Page:** animated sunset and perspective grid with customizable **Speed Dial** tiles and a persistent **Quick Notes** scratchpad.
+- **Address Bar & Search:** built-in Google and custom search engines (`%s` / `{query}`), inline bookmarks/history suggestions, and a clickable zoom percentage badge.
+- **Scanlines, Smooth Scrolling & HUD Status Bar:** optional CRT line effect (`SCAN`), animated wheel and keyboard scrolling, and live network download/upload speed in the status bar.
+- **"SIGNAL LOST" Error Page & Warnings:** themed error page with a `RETRY` button when a site fails to load, plus themed certificate and HTTPS-only warnings.
+- **Privacy & Security:** incognito windows (`Ctrl+Shift+N`), clear browsing data, HTTPS-only mode, proxy profiles, per-site permissions (`neonnet://permissions`), and saved passwords encrypted with your Windows account (DPAPI).
+- **Extensions (Userscripts):** `Ctrl+Shift+E` (`neonnet://extensions`) manages `.user.js` userscripts with `@match`/`@include`/`@exclude`, `@run-at`, and `GM_*` APIs.
+- **Find in Page, Bookmarks, History & Downloads:** `Ctrl+F`, `Ctrl+D`, `Ctrl+H`, `Ctrl+Shift+O` for bookmarks (with nested folders, bookmarks bar via `Ctrl+Shift+B`, and HTML import/export), `Ctrl+J` for downloads, and `Ctrl+Shift+T` to reopen closed tabs.
+- **Developer Tools & Single Window:** docked DevTools (`F12`), Chromium sandbox enabled for renderer/GPU processes, and `NeonNet.exe <url>` opens new tabs in the existing window.
+- **Installer & Automatic Updates:** per-user by default (no admin rights needed) or all-users install, default-browser registration, and background auto-updates verified against SHA-256 checksums.
 
 ## Download and install
 
