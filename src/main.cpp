@@ -1946,11 +1946,11 @@ static std::string ThemeRuleCss() {
     const char* trackCol = light ? "#eae5f7" : "#0a0420";
     const char* trackEdge = light ? "rgba(100,85,138,.2)" : "rgba(138,111,192,.18)";
     _snprintf_s(buf, sizeof(buf), _TRUNCATE,
-                ":root:not(.incog){--accent-primary:%s;--accent-primary-soft:%s;--accent-secondary:%s;--pink-rgb:%d,%d,%d;--cyan-rgb:%d,%d,%d;}"
+                ":root:not(.incog){--accent-primary:%s;--accent-primary-soft:%s;--accent-secondary:%s;--accent-primary-rgb:%d,%d,%d;--accent-secondary-rgb:%d,%d,%d;}"
                 "%s"
                 "::-webkit-scrollbar{width:7px;height:7px;}"
                 "::-webkit-scrollbar-track{background:%s;border-left:1px solid %s;}"
-                "::-webkit-scrollbar-thumb{background:rgba(var(--cyan-rgb,0,229,255),.32);border:1px solid rgba(var(--cyan-rgb,0,229,255),.55);}"
+                "::-webkit-scrollbar-thumb{background:rgba(var(--accent-secondary-rgb,0,229,255),.32);border:1px solid rgba(var(--accent-secondary-rgb,0,229,255),.55);}"
                 "::-webkit-scrollbar-thumb:hover{background:var(--accent-primary,#ff2e97);border-color:var(--accent-primary-soft,#ff7bc0);}"
                 "::-webkit-scrollbar-corner{background:%s;}",
                 Utf8(p).c_str(), Utf8(p2).c_str(), Utf8(c).c_str(),
@@ -1960,8 +1960,8 @@ static std::string ThemeRuleCss() {
                 trackCol, trackEdge, trackCol);
     std::string css(buf);
     if (g.highContrast.load()) {
-        css += light ? ":root:not(.incog){--accent-primary:#0000cc;--accent-primary-soft:#0000ff;--accent-secondary:#004488;--pink-rgb:0,0,204;--cyan-rgb:0,68,136;}"
-                     : ":root:not(.incog){--accent-primary:#ffff00;--accent-primary-soft:#ffff80;--accent-secondary:#00ffff;--pink-rgb:255,255,0;--cyan-rgb:0,255,255;}";
+        css += light ? ":root:not(.incog){--accent-primary:#0000cc;--accent-primary-soft:#0000ff;--accent-secondary:#004488;--accent-primary-rgb:0,0,204;--accent-secondary-rgb:0,68,136;}"
+                     : ":root:not(.incog){--accent-primary:#ffff00;--accent-primary-soft:#ffff80;--accent-secondary:#00ffff;--accent-primary-rgb:255,255,0;--accent-secondary-rgb:0,255,255;}";
         css += "body::after{display:none!important;}";
     }
     if (g.reducedMotion.load()) {
@@ -5342,10 +5342,10 @@ public:
         // be named after the address). Nothing from the request is echoed back.
         static const char NOT_FOUND[] =
             "<!doctype html><html><head><meta charset=\"utf-8\"><title>NOT FOUND</title><style>"
-            "html,body{margin:0;height:100%;background:var(--bg,#12062c);color:var(--text,#e8d8ff);font:14px Consolas,'Courier New',monospace}"
+            "html,body{margin:0;height:100%;background:var(--surface,#12062c);color:var(--text,#e8d8ff);font:14px Consolas,'Courier New',monospace}"
             "main{max-width:640px;margin:0 auto;padding:12vh 20px}"
-            "h1{margin:0;font:italic 900 56px Impact,'Arial Black',sans-serif;letter-spacing:3px;color:var(--cyan,#00e5ff);text-shadow:3px 3px 0 var(--pink,#ff2e97)}"
-            "p{color:var(--muted,#8a6fc0);letter-spacing:1px}a{color:var(--yellow,#ffd600);text-decoration:none}a:hover{text-decoration:underline}"
+            "h1{margin:0;font:italic 900 56px Impact,'Arial Black',sans-serif;letter-spacing:3px;color:var(--accent-secondary,#00e5ff);text-shadow:3px 3px 0 var(--accent-primary,#ff2e97)}"
+            "p{color:var(--text-muted,#8a6fc0);letter-spacing:1px}a{color:var(--highlight,#ffd600);text-decoration:none}a:hover{text-decoration:underline}"
             "</style></head><body><main><h1>404</h1><p>&gt; NO SUCH PAGE ON THIS NODE</p>"
             "<p><a href=\"https://neonnet.ui/newtab.html\">&gt; BACK TO THE GRID</a></p></main></body></html>";
         std::string nf = NOT_FOUND;

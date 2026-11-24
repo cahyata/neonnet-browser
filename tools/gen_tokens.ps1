@@ -29,11 +29,6 @@ foreach ($f in @($t.spacing.tokens + $t.radius.tokens + $t.cut.tokens + $t.zInde
 foreach ($p in $t.type.families.PSObject.Properties) { [void]$o.Append("--font-$($p.Name):$($p.Value);") }
 [void]$o.Append("}$nl")
 
-# Old variable names, kept as aliases of the role names. Declared on every theme scope so a nested
-# [data-theme] re-resolves them.
-[void]$o.Append("/* legacy names */${nl}:root,[data-theme]{")
-foreach ($c in $t.color.tokens) { if ($c.legacy -and $c.legacy -ne $c.name) { [void]$o.Append("--$($c.legacy):var(--$($c.name));") } }
-[void]$o.Append("}$nl")
 # An incognito window swaps the primary accent for green.
 [void]$o.Append(":root.incog{--accent-primary:#35ffa0;--accent-primary-soft:#9dffd0}$nl")
 

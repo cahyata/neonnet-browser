@@ -4,25 +4,25 @@
 <meta charset="utf-8">
 <title>WARNING</title>
 <style>
-html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:14px "Cascadia Mono",Consolas,monospace}
+html,body{margin:0;height:100%;background:var(--surface);color:var(--text);font:14px "Cascadia Mono",Consolas,monospace}
 body{display:flex;align-items:center;justify-content:center}
 body::after{content:"";position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.08) 2px 3px)}
 html.light body::after{background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.04) 2px 3px)}
-.b{border:1px solid var(--red);padding:28px 34px;max-width:660px;background:var(--bg2);
+.b{border:1px solid var(--danger);padding:28px 34px;max-width:660px;background:var(--surface-inset);
   clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}
-h1{margin:0 0 8px;font:italic 900 38px Impact,"Arial Black",sans-serif;letter-spacing:3px;color:var(--red);text-shadow:3px 3px 0 #5c1c5e}
-.y{color:var(--yellow);margin:0 0 14px}
-.u{color:var(--cyan);word-break:break-all;margin:0 0 14px}
+h1{margin:0 0 8px;font:italic 900 38px Impact,"Arial Black",sans-serif;letter-spacing:3px;color:var(--danger);text-shadow:3px 3px 0 #5c1c5e}
+.y{color:var(--highlight);margin:0 0 14px}
+.u{color:var(--accent-secondary);word-break:break-all;margin:0 0 14px}
 p{margin:0 0 14px;line-height:1.55;color:var(--text)}
-.m{color:var(--muted)}
+.m{color:var(--text-muted)}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:20px}
 button{font:bold 14px "Cascadia Mono",Consolas,monospace;border:0;padding:10px 22px;cursor:pointer}
-#back{background:var(--pink);color:var(--bg)}
-#back:hover,#back:focus{background:var(--cyan);outline:0}
-#adv{background:none;color:var(--muted);padding:10px 4px;font-weight:normal}
-#adv:hover{color:var(--cyan)}
-#go{background:none;color:var(--red);border:1px solid var(--red)}
-#go:hover{background:var(--red);color:var(--bg)}
+#back{background:var(--accent-primary);color:var(--surface)}
+#back:hover,#back:focus{background:var(--accent-secondary);outline:0}
+#adv{background:none;color:var(--text-muted);padding:10px 4px;font-weight:normal}
+#adv:hover{color:var(--accent-secondary)}
+#go{background:none;color:var(--danger);border:1px solid var(--danger)}
+#go:hover{background:var(--danger);color:var(--surface)}
 #more{display:none;margin-top:18px;padding-top:16px;border-top:1px solid #5c1c5e}
 #more.on{display:block}
 </style>
