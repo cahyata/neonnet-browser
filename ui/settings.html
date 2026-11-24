@@ -1,25 +1,16 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>SETTINGS</title>
 <style>
-:root{
-  --bg:#12062c;
-  --bg2:#0a0420;
-  --card:#190a38;
-  --row:#1b0b3d;
-  --tab:#2d1160;
-  --pink:#ff2e97;
-  --pink2:#ff7bc0;
-  --cyan:#00e5ff;
-  --yellow:#ffd600;
-  --muted:#8a6fc0;
-  --green:#35ffa0;
-  --line:#3a1a5e;
-  --text:#e8d8ff;
-}
 *{box-sizing:border-box}
+:is(button,input,select,a,[tabindex]):focus-visible{outline:2px solid var(--cyan);outline-offset:2px;box-shadow:0 0 0 2px var(--bg2),0 0 8px var(--cyan)}
+/* A clip-path also clips outlines and outer shadows, so on the cut-corner shapes the focus ring is drawn inside them */
+.addr:focus-within{box-shadow:inset 0 0 0 2px var(--cyan),inset 0 0 12px rgba(var(--cyan-rgb,0,229,255),.3)}
+.addr input:focus-visible{outline:none;box-shadow:none}
+.addr button:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--cyan)}
+:is(select,.txt):focus-visible,#toc a:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--cyan)}
 html{scroll-behavior:smooth}
 html,body{
   margin:0;
@@ -34,7 +25,7 @@ body::after{
   inset:0;
   pointer-events:none;
   z-index:50;
-  background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.15) 2px 3px);
+  background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.08) 2px 3px);
 }
 a{color:var(--cyan);text-decoration:none}
 a:hover{color:var(--yellow);text-decoration:underline}
@@ -46,8 +37,11 @@ a:hover{color:var(--yellow);text-decoration:underline}
   z-index:30;
   background:var(--bg);
   border-bottom:1px solid var(--cyan);
-  box-shadow:0 4px 24px rgba(10,4,32,.85);
+  box-shadow:0 4px 24px var(--shadow,rgba(10,4,32,.85));
 }
+html.light body::after{background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.04) 2px 3px);}
+html.light .hero{background:linear-gradient(135deg,#ffffff 0%,#f0eafc 65%,#f9e1f0 100%);}
+html.light .hero h1{text-shadow:2px 2px 0 color-mix(in srgb,var(--pink) 45%,transparent);}
 .top-row{
   max-width:1100px;
   margin:0 auto;
@@ -94,7 +88,7 @@ a:hover{color:var(--yellow);text-decoration:underline}
   color:var(--cyan);
   font:12px "Cascadia Mono","Consolas",monospace;
 }
-.addr input::placeholder{color:#5e4a8f}
+.addr input::placeholder{color:var(--muted)}
 .addr button{
   height:100%;
   border:0;
@@ -245,10 +239,10 @@ h2.subhead{margin-top:18px}
   min-height:50px;
 }
 .sec > .row:last-child{border-bottom:0}
-.row:hover{background:var(--row)}
+.row:hover,.row:focus-within{background:var(--row);box-shadow:inset 3px 0 0 var(--cyan)}
 .row.hidden{display:none}
 .lab{flex:1;min-width:0}
-.lab b{display:block;color:var(--cyan);font-weight:bold}
+.lab b{display:block;color:var(--strong);font-weight:bold}
 .lab span{display:block;color:var(--muted);margin-top:3px;font-size:12px;line-height:1.5}
 
 button,select,input{font:inherit}
@@ -267,8 +261,8 @@ button{cursor:pointer;border:0}
 .tog:hover:not(:disabled){background:var(--cyan);color:var(--bg);border-color:var(--cyan)}
 .tog:disabled{opacity:.4;cursor:default}
 .chip-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;background:var(--bg2);border:1px solid rgba(0,229,255,.4);color:#e8d8ff;font-size:11px}
-.chip .ctag{color:var(--pink);font-weight:bold;font-size:10px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;background:var(--bg2);border:1px solid rgba(var(--cyan-rgb,0,229,255),.4);color:var(--text);font-size:11px}
+.chip .ctag{color:var(--pink);font-weight:bold;font-size:11px}
 .chip button{color:var(--muted);background:none;padding:0 2px;font-size:12px}
 .chip button:hover{color:var(--pink)}
 
@@ -284,7 +278,7 @@ select,.txt{
 select{min-width:190px;cursor:pointer}
 select option{background:var(--bg2);color:var(--cyan)}
 .txt{width:300px;max-width:100%}
-.txt::placeholder{color:#5a4a8a}
+.txt::placeholder{color:var(--muted)}
 .btn{
   height:32px;
   padding:0 14px;
@@ -300,15 +294,18 @@ select option{background:var(--bg2);color:var(--cyan)}
 }
 .btn:hover:not(:disabled){background:var(--pink);color:var(--bg);text-decoration:none}
 .btn:disabled{opacity:.5;cursor:default}
+/* destructive actions: red, and a second click to confirm */
+.btn.danger,.tog.danger{border-color:var(--red);color:var(--red)}
+.btn.danger:hover:not(:disabled),.tog.danger:hover:not(:disabled),.btn.danger.arm,.tog.danger.arm{background:var(--red);border-color:var(--red);color:var(--bg)}
 .pair{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .row.stack{flex-direction:column;align-items:stretch;gap:10px}
 .row.stack .pair{justify-content:flex-start}
-.err{color:var(--pink2);font-size:12px;min-height:16px;margin-top:4px}
+.err{color:var(--red);font-size:12px;min-height:16px;margin-top:4px}
 .px-list{display:flex;flex-direction:column;gap:8px;width:100%;margin-top:4px}
 .px-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid rgba(138,111,192,.4);background:var(--bg2)}
 .px-item.on{border-color:var(--green);box-shadow:0 0 12px rgba(53,255,160,.12)}
 .px-meta{flex:1;min-width:0}
-.px-meta b{color:var(--cyan);font-size:13px}
+.px-meta b{color:var(--strong);font-size:13px}
 .px-meta span{display:block;color:var(--muted);font-size:11px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .px-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;width:100%}
 .px-grid .txt,.px-grid select{width:100%;min-width:0}
@@ -334,7 +331,7 @@ select option{background:var(--bg2);color:var(--cyan)}
   line-height:1.85;
   padding:10px 8px 6px;
 }
-.about b{color:var(--cyan);font-weight:normal}
+.about b{color:var(--strong);font-weight:normal}
 
 .empty-search{
   display:none;
@@ -368,9 +365,13 @@ select option{background:var(--bg2);color:var(--cyan)}
   aside{position:static}
   .row{flex-wrap:wrap}
 }
+.skip{position:absolute;left:12px;top:-60px;z-index:100;padding:8px 14px;background:var(--cyan);color:var(--bg);font-weight:bold;text-decoration:none}
+.skip:focus{top:8px}
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 </style>
 </head>
 <body>
+<a class="skip" href="#main">Skip to main content</a>
 
 <header class="topbar">
   <div class="top-row">
@@ -380,13 +381,13 @@ select option{background:var(--bg2);color:var(--cyan)}
       <input id="filter" spellcheck="false" autocomplete="off" placeholder="filter settings, toggles, or keywords (Ctrl+K)">
       <button id="clearFilter" title="Clear filter">&#10005;</button>
     </div>
-    <div class="hud-links">
+    <nav class="hud-links" aria-label="NeonNet pages">
       <a class="hud-link on" href="https://neonnet.ui/settings.html">SETTINGS</a>
       <a class="hud-link" href="https://neonnet.ui/extensions.html">EXTENSIONS</a>
       <a class="hud-link" href="https://neonnet.ui/bookmarks.html">BOOKMARKS</a>
       <a class="hud-link" href="https://neonnet.ui/history.html">HISTORY</a>
       <a class="hud-link" href="https://neonnet.ui/downloads.html">DOWNLOADS</a>
-    </div>
+    </nav>
   </div>
 </header>
 
@@ -412,14 +413,14 @@ select option{background:var(--bg2);color:var(--cyan)}
     </div>
   </aside>
 
-  <main>
+  <main id="main" tabindex="-1">
     <div class="hero">
       <h1>SETTINGS</h1>
       <div class="sub">&gt; SYSTEM CONFIG // CHANGES APPLY AT ONCE</div>
     </div>
 
     <div id="emptySearch" class="empty-search">
-      NO MATCHING SETTINGS FOR "<span id="emptyQuery"></span>" &mdash; CLEAR THE SEARCH BAR TO VIEW ALL OPTIONS.
+      No matching settings for "<span id="emptyQuery"></span>". Clear the search bar to see all options.
     </div>
 
     <section class="sec" id="sec-search">
@@ -468,6 +469,10 @@ select option{background:var(--bg2);color:var(--cyan)}
         <div class="lab"><b>Continue where you left off</b><span id="restoreHint"></span></div>
         <button class="tog" id="restoreSession">OFF</button>
       </div>
+      <div class="row">
+        <div class="lab"><b>Show Quick Start Tips on New Tab</b><span>Displays a dismissible quick-reference card on New Tab for DOCK, Shield, Reader Mode, Split View, Workspaces, and Command Palette.</span></div>
+        <button class="tog" id="showWelcome">ON</button>
+      </div>
     </section>
 
     <section class="sec" id="sec-privacy">
@@ -487,7 +492,7 @@ select option{background:var(--bg2);color:var(--cyan)}
           <button class="tog on" id="clrCookies" title="Cookies and other site data (local storage, offline data, sign-ins)">COOKIES + SITE DATA</button>
           <button class="tog on" id="clrCache" title="Cached images and files">CACHE</button>
           <button class="tog on" id="clrHistory" title="The pages you visited">HISTORY</button>
-          <button class="btn" id="clrGo">CLEAR</button>
+          <button class="btn danger" id="clrGo">CLEAR</button>
         </div>
       </div>
     </section>
@@ -529,6 +534,26 @@ select option{background:var(--bg2);color:var(--cyan)}
       <div class="row">
         <div class="lab"><b>Block trackers</b><span>Cancels analytics, telemetry, and tracking scripts across all websites.</span></div>
         <button class="tog" id="blockTrackers">ON</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Strip tracking parameters from URLs</b><span id="stripHint">Automatically removes tracking query parameters (utm_*, fbclid, gclid, igshid, etc.) during navigation and when using "Copy clean link".</span></div>
+        <button class="tog" id="stripTracking">ON</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Block third-party cookies</b><span>Blocks cross-site tracking cookies via Chromium cookie controls while keeping first-party site logins working.</span></div>
+        <button class="tog" id="block3pCookies">OFF</button>
+      </div>
+      <div class="row stack">
+        <div class="lab"><b>Third-party cookie site exceptions</b><span>Sites allowed to use third-party cookies (e.g. embedded SSO or payment frames).</span></div>
+        <div class="pair">
+          <input class="txt" id="cookie3pInput" spellcheck="false" autocomplete="off" placeholder="example.com">
+          <button class="btn" id="cookie3pAdd" type="button">+ ADD SITE</button>
+        </div>
+        <div class="chip-list" id="cookie3pExemptList"></div>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Strict cross-site Referrer</b><span>Trims cross-site Referer headers to the origin only (e.g. https://source.com/) so full paths and query strings are never leaked.</span></div>
+        <button class="tog" id="strictReferrer">OFF</button>
       </div>
       <div class="row stack">
         <div class="lab"><b>Ad &amp; tracker site exceptions</b><span>Sites where you turned off Ad Blocker or Tracker Blocker from the Shield popup.</span></div>
@@ -611,6 +636,24 @@ select option{background:var(--bg2);color:var(--cyan)}
         <div class="lab"><b>Position of the developer tools (F12)</b><span>Docked in the NeonNet window below, right or left of the page, or in a window of their own. Applies the next time they open.</span></div>
         <select id="devDock"><option value="0">BOTTOM</option><option value="1">RIGHT</option><option value="2">LEFT</option><option value="3">SEPARATE WINDOW</option></select>
       </div>
+
+      <h2 class="subhead">ACCESSIBILITY</h2>
+      <div class="row">
+        <div class="lab"><b>Screen reader / UI Automation support</b><span>Exposes the Chromium accessibility tree for screen readers (NVDA, Windows Narrator) across tabs and browser chrome.</span></div>
+        <button class="tog" id="a11yTree">OFF</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Reduced Motion &amp; Comfort Mode</b><span>Disables CRT scanlines, UI animations, fade transitions, and smooth-scroll motion across NeonNet and web pages (respects Windows animation settings by default).</span></div>
+        <button class="tog" id="reducedMotion">OFF</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>High Contrast Theme</b><span>Increases text and border contrast (&ge; 7:1), disables scanlines and shadows, and uses color-blind-safe high-visibility accents.</span></div>
+        <button class="tog" id="highContrast">OFF</button>
+      </div>
+      <div class="row">
+        <div class="lab"><b>Minimum font size (web pages)</b><span>Enforces a minimum readable text size on newly opened web pages without enlarging browser chrome.</span></div>
+        <select id="minFontSize"><option value="0">DEFAULT</option><option value="12">12 PX</option><option value="14">14 PX</option><option value="16">16 PX</option><option value="18">18 PX</option><option value="20">20 PX</option></select>
+      </div>
     </section>
 
     <section class="sec" id="sec-look">
@@ -673,7 +716,15 @@ select option{background:var(--bg2);color:var(--cyan)}
         <div class="lab"><b>Default reader text size</b><span>Initial font size in pixels for Reader Mode.</span></div>
         <select id="readerSize"><option value="14">14 PX</option><option value="16">16 PX</option><option value="18">18 PX</option><option value="20">20 PX</option><option value="22">22 PX</option><option value="24">24 PX</option></select>
       </div>
-      <h2 class="subhead" id="theme">THEME ACCENT</h2>
+      <h2 class="subhead" id="theme">LANGUAGE, THEME &amp; ACCENT</h2>
+      <div class="row">
+        <div class="lab"><b>Interface language</b><span>Choose English or Bahasa Indonesia for NeonNet chrome, New Tab, and Settings.</span></div>
+        <select id="lang"><option value="en">ENGLISH</option><option value="id">BAHASA INDONESIA</option></select>
+      </div>
+      <div class="row">
+        <div class="lab"><b>UI theme mode</b><span>Switch NeonNet's browser chrome, menus, dialogs, and built-in pages between Dark Synthwave and Light Cyber Paper.</span></div>
+        <select id="lightMode"><option value="0">DARK (SYNTHWAVE)</option><option value="1">LIGHT (CYBER PAPER)</option></select>
+      </div>
       <div class="row stack">
         <div class="lab"><b>Neon accent preset</b><span id="themeHint">Changes the primary &amp; secondary neon colors across the toolbar, window border, settings, and New Tab page.</span></div>
         <div class="theme-swatches" id="themeSwatches"></div>
@@ -761,8 +812,22 @@ select option{background:var(--bg2);color:var(--cyan)}
 const $ = s => document.querySelector(s);
 let cfg = null, flashTimer = 0;
 
+// Two clicks to delete: the first one arms the button for three seconds, the second one runs the action.
+function twoStep(btn, run){
+  const label = btn.textContent; let timer = 0;
+  btn.onclick = async e => {
+    if(e) e.stopPropagation();
+    if(!timer){
+      btn.classList.add('arm'); btn.textContent = window.__nnLang === 'id' ? 'YAKIN?' : 'CONFIRM?';
+      timer = setTimeout(() => { timer = 0; btn.classList.remove('arm'); btn.textContent = label; }, 3000);
+      return;
+    }
+    clearTimeout(timer); timer = 0; btn.classList.remove('arm'); btn.textContent = label;
+    await run();
+  };
+}
 function flash(){ const s = $('#saved'); s.classList.add('show'); clearTimeout(flashTimer); flashTimer = setTimeout(() => s.classList.remove('show'), 1200); }
-function setTog(id, on){ const b = $(id); b.classList.toggle('on', !!on); b.textContent = on ? 'ON' : 'OFF'; }
+function setTog(id, on){ const b = $(id); b.classList.toggle('on', !!on); b.textContent = on ? 'ON' : 'OFF'; b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
 
 async function load(){
   try { cfg = await (await fetch('/api/settings', {cache:'no-store'})).json(); } catch(e){ return; }
@@ -787,8 +852,15 @@ async function load(){
     ? 'A Save As dialog opens for every download (defaulting to ' + cfg.downloadDir + catNote + ').'
     : 'Files are saved straight into ' + cfg.downloadDir + catNote + ' (a number is added if the name is taken).';
   setTog('#favicons', cfg.favicons);
+  setTog('#showWelcome', !cfg.welcomeDismissed);
+  $('#lang').value = cfg.lang || 'en';
+  applySettingsLang(cfg.lang || 'en');
   setTog('#httpsOnly', cfg.httpsOnly);
   setTog('#smoothScroll', cfg.smoothScroll);
+  setTog('#a11yTree', cfg.a11yTree);
+  setTog('#reducedMotion', cfg.reducedMotion);
+  setTog('#highContrast', cfg.highContrast);
+  $('#minFontSize').value = String(cfg.minFontSize || 0);
   $('#smoothStep').value = String(cfg.smoothStep);
   $('#devDock').value = String(cfg.devDock);
   $('#defHint').textContent = cfg.defaultBrowser ? 'NeonNet is your default browser: web links and .html files from other programs open here.'
@@ -803,6 +875,23 @@ async function load(){
   $('#extHint').textContent = (cfg.scriptEnabled || 0) + ' enabled (' + (cfg.scriptTotal || 0) + ' installed). NeonNet runs .user.js userscripts (like Tampermonkey / Greasy Fork) instead of Chrome Web Store (.crx) extensions, which depend on Chrome\'s own toolbar and window UI.' + (cfg.incognito ? ' Incognito windows run existing scripts read-only.' : '');
   setTog('#blockAds', cfg.blockAds);
   setTog('#blockTrackers', cfg.blockTrackers);
+  setTog('#stripTracking', cfg.stripTracking !== false);
+  setTog('#block3pCookies', !!cfg.block3pCookies);
+  setTog('#strictReferrer', !!cfg.strictReferrer);
+  const cBox = $('#cookie3pExemptList'); cBox.textContent = '';
+  const cEx = cfg.cookie3pExempt || [];
+  if(!cEx.length){
+    const em = document.createElement('span'); em.style.cssText = 'color:var(--muted);font-size:12px'; em.textContent = 'No cookie exceptions.'; cBox.appendChild(em);
+  } else {
+    cEx.forEach(h => {
+      const c = document.createElement('span'); c.className = 'chip';
+      const t = document.createElement('span'); t.className = 'ctag'; t.textContent = '3P';
+      const b = document.createElement('button'); b.textContent = '\u2715'; b.title = 'Remove exception';
+      b.onclick = async () => { if(await set('cookie3pExemptDel', h)) load(); };
+      c.append(t, document.createTextNode(h), b); cBox.appendChild(c);
+    });
+  }
+  $('#stripHint').textContent = 'Automatically removes tracking query parameters (utm_*, fbclid, gclid, igshid, etc.) during navigation and when using "Copy clean link". ' + (cfg.strippedCount ? cfg.strippedCount + ' tracking parameters stripped since NeonNet started.' : '');
   $('#adHint').textContent = 'Cancels requests to well-known advertising and tracking sites, only when another site asks for them. Uses the EasyList, EasyPrivacy and Peter Lowe lists (about 82 000 sites), plus built-in YouTube ad skipping. ' + (cfg.blocked ? cfg.blocked + ' requests blocked since NeonNet started.' : '');
   const sBox = $('#shieldExemptList'); sBox.textContent = '';
   const adsEx = cfg.adsExempt || [], trkEx = cfg.trackersExempt || [];
@@ -866,6 +955,7 @@ async function load(){
     const o = document.createElement('option'); o.value = dwVal; o.textContent = 'CUSTOM (' + dwVal + ')'; dwEl.appendChild(o);
   }
   dwEl.value = dwVal;
+  $('#lightMode').value = cfg.lightMode ? '1' : '0';
   setTog('#scan', cfg.scan);
   setTog('#autoUpdate', cfg.autoUpdate);
   $('#autoUpdate').disabled = !cfg.installed;
@@ -902,6 +992,183 @@ function renderTheme(cfg){
   $('#accentCyan').value = cfg.accentCyan || '#00e5ff';
 }
 
+const SET_ID_LABELS = {
+  '#engine': ['Mesin pencari', 'Digunakan saat Anda mengetik kata pencarian di bilah alamat dan halaman Tab Baru.'],
+  '#defaultBrowser': ['Buka tautan dari program lain di NeonNet', null],
+  '#home': ['Halaman beranda', 'Dibuka saat awal dijalankan dan oleh tombol Beranda. Kosong berarti halaman Tab Baru.'],
+  '#favicons': ['Ikon situs di tab', 'Menampilkan ikon masing-masing situs pada tab.'],
+  '#restoreSession': ['Lanjutkan sesi terakhir', null],
+  '#showWelcome': ['Tampilkan Tips Mulai Cepat di Tab Baru', 'Menampilkan kartu panduan ringkas untuk DOCK, Shield, Mode Baca, Split View, Workspaces, dan Command Palette.'],
+  '#savePasswords': ['Tawarkan simpan kata sandi', null],
+  '#httpsOnly': ['Mode HTTPS-only', 'Membuka setiap alamat http:// lewat https:// secara otomatis.'],
+  '#blockAds': ['Blokir iklan (termasuk YouTube)', null],
+  '#blockTrackers': ['Blokir pelacak (tracker)', 'Membatalkan skrip analitik, telemetri, dan pelacakan lintas situs.'],
+  '#stripTracking': ['Hapus parameter pelacak URL', null],
+  '#block3pCookies': ['Blokir cookie pihak ketiga', 'Memblokir cookie pelacak lintas situs melalui kontrol cookie Chromium sambil menjaga login utama tetap bekerja.'],
+  '#strictReferrer': ['Strict cross-site Referrer', 'Memangkas header Referer lintas domain menjadi origin saja (mis. https://asal.com/) tanpa membocorkan path atau query.'],
+  '#dohMode': ['DNS-over-HTTPS (DoH)', null],
+  '#dohProvider': ['Penyedia DoH', null],
+  '#smoothScroll': ['Gulir halus (Smooth scrolling)', 'Menggunakan animasi halus saat menggulir dengan mouse wheel dan keyboard.'],
+  '#smoothStep': ['Jarak gulir', 'Seberapa jauh halaman bergeser per langkah gulir mouse.'],
+  '#smoothTime': ['Kehalusan animasi', 'Durasi animasi gulir halus.'],
+  '#devDock': ['Posisi Developer Tools (F12)', 'Letak panel DevTools di dalam jendela NeonNet atau jendela terpisah.'],
+  '#a11yTree': ['Dukungan Screen Reader / UI Automation', 'Mengaktifkan pohon aksesibilitas Chromium untuk pembaca layar (NVDA, Windows Narrator).'],
+  '#reducedMotion': ['Reduced Motion & Mode Nyaman', 'Mematikan scanlines CRT, animasi UI, efek pudar, dan gulir halus.'],
+  '#highContrast': ['Tema Kontras Tinggi', 'Meningkatkan kontras teks dan border (>= 7:1), mematikan scanlines dan bayangan.'],
+  '#minFontSize': ['Ukuran font minimum (halaman web)', 'Menetapkan ukuran teks minimum yang nyaman dibaca pada tab web baru.'],
+  '#fastDownload': ['Unduhan multi-koneksi cepat (mode IDM)', 'Mempercepat unduhan HTTP/HTTPS dengan membagi file ke beberapa koneksi paralel.'],
+  '#fastConnections': ['Koneksi paralel per unduhan', 'Jumlah maksimum aliran paralel untuk Turbo Download Engine.'],
+  '#askDownload': ['Selalu tanya lokasi simpan file', null],
+  '#bookmarksBar': ['Bilah markah (Bookmarks bar)', 'Menampilkan markah di bawah bilah alamat (Ctrl+Shift+B).'],
+  '#netSpeed': ['Kecepatan jaringan di status bar', 'Menampilkan kecepatan unduh (cyan) dan unggah (pink) di pojok kiri bawah.'],
+  '#forceDark': ['Mode Gelap Paksa (Force Dark)', 'Mengubah situs web terang menjadi gelap secara otomatis.'],
+  '#scan': ['Efek Scanlines', 'Garis tipis CRT di layar. Hanya bersifat visual.'],
+  '#lang': ['Bahasa antarmuka', 'Pilih Bahasa Indonesia atau English untuk chrome NeonNet, Tab Baru, dan Pengaturan.'],
+  '#lightMode': ['Mode tema UI', 'Ubah tampilan NeonNet antara Dark Synthwave dan Light Cyber Paper.'],
+  '#ramLimitMB': ['Pembatas RAM', 'Menidurkan tab latar belakang paling lama tidak dipakai saat batas RAM terlampaui.'],
+  '#bgLimit': ['Pembatas CPU (tab latar belakang)', 'Menurunkan prioritas proses dan mengaktifkan EcoQoS untuk tab latar belakang.'],
+  '#batterySaver': ['Penghemat baterai', 'Membatasi tab latar belakang dan menidurkan tab yang diam lebih dari 3 menit.'],
+  '#batteryAuto': ['Penghemat baterai otomatis (<=25%)', 'Mengaktifkan Penghemat Baterai otomatis saat baterai 25% atau lebih rendah.'],
+  '#netLimitKB': ['Pembatas jaringan', 'Membatasi kecepatan unduh lewat pengaturan DevTools.'],
+  '#autoUpdate': ['Periksa pembaruan otomatis', 'Mengecek rilis terbaru NeonNet sekali sehari di latar belakang.']
+};
+const SET_STATIC_ID = {
+  'SEARCH': 'PENCARIAN',
+  '01 // ADDRESS BAR': '01 // BILAH ALAMAT',
+  'DEFAULT BROWSER': 'BROWSER DEFAULT',
+  'START': 'MULAI',
+  '02 // STARTUP & TABS': '02 // AWAL & TAB',
+  'PRIVACY': 'PRIVASI',
+  '03 // DATA': '03 // DATA',
+  'PASSWORDS': 'KATA SANDI',
+  '04 // CREDENTIALS & PERMISSIONS': '04 // KREDENSIAL & IZIN',
+  'SITE PERMISSIONS': 'IZIN SITUS',
+  'EXTENSIONS (USERSCRIPTS)': 'EKSTENSI (USERSCRIPT)',
+  '05 // SCRIPTS & SECURITY': '05 // SKRIP & KEAMANAN',
+  'SECURITY': 'KEAMANAN',
+  'PROXY TUNNEL': 'TEROWONGAN PROXY',
+  'SCROLLING': 'GULIR',
+  '06 // INPUT & DEVTOOLS': '06 // INPUT & DEVTOOLS',
+  'DEVELOPER TOOLS': 'ALAT PENGEMBANG (DEVTOOLS)',
+  'ACCESSIBILITY': 'AKSESIBILITAS',
+  'DOWNLOADS': 'UNDUHAN',
+  '07 // FILES & APPEARANCE': '07 // BERKAS & TAMPILAN',
+  'LOOK': 'TAMPILAN',
+  'READER MODE DEFAULTS': 'DEFAULT MODE BACA',
+  'LANGUAGE, THEME & ACCENT': 'BAHASA, TEMA & AKSEN',
+  'PERFORMANCE & BATTERY': 'PERFORMA & BATERAI',
+  '08 // RESOURCES & DOCK': '08 // SUMBER DAYA & DOCK',
+  'SOCIAL DOCK': 'DOCK SOSIAL',
+  'KEYBINDINGS': 'PINTASAN KEYBOARD',
+  '09 // SHORTCUTS': '09 // PINTASAN',
+  'UPDATES': 'PEMBARUAN',
+  '10 // SYSTEM': '10 // SISTEM',
+  'ABOUT NEONNET': 'TENTANG NEONNET',
+  'Custom search engines': 'Mesin pencari kustom',
+  'Clear browsing data': 'Hapus data penjelajahan',
+  'Saved passwords': 'Kata sandi tersimpan',
+  'Camera, microphone, location and more': 'Kamera, mikrofon, lokasi, dan lainnya',
+  'Userscripts (.user.js)': 'Userscript (.user.js)',
+  'Ad & tracker site exceptions': 'Pengecualian iklan & pelacak situs',
+  'Third-party cookie site exceptions': 'Pengecualian cookie pihak ketiga per situs',
+  '+ ADD SITE': '+ TAMBAH SITUS',
+  'Built-in Proxy Tunnel': 'Terowongan Proxy Bawaan',
+  'Prevent WebRTC IP leaks': 'Cegah kebocoran IP WebRTC',
+  'Proxy server profiles': 'Profil server proxy',
+  'Save inside “NeonNet Download” folder': 'Simpan di folder “NeonNet Download”',
+  'Save inside "NeonNet Download" folder': 'Simpan di folder "NeonNet Download"',
+  'Auto-categorize into subfolders (IDM style)': 'Kategorikan otomatis ke subfolder (gaya IDM)',
+  'Force dark mode exceptions': 'Pengecualian Mode Gelap Paksa',
+  'Default reader theme': 'Tema mode baca default',
+  'Default reader font': 'Font mode baca default',
+  'Default reader text size': 'Ukuran teks mode baca default',
+  'Accent color preset': 'Preset warna aksen',
+  'Custom accent colors': 'Warna aksen kustom',
+  'Network limiter scope': 'Cakupan pembatas jaringan',
+  'Default dock app': 'Aplikasi dock default',
+  'Dock width': 'Lebar dock',
+  'Check for updates': 'Periksa pembaruan',
+  '+ ADD ENGINE': '+ TAMBAH MESIN',
+  'SAVE': 'SIMPAN',
+  'CLEAR': 'HAPUS',
+  'MANAGE': 'KELOLA',
+  'OPEN FOLDER': 'BUKA FOLDER',
+  'SET AS DEFAULT': 'JADIKAN DEFAULT',
+  'OPEN WINDOWS SETTINGS': 'BUKA PENGATURAN WINDOWS',
+  'COOKIES + SITE DATA': 'COOKIE + DATA SITUS',
+  'CACHE': 'CACHE',
+  'HISTORY': 'RIWAYAT',
+  'Last hour': '1 jam terakhir',
+  'Last 24 hours': '24 jam terakhir',
+  'Last 7 days': '7 hari terakhir',
+  'Last 4 weeks': '4 minggu terakhir',
+  'All time': 'Semua waktu',
+  'CHECK NOW': 'PERIKSA SEKARANG',
+  '+ ADD PROFILE': '+ TAMBAH PROFIL',
+  'RESET TO SYNTHWAVE': 'RESET KE SYNTHWAVE'
+};
+let origRowText = null;
+function applySettingsLang(l){
+  const isId = (l === 'id');
+  document.documentElement.lang = isId ? 'id' : 'en';
+  if(!origRowText){
+    origRowText = new Map();
+    for(const sel of Object.keys(SET_ID_LABELS)){
+      const el = $(sel), row = el && el.closest('.row');
+      const bEl = row && row.querySelector('.lab > b'), sEl = row && row.querySelector('.lab > span');
+      if(bEl) origRowText.set(sel, [bEl.textContent, sEl && !sEl.id ? sEl.textContent : null]);
+    }
+  }
+  $('#filter').placeholder = isId ? 'filter pengaturan, tombol, atau kata kunci (Ctrl+K)' : 'filter settings, toggles, or keywords (Ctrl+K)';
+  const heroH1 = $('.hero h1'), heroSub = $('.hero .sub');
+  if(heroH1) heroH1.textContent = isId ? 'PENGATURAN' : 'SETTINGS';
+  if(heroSub) heroSub.textContent = isId ? '> KONFIGURASI SISTEM // PERUBAHAN LANGSUNG BERLAKU' : '> SYSTEM CONFIG // CHANGES APPLY AT ONCE';
+  const hud = document.querySelectorAll('.hud-link');
+  const hudEn = ['SETTINGS','EXTENSIONS','BOOKMARKS','HISTORY','DOWNLOADS'];
+  const hudId = ['PENGATURAN','EKSTENSI','MARKAH','RIWAYAT','UNDUHAN'];
+  hud.forEach((a, i) => { if(hudEn[i]) a.textContent = isId ? hudId[i] : hudEn[i]; });
+  const tocEn = ['Search & Default','Startup & Tabs','Privacy & Data','Passwords & Sites','Extensions & Security','Scrolling & DevTools','Downloads & Look','Performance & Dock','Keybindings','Updates & About'];
+  const tocId = ['Pencarian & Default','Mulai & Tab','Privasi & Data','Kata Sandi & Situs','Ekstensi & Keamanan','Gulir & DevTools','Unduhan & Tampilan','Performa & Dock','Pintasan Keyboard','Pembaruan & Tentang'];
+  document.querySelectorAll('#toc a').forEach((a, i) => {
+    const num = a.querySelector('.num');
+    if(num && tocEn[i]) a.innerHTML = num.outerHTML + (isId ? tocId[i] : tocEn[i]);
+  });
+  for(const [sel, idPair] of Object.entries(SET_ID_LABELS)){
+    const el = $(sel), row = el && el.closest('.row');
+    if(!row) continue;
+    const bEl = row.querySelector('.lab > b'), sEl = row.querySelector('.lab > span');
+    const pair = isId ? idPair : (origRowText.get(sel) || []);
+    if(bEl && pair[0]) bEl.textContent = pair[0];
+    if(sEl && !sEl.id && pair[1]) sEl.textContent = pair[1];
+  }
+  document.querySelectorAll('main h2, main h2 .tag, .lab > b, button.btn, a.btn, #clrCookies, #clrCache, #clrHistory, #clrRange option').forEach(el => {
+    if(el.querySelector && el.querySelector('.tag')){
+      const tag = el.querySelector('.tag');
+      const raw = el.firstChild && el.firstChild.nodeType === 3 ? el.firstChild.textContent.trim() : '';
+      if(!el.dataset.enHead && raw) el.dataset.enHead = raw;
+      const enH = el.dataset.enHead;
+      if(enH && el.firstChild && el.firstChild.nodeType === 3){
+        el.firstChild.textContent = (isId && SET_STATIC_ID[enH] ? SET_STATIC_ID[enH] : enH) + ' ';
+      }
+      if(!tag.dataset.enTxt) tag.dataset.enTxt = tag.textContent.trim();
+      const enT = tag.dataset.enTxt;
+      tag.textContent = (isId && SET_STATIC_ID[enT]) ? SET_STATIC_ID[enT] : enT;
+      return;
+    }
+    if(el.children && el.children.length) return;
+    if(!el.dataset.enTxt) el.dataset.enTxt = el.textContent.trim();
+    const en = el.dataset.enTxt;
+    if(SET_STATIC_ID[en]) el.textContent = isId ? SET_STATIC_ID[en] : en;
+  });
+}
+window.__nnSetLang = applySettingsLang;
+
+$('#lightMode').onchange = async () => { await set('lightMode', $('#lightMode').value); load(); };
+$('#lang').onchange = async () => { await set('lang', $('#lang').value); load(); };
+$('#showWelcome').onclick = async () => {
+  const wantShow = !$('#showWelcome').classList.contains('on');
+  if(await set('welcomeDismissed', wantShow ? '0' : '1')) load();
+};
 $('#accentPink').onchange = async () => { await set('accentPink', $('#accentPink').value); load(); };
 $('#accentCyan').onchange = async () => { await set('accentCyan', $('#accentCyan').value); load(); };
 $('#themeReset').onclick = async () => { await set('accentPreset', 'synthwave'); load(); };
@@ -1058,7 +1325,7 @@ let proxyCfg = null, pxEditId = 0, pxKeepPass = false, pxPollTimer = 0;
 function setProxyStatus(msg, ok){
   const el = $('#proxyStatus');
   el.textContent = msg || '';
-  el.style.color = ok ? '#35ffa0' : '';
+  el.style.color = ok ? 'var(--green)' : '';
 }
 async function loadProxy(){
   try { proxyCfg = await (await fetch('/api/proxy', {cache:'no-store'})).json(); } catch(e){ return; }
@@ -1107,8 +1374,8 @@ async function loadProxy(){
     if(!proxyCfg.incognito){
       const edBtn = document.createElement('button'); edBtn.className = 'btn'; edBtn.textContent = 'EDIT';
       edBtn.onclick = () => openProxyForm(p);
-      const delBtn = document.createElement('button'); delBtn.className = 'tog'; delBtn.textContent = 'DEL';
-      delBtn.onclick = async () => { await fetch('/api/proxy/delete?id=' + p.id, {cache:'no-store'}); flash(); loadProxy(); };
+      const delBtn = document.createElement('button'); delBtn.className = 'tog danger'; delBtn.textContent = 'DEL';
+      twoStep(delBtn, async () => { await fetch('/api/proxy/delete?id=' + p.id, {cache:'no-store'}); flash(); loadProxy(); });
       acts.append(edBtn, delBtn);
     }
     item.append(meta, acts);
@@ -1216,11 +1483,11 @@ function renderCustomEngines(c){
     useBtn.onclick = async () => { await set('search', e.id); load(); };
     const edBtn = document.createElement('button'); edBtn.className = 'btn'; edBtn.textContent = 'EDIT';
     edBtn.onclick = () => openEngForm(e);
-    const delBtn = document.createElement('button'); delBtn.className = 'tog'; delBtn.textContent = 'DEL';
-    delBtn.onclick = async () => {
+    const delBtn = document.createElement('button'); delBtn.className = 'tog danger'; delBtn.textContent = 'DEL';
+    twoStep(delBtn, async () => {
       await fetch('/api/engines/delete?id=' + encodeURIComponent(e.id), {cache:'no-store'});
       flash(); load();
-    };
+    });
     acts.append(useBtn, edBtn, delBtn);
     item.append(meta, acts);
     box.appendChild(item);
@@ -1281,7 +1548,7 @@ function renderUpd(cfg){
       st.style.color = 'var(--green)';
       st.textContent = 'NeonNet ' + (cfg.version || '') + ' is up to date.';
     } else if(cfg.updResult === 'failed'){
-      st.style.color = 'var(--pink2)';
+      st.style.color = 'var(--red)';
       st.textContent = 'Update check failed' + (cfg.updError ? ': ' + cfg.updError : '.');
     } else {
       st.textContent = 'Check GitHub for a newer release.';
@@ -1294,7 +1561,7 @@ $('#checkUpdate').onclick = async () => {
   const act = lastUpdState === 'ready' ? 'restart' : lastUpdState === 'available' ? 'download' : '1';
   if(await set('checkUpdate', act)) load();
 };
-for(const k of ['fastConnections', 'smoothStep', 'smoothTime', 'devDock', 'dohMode', 'dohProvider', 'readerTheme', 'readerFont', 'readerSize', 'ramLimitMB', 'netLimitKB', 'netLimitAll', 'dockDefault', 'dockWidth']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
+for(const k of ['fastConnections', 'smoothStep', 'smoothTime', 'devDock', 'minFontSize', 'dohMode', 'dohProvider', 'readerTheme', 'readerFont', 'readerSize', 'ramLimitMB', 'netLimitKB', 'netLimitAll', 'dockDefault', 'dockWidth']) $('#' + k).onchange = async () => { await set(k, $('#' + k).value); load(); };
 $('#openDlFolder').onclick = () => { fetch('/api/downloads/folder?id=0', {cache:'no-store'}).catch(() => {}); };
 async function saveDohCustom(){
   const v = $('#dohCustom').value.trim();
@@ -1305,9 +1572,15 @@ async function saveDohCustom(){
 }
 $('#dohCustomSave').onclick = saveDohCustom;
 $('#dohCustom').addEventListener('keydown', e => { if(e.key === 'Enter') saveDohCustom(); });
-for(const [id, key] of [['#fastDownload','fastDownload'], ['#dlSubfolder','dlSubfolder'], ['#dlCategories','dlCategories'], ['#askDownload','askDownload'], ['#forceDark','forceDark'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#bookmarksBar','bookmarksBar'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds'], ['#blockTrackers','blockTrackers'], ['#bgLimit','bgLimit'], ['#batterySaver','batterySaver'], ['#batteryAuto','batteryAuto']]){
+for(const [id, key] of [['#fastDownload','fastDownload'], ['#dlSubfolder','dlSubfolder'], ['#dlCategories','dlCategories'], ['#askDownload','askDownload'], ['#forceDark','forceDark'], ['#scan','scan'], ['#autoUpdate','autoUpdate'], ['#restoreSession','restoreSession'], ['#favicons','favicons'], ['#bookmarksBar','bookmarksBar'], ['#httpsOnly','httpsOnly'], ['#smoothScroll','smoothScroll'], ['#a11yTree','a11yTree'], ['#reducedMotion','reducedMotion'], ['#highContrast','highContrast'], ['#netSpeed','netSpeed'], ['#savePasswords','savePasswords'], ['#blockAds','blockAds'], ['#blockTrackers','blockTrackers'], ['#stripTracking','stripTracking'], ['#block3pCookies','block3pCookies'], ['#strictReferrer','strictReferrer'], ['#bgLimit','bgLimit'], ['#batterySaver','batterySaver'], ['#batteryAuto','batteryAuto']]){
   $(id).onclick = async () => { const next = !$(id).classList.contains('on'); if(await set(key, next ? '1' : '0')) load(); };
 }
+$('#cookie3pAdd').onclick = async () => {
+  const v = $('#cookie3pInput').value.trim();
+  if(!v) return;
+  if(await set('cookie3pExemptAdd', v)){ $('#cookie3pInput').value = ''; load(); }
+};
+$('#cookie3pInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('#cookie3pAdd').click(); });
 async function saveHome(){
   const v = $('#home').value.trim();
   if(v && !/^(https?:\/\/|file:\/\/\/)/i.test(v)){ $('#homeErr').textContent = 'The address must start with http://, https:// or file:///'; return; }
@@ -1321,13 +1594,21 @@ for(const id of ['#clrCookies', '#clrCache', '#clrHistory']) $(id).onclick = () 
 if(new URLSearchParams(location.search).get('clear') === 'history'){
   $('#clrCookies').classList.remove('on'); $('#clrCache').classList.remove('on');
 }
-let clearing = false;
+let clearing = false, clrArm = 0, clrLabel = 'CLEAR';
 $('#clrGo').onclick = async () => {
   if(clearing) return;
   const cookies = $('#clrCookies').classList.contains('on'), cache = $('#clrCache').classList.contains('on'),
         history = $('#clrHistory').classList.contains('on');
   const msg = $('#clrMsg');
   if(!cookies && !cache && !history){ msg.style.color = ''; msg.textContent = 'Tick at least one kind of data.'; return; }
+  // Two clicks to clear: the first one arms the button for three seconds.
+  const go = $('#clrGo');
+  if(!clrArm){
+    clrLabel = go.textContent; go.classList.add('arm'); go.textContent = window.__nnLang === 'id' ? 'YAKIN?' : 'CONFIRM?';
+    clrArm = setTimeout(() => { clrArm = 0; go.classList.remove('arm'); go.textContent = clrLabel; }, 3000);
+    return;
+  }
+  clearTimeout(clrArm); clrArm = 0; go.classList.remove('arm');
   msg.textContent = ''; clearing = true; $('#clrGo').disabled = true; $('#clrGo').textContent = 'CLEARING...';
   try {
     const q = 'range=' + encodeURIComponent($('#clrRange').value) + '&cookies=' + (cookies ? 1 : 0) + '&cache=' + (cache ? 1 : 0) + '&history=' + (history ? 1 : 0);

@@ -2,6 +2,21 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Accessibility & UI
+- **Light theme contrast:** the neon accents, `ON` green, danger red and yellow now reach 4.5:1 on every light surface. The accent is darkened until it passes instead of to a fixed brightness, and the Extensions page, the bookmarks drop-down and the VPN panel no longer use dark-theme-only colours in light mode.
+- **Visible keyboard focus:** the address bar, search fields, selects, tabs, the `GO` button and the Settings index drew their focus ring outside a cut corner, where it was clipped away. The ring is now drawn inside the shape. The command palette and the workspace dialog show focus too.
+- **Destructive actions:** delete, clear and cancel actions use a red role colour instead of the primary pink, and single deletes (bookmark, saved password, search engine, proxy profile, workspace) and **Clear browsing data** ask for a second click first.
+- **Accent presets:** Cyber Matrix is lime (`#a6ff1f`) so it no longer matches the mint ON / incognito colour, and Solar Amber's secondary is blue so it no longer matches the yellow chrome highlight.
+- **Page language:** every internal page sets `<html lang>` from the chosen interface language.
+- **Readability:** no text below 11px, error and empty-state messages in sentence case, setting names in the strong text colour (cyan is for links and fields), a visible hover bar on rows, a 24px tab close button that also shows for the keyboard-focused tab, and placeholders that meet 4.5:1.
+- Row actions on Bookmarks, History and Downloads stay reachable with the keyboard.
+- **Screen readers:** every page has a `nav` for its page links, a skip link, a `main` landmark and a heading outline. Fields and toggles get accessible names from their setting label, status and error text is announced, and the toolbar popups are dialogs that hand focus back to the button that opened them.
+- **Design tokens:** colours, spacing, cuts and type now live in `design/tokens.json` with role names (`surface`, `text-muted`, `accent-primary`, `danger`, ...). `tools/gen_tokens.ps1` (run by `build.ps1`) generates `ui/tokens.css`, which every NeonNet page receives first. The old names (`--bg`, `--pink`, ...) still work as aliases, and the duplicated colour lists in each page are gone.
+- **Component catalog:** `design/catalog.html` shows every token and component with the real `ui/tokens.css`, with buttons for the dark, light and high-contrast themes. Open it in a browser; no build is needed.
+- **Scanlines** are lighter (8%) on NeonNet's own pages, Crimson Edge is a scarlet that no longer looks like the danger red, and the tab speaker icon is a 24px target.
+
 ## [1.10.0] - 2026-11-17
 
 ### Features

@@ -15,6 +15,7 @@ IDR_PASSWORDS RCDATA "..\\ui\\passwords.html"
 IDR_PERMISSIONS RCDATA "..\\ui\\permissions.html"
 IDR_EXTENSIONS RCDATA "..\\ui\\extensions.html"
 IDR_YT_ADSKIP RCDATA "..\\ui\\yt-adskip.user.js"
+IDR_TOKENS RCDATA "..\\ui\\tokens.css"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION 1,10,0,0

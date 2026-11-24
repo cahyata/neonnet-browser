@@ -64,6 +64,8 @@ if (-not (Test-Path $wrapperLib)) {
 
 # --- 2. NeonNet.dll ---
 Write-Host '== NeonNet.dll'
+& powershell -NoProfile -ExecutionPolicy Bypass -File tools\gen_tokens.ps1
+if ($LASTEXITCODE -ne 0) { throw 'gen_tokens.ps1 failed' }
 Push-Location src; Run rc @('/nologo', '/fo', '..\build\obj\app\app.res', 'app.rc'); Pop-Location
 Run cl ($cflags + @('/Fobuild\obj\app\', 'src\main.cpp', 'src\updater.cpp', 'src\store.cpp', 'src\perf.cpp', 'src\crash.cpp', 'src\userscripts.cpp'))
 $libs = @('build\obj\app\main.obj', 'build\obj\app\updater.obj', 'build\obj\app\store.obj', 'build\obj\app\perf.obj', 'build\obj\app\crash.obj', 'build\obj\app\userscripts.obj', 'build\obj\app\app.res', $wrapperLib, "$cef\Release\libcef.lib",

@@ -1,19 +1,24 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>DOWNLOADS</title>
 <style>
-:root{--bg:#12062c;--bg2:#0a0420;--row:#1b0b3d;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0;--green:#35ffa0}
 *{box-sizing:border-box}
+:is(button,input,select,a,[tabindex]):focus-visible{outline:2px solid var(--cyan);outline-offset:2px;box-shadow:0 0 0 2px var(--bg2),0 0 8px var(--cyan)}
+/* A clip-path also clips outlines and outer shadows, so on the cut-corner shapes the focus ring is drawn inside them */
+.addr:focus-within,.search:focus-within{box-shadow:inset 0 0 0 2px var(--cyan),inset 0 0 12px rgba(var(--cyan-rgb,0,229,255),.3)}
+.addr input:focus-visible,.search input:focus-visible{outline:none;box-shadow:none}
+.addr button:focus-visible,.search button:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--cyan)}
 ::-webkit-scrollbar{width:8px;height:8px}
 ::-webkit-scrollbar-track{background:var(--bg2);border-left:1px solid rgba(138,111,192,.18)}
 ::-webkit-scrollbar-thumb{background:rgba(138,111,192,.45);border:1px solid rgba(0,229,255,.35)}
 ::-webkit-scrollbar-thumb:hover{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
 ::-webkit-scrollbar-corner{background:var(--bg2)}
-html,body{margin:0;min-height:100%;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
-body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.15) 2px 3px)}
-.topbar{position:sticky;top:0;z-index:30;background:var(--bg);border-bottom:1px solid var(--cyan);box-shadow:0 4px 24px rgba(10,4,32,.85)}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font:13px "Cascadia Mono","Consolas","Courier New",monospace}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.08) 2px 3px)}
+html.light body::after{background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.04) 2px 3px)}
+.topbar{position:sticky;top:0;z-index:30;background:var(--bg);border-bottom:1px solid var(--cyan);box-shadow:0 4px 24px var(--shadow)}
 .top-row{max-width:1100px;margin:0 auto;padding:10px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .brand{color:var(--yellow);font-weight:bold;letter-spacing:1.5px;white-space:nowrap;display:flex;align-items:center;gap:8px}
 .brand b{color:var(--pink)}
@@ -22,7 +27,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;bac
   clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px))}
 .addr span{color:var(--pink);padding:0 6px 0 10px;user-select:none}
 .addr input{flex:1;min-width:0;height:100%;background:none;border:0;outline:0;color:var(--cyan);font:12px "Cascadia Mono","Consolas",monospace}
-.addr input::placeholder{color:#5e4a8f}
+.addr input::placeholder{color:var(--muted)}
 .addr button{height:100%;border:0;background:none;color:var(--muted);padding:0 10px;cursor:pointer;font:inherit;display:none}
 .addr button.show{display:block}
 .addr button:hover{color:var(--pink)}
@@ -37,29 +42,29 @@ main{max-width:1100px;margin:0 auto;padding:22px 18px 60px}
   clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))}
 .search span{color:var(--pink);padding:0 6px 0 12px}
 .search input{flex:1;height:100%;background:none;border:0;outline:0;color:var(--cyan);font:14px "Cascadia Mono","Consolas",monospace}
-.search input::placeholder{color:#5a4a8a}
+.search input::placeholder{color:var(--muted)}
 button{font:inherit;cursor:pointer;border:0}
 .tool-btns{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .btn-folder{height:36px;padding:0 14px;background:rgba(0,229,255,.08);border:1px solid var(--cyan);color:var(--cyan);font-weight:bold;letter-spacing:.8px}
 .btn-folder:hover{background:var(--cyan);color:var(--bg)}
-.danger{height:36px;padding:0 16px;background:none;border:1px solid var(--pink);color:var(--pink);font-weight:bold}
-.danger:hover,.danger.arm{background:var(--pink);color:var(--bg)}
+.danger{height:36px;padding:0 16px;background:none;border:1px solid var(--red);color:var(--red);font-weight:bold}
+.danger:hover,.danger.arm{background:var(--red);color:var(--bg)}
 .cats{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid rgba(138,111,192,.25)}
 .cat-btn{height:28px;padding:0 10px;background:var(--bg2);border:1px solid rgba(138,111,192,.4);color:var(--muted);font:bold 11px "Cascadia Mono","Consolas",monospace;letter-spacing:.8px;display:inline-flex;align-items:center;gap:6px}
 .cat-btn:hover{border-color:var(--cyan);color:var(--cyan)}
 .cat-btn.on{border-color:var(--cyan);background:rgba(0,229,255,.14);color:var(--cyan)}
-.cat-btn i{font-style:normal;font-size:10px;color:var(--yellow);opacity:.85}
+.cat-btn i{font-style:normal;font-size:11px;color:var(--yellow);opacity:.85}
 .row{display:flex;align-items:center;gap:12px;padding:10px 10px;border-bottom:1px solid rgba(138,111,192,.25)}
-.row:hover{background:var(--row)}
+.row:hover,.row:focus-within{background:var(--row);box-shadow:inset 3px 0 0 var(--cyan)}
 .info{flex:1;min-width:0}
 .name-row{display:flex;align-items:center;gap:8px;min-width:0}
-.name{color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:bold}
-.badge-cat{flex:none;padding:1px 6px;border:1px solid rgba(138,111,192,.55);background:rgba(10,4,32,.7);color:var(--muted);font-size:10px;letter-spacing:.8px;text-transform:uppercase}
-.badge-turbo{flex:none;padding:1px 6px;border:1px solid var(--yellow);background:rgba(255,214,0,.1);color:var(--yellow);font-size:10px;font-weight:bold;letter-spacing:.8px}
+.name{color:var(--strong);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:bold}
+.badge-cat{flex:none;padding:1px 6px;border:1px solid rgba(138,111,192,.55);background:var(--bg2);color:var(--muted);font-size:11px;letter-spacing:.8px;text-transform:uppercase}
+.badge-turbo{flex:none;padding:1px 6px;border:1px solid var(--yellow);background:rgba(255,214,0,.1);color:var(--yellow);font-size:11px;font-weight:bold;letter-spacing:.8px}
 .row.dead .name{color:var(--muted);text-decoration:line-through}
 .meta{color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .meta b{font-weight:normal}
-.ok b{color:var(--green)} .bad b{color:var(--pink2)} .run b{color:var(--yellow)}
+.ok b{color:var(--green)} .bad b{color:var(--red)} .run b{color:var(--yellow)}
 .bar{height:5px;background:var(--bg2);margin-top:6px;border:1px solid rgba(0,229,255,.35)}
 .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--pink),var(--cyan))}
 .segs{display:flex;gap:3px;margin-top:4px;height:4px}
@@ -70,16 +75,20 @@ button{font:inherit;cursor:pointer;border:0}
 .acts button:hover{background:var(--cyan);color:var(--bg)}
 .acts button.retry{border-color:var(--yellow);color:var(--yellow)}
 .acts button.retry:hover{background:var(--yellow);color:var(--bg)}
-.acts button.stop{border-color:var(--pink);color:var(--pink)}
-.acts button.stop:hover{background:var(--pink);color:var(--bg)}
-.acts .x{width:28px;padding:0;border-color:transparent;color:var(--muted);visibility:hidden}
-.row:hover .acts .x{visibility:visible}
-.acts .x:hover{background:var(--pink);color:var(--bg)}
+.acts button.stop{border-color:var(--red);color:var(--red)}
+.acts button.stop:hover{background:var(--red);color:var(--bg)}
+.acts .x{width:28px;padding:0;border-color:transparent;color:var(--muted);opacity:0}
+.row:hover .acts .x,.row:focus-within .acts .x{opacity:1}
+.acts .x:hover{background:var(--red);color:var(--bg)}
 .empty{color:var(--muted);margin-top:40px;text-align:center;letter-spacing:1px}
 .note{color:var(--muted);margin-top:22px;font-size:12px}
+.skip{position:absolute;left:12px;top:-60px;z-index:100;padding:8px 14px;background:var(--cyan);color:var(--bg);font-weight:bold;text-decoration:none}
+.skip:focus{top:8px}
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 </style>
 </head>
 <body>
+<a class="skip" href="#main">Skip to main content</a>
 <header class="topbar">
   <div class="top-row">
     <div class="brand">&#9632; <b>NEON</b>NET // DOWNLOADS <span class="tbadge">FILES</span></div>
@@ -88,16 +97,16 @@ button{font:inherit;cursor:pointer;border:0}
       <input id="q" spellcheck="false" autocomplete="off" placeholder="search downloads (Ctrl+K)">
       <button id="qClear" title="Clear filter">&#10005;</button>
     </div>
-    <div class="hud-links">
+    <nav class="hud-links" aria-label="NeonNet pages">
       <a class="hud-link" href="https://neonnet.ui/settings.html">SETTINGS</a>
       <a class="hud-link" href="https://neonnet.ui/extensions.html">EXTENSIONS</a>
       <a class="hud-link" href="https://neonnet.ui/bookmarks.html">BOOKMARKS</a>
       <a class="hud-link" href="https://neonnet.ui/history.html">HISTORY</a>
       <a class="hud-link on" href="https://neonnet.ui/downloads.html">DOWNLOADS</a>
-    </div>
+    </nav>
   </div>
 </header>
-<main>
+<main id="main" tabindex="-1">
   <div class="tools">
     <div class="sub">&gt; TURBO MULTI-CONNECTION DOWNLOAD MANAGER // AUTO-CATEGORIZED FOLDERS</div>
     <div class="tool-btns">
@@ -236,7 +245,7 @@ function render(){
     sig = ids; list.textContent = '';
     if(!shown.length){
       const e = document.createElement('div'); e.className = 'empty';
-      e.textContent = q ? 'NO MATCHES FOR "' + q.toUpperCase() + '"' : (activeCat !== 'ALL' ? 'NO DOWNLOADS IN CATEGORY [' + activeCat.toUpperCase() + '].' : 'NOTHING DOWNLOADED YET.');
+      e.textContent = q ? 'No matches for "' + q + '".' : (activeCat !== 'ALL' ? 'No downloads in the ' + activeCat + ' category.' : 'Nothing downloaded yet.');
       list.appendChild(e);
     } else for(const it of shown){
       let r = rows.get(it.id); if(!r){ r = build(it); rows.set(it.id, r); }
@@ -274,6 +283,18 @@ $('#clear').onclick = async () => {
   clearTimeout(armed); armed = 0; b.classList.remove('arm'); b.textContent = 'CLEAR LIST';
   await act('clear', 0); sig = ''; poll();
 };
+function applyDlLang(l){
+  const isId = (l === 'id');
+  document.documentElement.lang = isId ? 'id' : 'en';
+  const hudEn = ['SETTINGS','EXTENSIONS','BOOKMARKS','HISTORY','DOWNLOADS'], hudId = ['PENGATURAN','EKSTENSI','MARKAH','RIWAYAT','UNDUHAN'];
+  document.querySelectorAll('.hud-link').forEach((a,i) => { if(hudEn[i]) a.textContent = isId ? hudId[i] : hudEn[i]; });
+  $('#q').placeholder = isId ? 'cari unduhan (Ctrl+K)' : 'search downloads (Ctrl+K)';
+  const sub = $('.sub'); if(sub) sub.textContent = isId ? '> PENGELOLA UNDUHAN TURBO MULTI-KONEKSI // FOLDER OTOMATIS' : '> TURBO MULTI-CONNECTION DOWNLOAD MANAGER // AUTO-CATEGORIZED FOLDERS';
+  if($('#openRoot')) $('#openRoot').textContent = isId ? 'BUKA FOLDER UNDUHAN' : 'OPEN DOWNLOAD FOLDER';
+  if($('#clear') && !$('#clear').classList.contains('arm')) $('#clear').textContent = isId ? 'BERSIHKAN DAFTAR' : 'CLEAR LIST';
+}
+window.__nnSetLang = applyDlLang;
+if(window.__nnLang === 'id') applyDlLang('id');
 poll();
 </script>
 </body>

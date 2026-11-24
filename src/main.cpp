@@ -131,7 +131,7 @@ enum Cmd {
     CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_BOOKMARKS_BAR, CMD_HISTORY,
     CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS, CMD_BLOCKTRACKERS, CMD_EXTENSIONS, CMD_HELP, CMD_CARET,
     CMD_PALETTE, CMD_PIN_TAB, CMD_MUTE_TAB, CMD_FORCEDARK, CMD_DARK_EXEMPT, CMD_PROXY_TOGGLE,
-    CMD_SPLIT_VIEW, CMD_SPLIT_SWAP, CMD_READER_MODE, CMD_WHATSAPP
+    CMD_SPLIT_VIEW, CMD_SPLIT_SWAP, CMD_READER_MODE, CMD_WHATSAPP, CMD_LIGHTMODE, CMD_COPY_CLEAN
 };
 enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW, DLA_RETRY, DLA_ROOT_FOLDER };
 
@@ -144,7 +144,7 @@ struct UpdateMsg {
     std::wstring version, path, page, error;
 };
 enum { MENU_OPEN_LINK_TAB = MENU_ID_USER_FIRST, MENU_INSPECT, MENU_OPEN_PLAYER,
-       MENU_VIEW_SOURCE, MENU_OPEN_IMAGE_TAB, MENU_OPEN_LINK_INCOGNITO, MENU_SEARCH_SELECTION };
+       MENU_VIEW_SOURCE, MENU_OPEN_IMAGE_TAB, MENU_OPEN_LINK_INCOGNITO, MENU_SEARCH_SELECTION, MENU_COPY_CLEAN_LINK };
 
 // A login the user just sent, waiting to see whether it worked before NeonNet offers to save it.
 struct PwPending { std::wstring origin, user, pass; ULONGLONG at = 0; };
@@ -273,6 +273,13 @@ struct App {
     bool savePasswords = true;        // offer to save passwords (registry SavePasswords)
     bool smooth = true;               // smooth scrolling (registry SmoothScroll), with the distance of a wheel step in px (100 = the normal step)
     bool forceDark = false;           // force dark mode on web pages via Blink Auto Dark (registry ForceDark)
+    bool a11yTree = false;            // enable CEF accessibility tree for screen readers (registry Accessibility)
+    std::atomic<bool> reducedMotion{ false }; // reduced motion & comfort mode (registry ReducedMotion)
+    std::atomic<bool> highContrast{ false };  // high-contrast theme (registry HighContrast)
+    int minFontSize = 0;                      // minimum web page font size in px (registry MinFontSize; 0 = default)
+    std::atomic<bool> lightMode{ false }; // UI light mode theme (registry LightMode); atomic: read on IO & UI threads
+    std::atomic<int> langId{ 0 };         // UI language: 0 = en, 1 = id (registry Language)
+    std::atomic<bool> welcomeDismissed{ false }; // New Tab Quick Start card dismissed (registry WelcomeDismissed)
     int devDock = 0;                  // where developer tools open: 0 bottom, 1 right, 2 left, 3 separate window (registry DevToolsDock)
     int smoothStep = 120, smoothTime = 400;  // and the length of the animation in ms
     bool netSpeed = true;             // network speed in the status bar (registry NetSpeed)
@@ -281,7 +288,11 @@ struct App {
     std::map<DWORD, std::pair<DWORD, DWORD>> netPrev;   // per adapter: last in and out byte counters
     std::atomic<bool> blockAds{ true };       // block ads (registry BlockAds); atomic: read on the IO thread
     std::atomic<bool> blockTrackers{ true };  // block trackers (registry BlockTrackers); atomic: read on the IO thread
+    std::atomic<bool> stripTracking{ true };  // strip tracking URL query params (registry StripTracking)
+    std::atomic<bool> block3pCookies{ false }; // block 3rd-party cookies (registry Block3pCookies)
+    std::atomic<bool> strictReferrer{ false }; // trim cross-site Referer to origin (registry StrictReferrer)
     std::atomic<int> blockedCount{ 0 };    // requests blocked since NeonNet started
+    std::atomic<int> strippedCount{ 0 };   // tracking URL parameters stripped since NeonNet started
     std::set<std::wstring> certAllow;  // host:port the user chose to open despite a certificate error, until NeonNet closes
     std::set<std::wstring> httpAllow;  // hosts the user chose to open over plain http (HTTPS-only mode), until NeonNet closes
     std::set<std::wstring> warned;     // what NeonNet itself showed a warning for ("cert|host:port", "http|host"): only these can be proceeded
@@ -302,6 +313,10 @@ struct App {
     UpdState upd = U_IDLE;
     int updPercent = 0;
     std::wstring updVersion, updPath, updPage, notice;
+    HWND toastHwnd = nullptr;
+    std::wstring toastText;
+    ULONGLONG toastShownAt = 0;
+    BYTE toastAlpha = 0;
     bool updRelaunch = false;
     std::atomic<bool> updCancel{ false };
     HANDLE updThread = nullptr;
@@ -346,8 +361,77 @@ static void SyncUpdSnap(const wchar_t* result = nullptr, const std::wstring& err
 static std::atomic<DWORD> g_accentCol{ C_PINK };
 static std::atomic<DWORD> g_cyanCol{ C_CYAN };
 static std::atomic<bool> g_kbCapturing{ false };
-static COLORREF Accent() { return g.incognito ? C_GREEN : (COLORREF)g_accentCol.load(); }   // window frame, status bar line, menu marks
-static COLORREF SecondaryAccent() { return (COLORREF)g_cyanCol.load(); }
+// WCAG relative luminance of an 8-bit sRGB colour.
+static double RelLuminance(double r, double g2, double b) {
+    auto lin = [](double v) { v /= 255.0; return v <= 0.03928 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * lin(r) + 0.7152 * lin(g2) + 0.0722 * lin(b);
+}
+// An accent used as text in light mode must reach 4.5:1 on every light surface it can sit on. The
+// darkest of them is the active tab / sidebar link (#e4def4), so measuring against it covers the
+// page (#f4f2fa), the cards (#ffffff) and the hover rows (#eae5f7) too. The colour is scaled
+// towards black until it passes, which keeps its hue.
+static COLORREF DarkenForLight(COLORREF c) {
+    const double surf = RelLuminance(0xe4, 0xde, 0xf4);
+    double r = GetRValue(c), gr = GetGValue(c), b = GetBValue(c);
+    for (int step = 0; step <= 90; step++) {
+        double k = 1.0 - step * 0.01;
+        BYTE rr = (BYTE)(r * k), gg = (BYTE)(gr * k), bb = (BYTE)(b * k);
+        if ((surf + 0.05) / (RelLuminance(rr, gg, bb) + 0.05) >= 4.5) return RGB(rr, gg, bb);
+    }
+    return RGB((BYTE)(r * 0.1), (BYTE)(gr * 0.1), (BYTE)(b * 0.1));
+}
+static std::wstring HexOfCol(COLORREF c) {
+    wchar_t buf[16];
+    swprintf_s(buf, L"#%02x%02x%02x", GetRValue(c), GetGValue(c), GetBValue(c));
+    return buf;
+}
+static COLORREF BgCol() {
+    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0xff, 0xff, 0xff) : RGB(0x00, 0x00, 0x00);
+    return g.lightMode.load() ? RGB(0xf4, 0xf2, 0xfa) : C_BG;
+}
+static cef_color_t CefBgCol() {
+    if (g.highContrast.load()) return g.lightMode.load() ? 0xFFFFFFFF : 0xFF000000;
+    return g.lightMode.load() ? 0xFFF4F2FA : CEF_BG;
+}
+static COLORREF MenuBgCol() {
+    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0xff, 0xff, 0xff) : RGB(0x00, 0x00, 0x00);
+    return g.lightMode.load() ? RGB(0xff, 0xff, 0xff) : RGB(0x0a, 0x04, 0x20);
+}
+static COLORREF TextCol() {
+    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x00, 0x00, 0x00) : RGB(0xff, 0xff, 0xff);
+    return g.lightMode.load() ? RGB(0x1a, 0x10, 0x33) : RGB(0xe8, 0xd8, 0xff);
+}
+static COLORREF MutedCol() {
+    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x1a, 0x1a, 0x1a) : RGB(0xe0, 0xe0, 0xff);
+    return g.lightMode.load() ? RGB(0x63, 0x55, 0x8a) : C_MUTED;
+}
+static COLORREF DimCol() {
+    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x40, 0x40, 0x40) : RGB(0xb8, 0xb8, 0xd8);
+    return g.lightMode.load() ? RGB(0xa8, 0x9c, 0xc8) : RGB(0x4d, 0x3a, 0x73);
+}
+static COLORREF YellowCol() {
+    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x7a, 0x38, 0x00) : RGB(0xff, 0xff, 0x00);
+    return g.lightMode.load() ? RGB(0x92, 0x40, 0x0e) : C_YELLOW;
+}
+static COLORREF GreenCol() {
+    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x00, 0x66, 0x22) : RGB(0x00, 0xff, 0xaa);
+    return g.lightMode.load() ? RGB(0x04, 0x6c, 0x4e) : C_GREEN;
+}
+static COLORREF SepCol() {
+    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x00, 0x00, 0x00) : RGB(0xff, 0xff, 0xff);
+    return g.lightMode.load() ? RGB(0xd4, 0xcb, 0xe8) : RGB(0x3a, 0x1a, 0x5e);
+}
+static COLORREF Accent() {
+    if (g.incognito) return GreenCol();
+    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x00, 0x00, 0xcc) : RGB(0xff, 0xff, 0x00);
+    COLORREF c = (COLORREF)g_accentCol.load();
+    return g.lightMode.load() ? DarkenForLight(c) : c;
+}
+static COLORREF SecondaryAccent() {
+    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x00, 0x44, 0x88) : RGB(0x00, 0xff, 0xff);
+    COLORREF c = (COLORREF)g_cyanCol.load();
+    return g.lightMode.load() ? DarkenForLight(c) : c;
+}
 
 // Search engines for text typed in the address bar. `id` is what is saved in the registry.
 struct SearchEngine { const wchar_t* id; const wchar_t* name; const wchar_t* url; };
@@ -666,7 +750,14 @@ static void UpdateRegion() {
 }
 
 static HBRUSH BgBrush() {
-    static HBRUSH br = CreateSolidBrush(C_BG);
+    static HBRUSH br = nullptr;
+    static COLORREF lastCol = 0;
+    COLORREF cur = BgCol();
+    if (!br || cur != lastCol) {
+        if (br) DeleteObject(br);
+        br = CreateSolidBrush(cur);
+        lastCol = cur;
+    }
     return br;
 }
 
@@ -757,6 +848,8 @@ static void Place(CefRefPtr<CefBrowser> b, const RECT& r, bool visible, bool rai
     }
 }
 
+static void PositionToast();
+
 static void Layout() {
     if (!g.hwnd) return;
     if (g.panel) {
@@ -820,6 +913,7 @@ static void Layout() {
     }
     UpdateRegion();
     InvalidateRect(g.hwnd, nullptr, FALSE);
+    if (g.toastHwnd && IsWindowVisible(g.toastHwnd)) PositionToast();
 }
 
 static void InvalidateStatus() { RECT s = StatusRect(); InvalidateRect(g.hwnd, &s, FALSE); }
@@ -1032,6 +1126,28 @@ static void SendState() {
     RunInChrome(L"window.__nn&&window.__nn(" + j + L")");
 }
 
+static void ApplyAccessibility(CefRefPtr<CefBrowser> b) {
+    if (!b || !b->GetHost()) return;
+    b->GetHost()->SetAccessibilityState(g.a11yTree ? STATE_ENABLED : STATE_DEFAULT);
+}
+
+static bool SystemReducedMotion() {
+    BOOL anim = TRUE;
+    return SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &anim, 0) && !anim;
+}
+
+static void ApplyReducedMotion(CefRefPtr<CefBrowser> b) {
+    if (!b || !b->GetHost()) return;
+    CefRefPtr<CefDictionaryValue> p = CefDictionaryValue::Create();
+    CefRefPtr<CefListValue> feats = CefListValue::Create();
+    CefRefPtr<CefDictionaryValue> f = CefDictionaryValue::Create();
+    f->SetString("name", "prefers-reduced-motion");
+    f->SetString("value", g.reducedMotion.load() ? "reduce" : "");
+    feats->SetDictionary(0, f);
+    p->SetList("features", feats);
+    b->GetHost()->ExecuteDevToolsMethod(0, "Emulation.setEmulatedMedia", p);
+}
+
 static void FocusPage() {
     if (Tab* a = Active()) if (a->browser) {
         if (HWND pw = a->browser->GetHost()->GetWindowHandle()) ::SetFocus(pw);
@@ -1120,7 +1236,7 @@ static std::wstring ScanScript(bool on) {
 }
 
 static void ApplyScan(CefRefPtr<CefBrowser> b) {
-    if (b) b->GetMainFrame()->ExecuteJavaScript(ScanScript(g.scan), b->GetMainFrame()->GetURL(), 0);
+    if (b) b->GetMainFrame()->ExecuteJavaScript(ScanScript(g.scan && !g.reducedMotion.load() && !g.highContrast.load()), b->GetMainFrame()->GetURL(), 0);
 }
 
 static std::wstring DarkHostOf(const std::wstring& url);
@@ -1731,10 +1847,13 @@ struct ThemePreset {
 };
 static const ThemePreset THEME_PRESETS[] = {
     { L"synthwave",   L"Synthwave (Default)", L"#ff2e97", L"#00e5ff", RGB(0xff, 0x2e, 0x97), RGB(0x00, 0xe5, 0xff) },
-    { L"cybergreen",  L"Cyber Matrix",        L"#35ffa0", L"#00e5ff", RGB(0x35, 0xff, 0xa0), RGB(0x00, 0xe5, 0xff) },
+    // Cyber Matrix is lime, not mint: mint (#35ffa0) is the ON / success colour and the incognito accent.
+    { L"cybergreen",  L"Cyber Matrix",        L"#a6ff1f", L"#00e5ff", RGB(0xa6, 0xff, 0x1f), RGB(0x00, 0xe5, 0xff) },
     { L"plasma",      L"Electric Cyan",       L"#00e5ff", L"#b967ff", RGB(0x00, 0xe5, 0xff), RGB(0xb9, 0x67, 0xff) },
-    { L"amber",       L"Solar Amber",         L"#ff9a3c", L"#ffd600", RGB(0xff, 0x9a, 0x3c), RGB(0xff, 0xd6, 0x00) },
-    { L"crimson",     L"Crimson Edge",        L"#ff3355", L"#00e5ff", RGB(0xff, 0x33, 0x55), RGB(0x00, 0xe5, 0xff) },
+    // The secondary is blue, not yellow: #ffd600 is the chrome highlight (wordmark, headings, nav buttons).
+    { L"amber",       L"Solar Amber",         L"#ff9a3c", L"#3db8ff", RGB(0xff, 0x9a, 0x3c), RGB(0x3d, 0xb8, 0xff) },
+    // Scarlet, leaning orange: the danger red (#ff4d6d) is pinkish, and a pure crimson would look like it.
+    { L"crimson",     L"Crimson Edge",        L"#ff5a1f", L"#00e5ff", RGB(0xff, 0x5a, 0x1f), RGB(0x00, 0xe5, 0xff) },
     { L"ultraviolet", L"Ultraviolet",         L"#c74cff", L"#00e5ff", RGB(0xc7, 0x4c, 0xff), RGB(0x00, 0xe5, 0xff) },
 };
 static const int THEME_PRESET_COUNT = (int)(sizeof(THEME_PRESETS) / sizeof(THEME_PRESETS[0]));
@@ -1809,23 +1928,114 @@ static std::string ThemeRuleCss() {
         p = g_themePink; c = g_themeCyan;
         pc = (COLORREF)g_accentCol.load(); cc = (COLORREF)g_cyanCol.load();
     }
-    std::wstring p2 = LightenHex(pc);
-    char buf[768];
+    bool light = g.lightMode.load();
+    std::wstring p2;
+    if (light) {
+        pc = DarkenForLight(pc);
+        cc = DarkenForLight(cc);
+        p = HexOfCol(pc);
+        c = HexOfCol(cc);
+        p2 = HexOfCol(RGB((BYTE)(GetRValue(pc) * 0.82), (BYTE)(GetGValue(pc) * 0.82), (BYTE)(GetBValue(pc) * 0.82)));
+    } else {
+        p2 = LightenHex(pc);
+    }
+    // The theme colours (dark, light, high contrast) are in tokens.css, generated from design/tokens.json.
+    // Only what depends on the user's settings is written here: the accent pair (darkened for light mode
+    // above), the light incognito green, scrollbars and the high-contrast / reduced-motion switches.
+    char buf[2000];
+    const char* trackCol = light ? "#eae5f7" : "#0a0420";
+    const char* trackEdge = light ? "rgba(100,85,138,.2)" : "rgba(138,111,192,.18)";
     _snprintf_s(buf, sizeof(buf), _TRUNCATE,
-                ":root:not(.incog){--pink:%s;--pink2:%s;--cyan:%s;--pink-rgb:%d,%d,%d;--cyan-rgb:%d,%d,%d;}"
+                ":root:not(.incog){--accent-primary:%s;--accent-primary-soft:%s;--accent-secondary:%s;--pink-rgb:%d,%d,%d;--cyan-rgb:%d,%d,%d;}"
+                "%s"
                 "::-webkit-scrollbar{width:7px;height:7px;}"
-                "::-webkit-scrollbar-track{background:#0a0420;border-left:1px solid rgba(138,111,192,.18);}"
+                "::-webkit-scrollbar-track{background:%s;border-left:1px solid %s;}"
                 "::-webkit-scrollbar-thumb{background:rgba(var(--cyan-rgb,0,229,255),.32);border:1px solid rgba(var(--cyan-rgb,0,229,255),.55);}"
-                "::-webkit-scrollbar-thumb:hover{background:var(--pink,#ff2e97);border-color:var(--pink2,#ff7bc0);}"
-                "::-webkit-scrollbar-corner{background:#0a0420;}",
+                "::-webkit-scrollbar-thumb:hover{background:var(--accent-primary,#ff2e97);border-color:var(--accent-primary-soft,#ff7bc0);}"
+                "::-webkit-scrollbar-corner{background:%s;}",
                 Utf8(p).c_str(), Utf8(p2).c_str(), Utf8(c).c_str(),
                 GetRValue(pc), GetGValue(pc), GetBValue(pc),
-                GetRValue(cc), GetGValue(cc), GetBValue(cc));
-    return std::string(buf);
+                GetRValue(cc), GetGValue(cc), GetBValue(cc),
+                light ? ":root.incog{--accent-primary:#046c4e;--accent-primary-soft:#035940;}" : "",
+                trackCol, trackEdge, trackCol);
+    std::string css(buf);
+    if (g.highContrast.load()) {
+        css += light ? ":root:not(.incog){--accent-primary:#0000cc;--accent-primary-soft:#0000ff;--accent-secondary:#004488;--pink-rgb:0,0,204;--cyan-rgb:0,68,136;}"
+                     : ":root:not(.incog){--accent-primary:#ffff00;--accent-primary-soft:#ffff80;--accent-secondary:#00ffff;--pink-rgb:255,255,0;--cyan-rgb:0,255,255;}";
+        css += "body::after{display:none!important;}";
+    }
+    if (g.reducedMotion.load()) {
+        css += "html{scroll-behavior:auto!important;}body::after{display:none!important;}"
+               "*,*::before,*::after{animation-duration:0.001ms!important;animation-iteration-count:1!important;"
+               "transition-duration:0.001ms!important;scroll-behavior:auto!important;}";
+    }
+    return css;
+}
+
+// Accessibility glue shared by every NeonNet page: accessible names for fields and toggles, live
+// regions for status and error text, dialog roles for the toolbar popups, and focus returning to
+// the button that opened a popup.
+static const char NN_A11Y_JS[] = R"NNJS((function(){
+var n=0;
+function lab(el){
+  if(el.getAttribute('aria-label')||el.getAttribute('aria-labelledby')||el.type==='hidden'||el.type==='file')return;
+  if(el.id&&document.querySelector('label[for="'+el.id+'"]'))return;
+  var row=el.closest('.row'),b=row&&row.querySelector('.lab b');
+  if(b){
+    var all=row.querySelectorAll('input:not([type=hidden]):not([type=file]),select,textarea,button.tog');
+    if(all.length===1){
+      if(!b.id)b.id='nnl'+(++n);
+      if(el.tagName==='BUTTON'){if(!el.id)el.id='nnb'+(++n);el.setAttribute('aria-labelledby',b.id+' '+el.id);}
+      else el.setAttribute('aria-labelledby',b.id);
+      return;
+    }
+  }
+  if(el.matches('input,textarea')){var p=el.getAttribute('placeholder');if(p)el.setAttribute('aria-label',p.replace(/\s*\(Ctrl\+K\)/,''));}
+}
+function live(el){if(!el.getAttribute('role')&&!el.getAttribute('aria-live'))el.setAttribute('role','status');}
+function scan(root){
+  root.querySelectorAll('input,select,textarea,button.tog').forEach(lab);
+  root.querySelectorAll('.err,#saved,#toast,#msg,#clrMsg,.derr,#proxyStatus').forEach(live);
+}
+function popups(){
+  var names={dlPop:'Recent downloads',zoomPop:'Zoom',tabListPop:'Open tabs',shieldPop:'Shield',vpnPop:'Proxy tunnel',engPop:'Search engine',site:'Site information and permissions',wsModal:'Workspace',pal:'Command palette',bmdrop:'Bookmarks folder'};
+  var tabs=document.getElementById('tabs');if(tabs&&!tabs.getAttribute('role')){tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Tabs');}
+  Object.keys(names).forEach(function(id){
+    var e=document.getElementById(id);if(!e)return;
+    e.setAttribute('role','dialog');e.setAttribute('aria-label',names[id]);
+    new MutationObserver(function(ms){ms.forEach(function(m){
+      var on=e.classList.contains('on'),was=(m.oldValue||'').split(' ').indexOf('on')>=0;
+      if(on&&!was){var a=document.activeElement;e.__op=(a&&a!==document.body&&!e.contains(a))?a:null;}
+      else if(!on&&was){var o=e.__op;e.__op=null;var a2=document.activeElement;
+        if(o&&o.isConnected&&(a2===document.body||e.contains(a2)))o.focus();}
+    });}).observe(e,{attributes:true,attributeFilter:['class'],attributeOldValue:true});
+  });
+}
+function go(){
+  scan(document);popups();
+  new MutationObserver(function(ms){ms.forEach(function(m){m.addedNodes.forEach(function(x){if(x.nodeType===1){scan(x);if(x.matches&&x.matches('input,select,textarea,button.tog,.err'))scan(x.parentNode||document);}});});}).observe(document.body,{childList:true,subtree:true});
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',go);else go();
+})();)NNJS";
+
+// ui/tokens.css (generated from design/tokens.json), embedded as a resource.
+static std::string TokensStyleTag() {
+    static std::string tag;
+    if (tag.empty()) {
+        std::string css;
+        if (!LoadUi(IDR_TOKENS, css)) css.clear();
+        tag = "<style id=\"nn-tokens\">" + css + "</style>";
+    }
+    return tag;
 }
 
 static std::string ThemeStyleTag() {
-    return "<style id=\"nn-accent\">" + ThemeRuleCss() + "</style>";
+    return "<style id=\"nn-accent\">" + ThemeRuleCss() + "</style><script>" + std::string(NN_A11Y_JS) + "</script>" +
+           (g.lightMode.load() ? "<script>document.documentElement.classList.add('light');</script>" : "") +
+           (g.highContrast.load() ? "<script>document.documentElement.classList.add('hc');</script>" : "") +
+           // The page language also goes on <html lang>, so a screen reader pronounces the page in the right language.
+           (g.langId.load() == 1 ? "<script>window.__nnLang='id';document.documentElement.lang='id';</script>"
+                                 : "<script>window.__nnLang='en';document.documentElement.lang='en';</script>");
 }
 
 static std::wstring ThemeStateJson() {
@@ -1836,8 +2046,11 @@ static std::wstring ThemeStateJson() {
         pc = (COLORREF)g_accentCol.load();
     }
     return L"{\"preset\":" + JsonStr(pr) + L",\"pink\":" + JsonStr(pk) +
-           L",\"pink2\":" + JsonStr(LightenHex(pc)) + L",\"cyan\":" + JsonStr(cy) + L"}";
+           L",\"pink2\":" + JsonStr(LightenHex(pc)) + L",\"cyan\":" + JsonStr(cy) +
+           L",\"light\":" + (g.lightMode.load() ? L"true" : L"false") +
+           L",\"lang\":" + JsonStr(g.langId.load() == 1 ? L"id" : L"en") + L"}";
 }
+static void BroadcastThemeAccent();
 
 // ---------------------------------------------------------------------------
 // Custom Keybindings (per-command customizable keyboard shortcuts)
@@ -1880,9 +2093,11 @@ static const KeyBindDef KEY_DEFS[] = {
     { "reader",        L"Toggle Reader Mode",      L"Features",   CMD_READER_MODE,   L"Ctrl+Alt+R" },
     { "wa",            L"Toggle Social Dock",      L"Features",   CMD_WHATSAPP,      L"Ctrl+Alt+W" },
     { "forcedark",     L"Toggle Force Dark Mode",  L"Features",   CMD_FORCEDARK,     L"" },
+    { "lightmode",     L"Toggle Light / Dark UI",  L"Features",   CMD_LIGHTMODE,     L"" },
     { "darkexempt",    L"Exclude Site from Force Dark", L"Features", CMD_DARK_EXEMPT, L"" },
     { "blockads",      L"Toggle Ad Blocker",       L"Features",   CMD_BLOCKADS,      L"" },
     { "blocktrackers", L"Toggle Tracker Blocker",  L"Features",   CMD_BLOCKTRACKERS, L"" },
+    { "copyclean",     L"Copy clean page URL",     L"Features",   CMD_COPY_CLEAN,    L"" },
     { "scan",          L"Toggle Scanlines",        L"Features",   CMD_SCAN,          L"" },
     { "perf",          L"Performance panel",       L"Tools",      CMD_PERFORMANCE,   L"Ctrl+Shift+M" },
     { "devtools",      L"Developer tools",         L"Tools",      CMD_DEVTOOLS,      L"F12" },
@@ -2525,6 +2740,8 @@ static const PermDef PERM_DEFS[] = {
     { L"microphone", L"Microphone", L"use your microphone", CEF_PERMISSION_TYPE_MIC_STREAM, CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE, true },
     { L"notifications", L"Notifications", L"show notifications", CEF_PERMISSION_TYPE_NOTIFICATIONS, 0, true },
     { L"clipboard", L"Clipboard", L"see what you copy to the clipboard", CEF_PERMISSION_TYPE_CLIPBOARD, 0, true },
+    { L"popups", L"Pop-ups & redirects", L"open pop-up windows or redirect tabs", 0, 0, true },
+    { L"javascript", L"JavaScript", L"run JavaScript on this site", 0, 0, true },
     { L"sensors", L"Motion sensors", L"use your motion sensors", CEF_PERMISSION_TYPE_SENSORS, 0, true },
     { L"screen", L"Screen sharing", L"see and record your screen", 0, CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE, false },
     { L"camera-control", L"Camera movement and zoom", L"move and zoom your camera", CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM, 0, false },
@@ -2614,17 +2831,65 @@ static int SpGet(const std::wstring& origin, const std::wstring& key) {
     auto e = s->second.find(key);
     return e == s->second.end() ? 0 : e->second;
 }
+static void ApplySiteContentSettingUI(const std::wstring& origin, const std::wstring& key, int v) {
+    cef_content_setting_types_t ctype;
+    if (key == L"javascript") ctype = CEF_CONTENT_SETTING_TYPE_JAVASCRIPT;
+    else if (key == L"popups") ctype = CEF_CONTENT_SETTING_TYPE_POPUPS;
+    else return;
+    cef_content_setting_values_t val = (v == 1) ? CEF_CONTENT_SETTING_VALUE_ALLOW :
+                                       (v == 2) ? CEF_CONTENT_SETTING_VALUE_BLOCK :
+                                                  CEF_CONTENT_SETTING_VALUE_DEFAULT;
+    std::string pat = Utf8(origin) + "/";
+    auto apply = [&](CefRefPtr<CefRequestContext> ctx) {
+        if (ctx) ctx->SetContentSetting(pat, pat, ctype, val);
+    };
+    apply(CefRequestContext::GetGlobalContext());
+    if (g.reqCtx) apply(g.reqCtx);
+}
+class SiteContentTask : public CefTask {
+public:
+    SiteContentTask(std::wstring o, std::wstring k, int v) : o_(std::move(o)), k_(std::move(k)), v_(v) {}
+    void Execute() override { ApplySiteContentSettingUI(o_, k_, v_); }
+private:
+    std::wstring o_, k_; int v_;
+    IMPLEMENT_REFCOUNTING(SiteContentTask);
+};
+static void ApplySiteContentSetting(const std::wstring& origin, const std::wstring& key, int v) {
+    if (key != L"javascript" && key != L"popups") return;
+    if (CefCurrentlyOn(TID_UI)) ApplySiteContentSettingUI(origin, key, v);
+    else CefPostTask(TID_UI, new SiteContentTask(origin, key, v));
+}
+
 // v: 1 allow, 2 block, 0 ask again (the entry is removed)
 static void SpSet(const std::wstring& origin, const std::wstring& key, int v) {
-    std::lock_guard<std::mutex> lk(g_spMu);
-    if (v == 0) {
-        auto s = g_sp.find(origin);
-        if (s != g_sp.end()) { s->second.erase(key); if (s->second.empty()) g_sp.erase(s); }
-    } else if (g_sp.size() < 5000 || g_sp.count(origin)) g_sp[origin][key] = v;
-    SpSaveLocked();
+    {
+        std::lock_guard<std::mutex> lk(g_spMu);
+        if (v == 0) {
+            auto s = g_sp.find(origin);
+            if (s != g_sp.end()) { s->second.erase(key); if (s->second.empty()) g_sp.erase(s); }
+        } else if (g_sp.size() < 5000 || g_sp.count(origin)) g_sp[origin][key] = v;
+        SpSaveLocked();
+    }
+    ApplySiteContentSetting(origin, key, v);
 }
-static void SpReset(const std::wstring& origin) { std::lock_guard<std::mutex> lk(g_spMu); g_sp.erase(origin); SpSaveLocked(); }
-static void SpClear() { std::lock_guard<std::mutex> lk(g_spMu); g_sp.clear(); SpSaveLocked(); }
+static void SpReset(const std::wstring& origin) {
+    { std::lock_guard<std::mutex> lk(g_spMu); g_sp.erase(origin); SpSaveLocked(); }
+    ApplySiteContentSetting(origin, L"javascript", 0);
+    ApplySiteContentSetting(origin, L"popups", 0);
+}
+static void SpClear() {
+    std::vector<std::wstring> origins;
+    {
+        std::lock_guard<std::mutex> lk(g_spMu);
+        for (const auto& kv : g_sp) origins.push_back(kv.first);
+        g_sp.clear();
+        SpSaveLocked();
+    }
+    for (const auto& o : origins) {
+        ApplySiteContentSetting(o, L"javascript", 0);
+        ApplySiteContentSetting(o, L"popups", 0);
+    }
+}
 
 // [{"k":"camera","l":"Camera","v":1},...] for one origin: the common permissions, then any other one that is set
 static std::wstring SpPermsJson(const std::wstring& origin) {
@@ -2688,17 +2953,24 @@ static std::wstring WarningPageUrl(const wchar_t* kind, const std::wstring& url,
 }
 
 static std::wstring ErrorPageUrl(const std::wstring& url, int code) {
+    bool light = g.lightMode.load();
     std::wstring h =
-        L"<!doctype html><html><head><meta charset='utf-8'><title>SIGNAL LOST</title><style>"
-        L"html,body{margin:0;height:100%;background:#12062c;color:#e8d8ff;font:14px 'Cascadia Mono',Consolas,monospace}"
+        std::wstring(L"<!doctype html><html lang='") + (g.langId.load() == 1 ? L"id" : L"en") +
+        L"'><head><meta charset='utf-8'><title>SIGNAL LOST</title><style>"
+        L"html,body{margin:0;height:100%;background:" + std::wstring(light ? L"#f4f2fa" : L"#12062c") +
+        L";color:" + std::wstring(light ? L"#1a1033" : L"#e8d8ff") + L";font:14px 'Cascadia Mono',Consolas,monospace}"
         L"body{display:flex;align-items:center;justify-content:center}"
-        L".b{border:1px solid #ff2e97;padding:28px 34px;max-width:640px;background:#0a0420;"
-        L"clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}"
-        L"h1{margin:0 0 6px;font:italic 900 40px Impact,sans-serif;letter-spacing:3px;color:#00e5ff;text-shadow:3px 3px 0 #ff2e97}"
-        L".y{color:#ffd600}.u{color:#8a6fc0;word-break:break-all;margin:14px 0 22px}"
-        L"button{font:bold 14px 'Cascadia Mono',Consolas,monospace;background:#ff2e97;color:#12062c;border:0;padding:9px 22px;cursor:pointer}"
-        L"button:hover{background:#00e5ff}"
-        L"body::after{content:'';position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.18) 2px 3px)}"
+        L".b{border:1px solid " + std::wstring(light ? L"#b7216c" : L"#ff2e97") + L";padding:28px 34px;max-width:640px;background:" +
+        std::wstring(light ? L"#ffffff" : L"#0a0420") +
+        L";clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}"
+        L"h1{margin:0 0 6px;font:italic 900 40px Impact,sans-serif;letter-spacing:3px;color:" +
+        std::wstring(light ? L"#006d7a" : L"#00e5ff") + L";text-shadow:3px 3px 0 " + std::wstring(light ? L"#b7216c" : L"#ff2e97") + L"}"
+        L".y{color:" + std::wstring(light ? L"#92400e" : L"#ffd600") + L"}.u{color:" +
+        std::wstring(light ? L"#63558a" : L"#8a6fc0") + L";word-break:break-all;margin:14px 0 22px}"
+        L"button{font:bold 14px 'Cascadia Mono',Consolas,monospace;background:" + std::wstring(light ? L"#b7216c" : L"#ff2e97") +
+        L";color:" + std::wstring(light ? L"#ffffff" : L"#12062c") + L";border:0;padding:9px 22px;cursor:pointer}"
+        L"button:hover{background:" + std::wstring(light ? L"#006d7a" : L"#00e5ff") + L"}"
+        L"body::after{content:'';position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.08) 2px 3px)}"
         L"</style></head><body><div class='b'><h1>SIGNAL LOST</h1><div class='y'>&gt; ";
     h += HtmlEsc(ErrorText(code));
     h += L"</div><div class='u' id='u' data-url=\"" + HtmlEsc(url) + L"\">" + HtmlEsc(url) + L"</div>";
@@ -2831,13 +3103,14 @@ static CefWindowInfo ChildInfo(const RECT& r) {
     return wi;
 }
 
-static CefBrowserSettings BrowserSettings() {
+static CefBrowserSettings BrowserSettings(bool webTab = false) {
     CefBrowserSettings s;
-    s.background_color = CEF_BG;
+    s.background_color = CefBgCol();
     // Our browsers are Chrome style, which brings Chromium's own bubbles. NeonNet shows the
     // link under the mouse and the zoom level in its status bar, so these would be shown twice.
     s.chrome_status_bubble = STATE_DISABLED;
     s.chrome_zoom_bubble = STATE_DISABLED;
+    if (webTab && g.minFontSize > 0) s.minimum_font_size = g.minFontSize;
     return s;
 }
 
@@ -2856,7 +3129,7 @@ static void CreateTab(const std::wstring& url, bool activate, int at) {
 
     g.creatingTab = id;
     CefRefPtr<CefBrowser> b = CefBrowserHost::CreateBrowserSync(ChildInfo(ContentRect()), MainClient(),
-        url.empty() ? NEWTAB : url, BrowserSettings(), nullptr, g.reqCtx);
+        url.empty() ? NEWTAB : url, BrowserSettings(true), nullptr, g.reqCtx);
     g.creatingTab = 0;
     Tab* t = FindTab(id);
     if (!b) { if (t) CloseTab(id); return; }
@@ -2873,7 +3146,7 @@ static void RestoreTab(Tab* t) {
     std::wstring url = DisplayUrl(t);
     g.creatingTab = t->id;
     CefRefPtr<CefBrowser> b = CefBrowserHost::CreateBrowserSync(ChildInfo(ContentRect()), MainClient(),
-        url.empty() ? NEWTAB : url, BrowserSettings(), nullptr, g.reqCtx);
+        url.empty() ? NEWTAB : url, BrowserSettings(true), nullptr, g.reqCtx);
     g.creatingTab = 0;
     if (b && !t->browser) t->browser = b;
 }
@@ -3293,7 +3566,7 @@ static void AppendMenuModel(CefRefPtr<CefMenuModel> m, std::vector<MenuItem>& ou
         if (type == MENUITEMTYPE_SUBMENU) continue;
         it.cmd = m->GetCommandIdAt(i);
         if (!it.cmd) continue;
-        bool ours = it.cmd >= MENU_OPEN_LINK_TAB && it.cmd <= MENU_SEARCH_SELECTION;   // added in OnBeforeContextMenu
+        bool ours = it.cmd >= MENU_OPEN_LINK_TAB && it.cmd <= MENU_COPY_CLEAN_LINK;   // added in OnBeforeContextMenu
         if (!ours && ReplacedByNeonNet(it.text)) continue;
         it.disabled = !m->IsEnabledAt(i);
         it.checked = (type == MENUITEMTYPE_CHECK || type == MENUITEMTYPE_RADIO) && m->IsCheckedAt(i);
@@ -3414,7 +3687,7 @@ struct TabBlockStats {
     std::vector<std::string> adHosts;
 };
 static std::mutex g_blockMu;
-static std::set<std::string> g_adsExempt, g_trackersExempt;
+static std::set<std::string> g_adsExempt, g_trackersExempt, g_cookie3pExempt;
 static std::map<int, TabBlockStats> g_tabBlocks;
 
 static bool IsTrackerHost(std::string_view h) {
@@ -3442,6 +3715,7 @@ static void SaveShieldExempt() {
     std::lock_guard<std::mutex> lk(g_blockMu);
     save(L"AdsExemptHosts", g_adsExempt);
     save(L"TrackersExemptHosts", g_trackersExempt);
+    save(L"Cookie3pExemptHosts", g_cookie3pExempt);
 }
 
 static void LoadShieldExempt() {
@@ -3459,6 +3733,7 @@ static void LoadShieldExempt() {
     std::lock_guard<std::mutex> lk(g_blockMu);
     load(L"AdsExemptHosts", g_adsExempt);
     load(L"TrackersExemptHosts", g_trackersExempt);
+    load(L"Cookie3pExemptHosts", g_cookie3pExempt);
 }
 
 static std::string ActiveShieldSiteUtf8(Tab* a) {
@@ -3537,6 +3812,54 @@ private:
     IMPLEMENT_REFCOUNTING(BlockHandler);
 };
 
+class StrictReferrerHandler : public CefResourceRequestHandler {
+public:
+    explicit StrictReferrerHandler(std::string refOrigin) : refOrigin_(std::move(refOrigin)) {}
+    ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefRefPtr<CefRequest> request, CefRefPtr<CefCallback>) override {
+        request->SetReferrer(refOrigin_, REFERRER_POLICY_ORIGIN);
+        CefRequest::HeaderMap hdrs;
+        request->GetHeaderMap(hdrs);
+        bool changed = false;
+        for (auto it = hdrs.begin(); it != hdrs.end(); ++it) {
+            std::string k = it->first.ToString();
+            for (auto& c : k) c = (char)tolower((unsigned char)c);
+            if (k == "referer") {
+                it->second = refOrigin_;
+                changed = true;
+            }
+        }
+        if (changed) request->SetHeaderMap(hdrs);
+        return RV_CONTINUE;
+    }
+private:
+    std::string refOrigin_;
+    IMPLEMENT_REFCOUNTING(StrictReferrerHandler);
+};
+
+static void ApplyCookiePrefs() {
+    auto apply = [](CefRefPtr<CefRequestContext> ctx) {
+        if (!ctx) return;
+        CefRefPtr<CefValue> v = CefValue::Create();
+        v->SetInt(g.block3pCookies.load() ? 1 : 0);
+        CefString err;
+        ctx->SetPreference("profile.cookie_controls_mode", v, err);
+    };
+    apply(CefRequestContext::GetGlobalContext());
+    if (g.reqCtx) apply(g.reqCtx);
+}
+
+static void ApplyCookie3pException(const std::string& site, bool allow) {
+    if (site.empty()) return;
+    auto setFor = [&](CefRefPtr<CefRequestContext> ctx) {
+        if (!ctx) return;
+        cef_content_setting_values_t val = allow ? CEF_CONTENT_SETTING_VALUE_ALLOW : CEF_CONTENT_SETTING_VALUE_DEFAULT;
+        ctx->SetContentSetting(CefString(), "https://" + site + "/", CEF_CONTENT_SETTING_TYPE_COOKIES, val);
+        ctx->SetContentSetting(CefString(), "http://" + site + "/", CEF_CONTENT_SETTING_TYPE_COOKIES, val);
+    };
+    setFor(CefRequestContext::GetGlobalContext());
+    if (g.reqCtx) setFor(g.reqCtx);
+}
+
 // Loads an address in a tab, from a task (not from inside the browser's own callback).
 class NavTask : public CefTask {
 public:
@@ -3549,6 +3872,94 @@ private:
     int id_; std::wstring url_;
     IMPLEMENT_REFCOUNTING(NavTask);
 };
+
+static bool IsTrackingParam(const std::wstring& k, const std::wstring& host) {
+    static const wchar_t* prefixes[] = { L"utm_", L"mc_", L"hsa_", L"_hs", L"pk_" };
+    for (auto* p : prefixes) if (k.rfind(p, 0) == 0) return true;
+    static const wchar_t* exact[] = {
+        L"fbclid", L"gclid", L"gclsrc", L"dclid", L"gbraid", L"wbraid",
+        L"msclkid", L"yclid", L"ttclid", L"twclid", L"li_fat_id",
+        L"igshid", L"igsh", L"ref_src", L"ref_url", L"spm", L"scm",
+        L"vero_conv", L"vero_id", L"mkt_tok", L"oly_enc_id", L"oly_anon_id",
+        L"_openstat", L"wickedid", L"rb_clickid", L"s_kwcid", L"zanpid", L"__tn__"
+    };
+    for (auto* e : exact) if (k == e) return true;
+    if (k == L"si" && (host.find(L"youtube.com") != std::wstring::npos || host == L"youtu.be" ||
+                       host.find(L"spotify.com") != std::wstring::npos)) return true;
+    return false;
+}
+
+static std::wstring StripTrackingParams(const std::wstring& url, int* removedOut = nullptr) {
+    if (removedOut) *removedOut = 0;
+    if (url.rfind(L"http://", 0) != 0 && url.rfind(L"https://", 0) != 0) return url;
+    size_t q = url.find(L'?');
+    if (q == std::wstring::npos) return url;
+    size_t hash = url.find(L'#', q);
+    std::wstring base = url.substr(0, q);
+    std::wstring query = (hash == std::wstring::npos) ? url.substr(q + 1) : url.substr(q + 1, hash - q - 1);
+    std::wstring frag = (hash == std::wstring::npos) ? L"" : url.substr(hash);
+    if (query.empty()) return url;
+
+    std::wstring host = HostOnly(url);
+    for (auto& c : host) c = (wchar_t)towlower(c);
+
+    std::wstring kept;
+    int removed = 0;
+    size_t pos = 0;
+    while (pos <= query.size()) {
+        size_t amp = query.find(L'&', pos);
+        if (amp == std::wstring::npos) amp = query.size();
+        std::wstring part = query.substr(pos, amp - pos);
+        pos = amp + 1;
+        if (part.empty()) continue;
+        size_t eq = part.find(L'=');
+        std::wstring k = (eq == std::wstring::npos) ? part : part.substr(0, eq);
+        for (auto& c : k) c = (wchar_t)towlower(c);
+        if (IsTrackingParam(k, host)) {
+            removed++;
+        } else {
+            if (!kept.empty()) kept += L'&';
+            kept += part;
+        }
+        if (amp == query.size()) break;
+    }
+    if (removedOut) *removedOut = removed;
+    if (removed == 0) return url;
+    return base + (kept.empty() ? L"" : (L"?" + kept)) + frag;
+}
+
+static bool IsTrackerExemptHost(const std::wstring& host) {
+    std::string h = Utf8(host);
+    for (auto& c : h) c = (char)tolower((unsigned char)c);
+    std::lock_guard<std::mutex> lk(g_blockMu);
+    return g_trackersExempt.count(h) > 0;
+}
+
+static void CopyTextToClipboard(const std::wstring& text) {
+    if (!OpenClipboard(g.hwnd)) return;
+    EmptyClipboard();
+    size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+    if (HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes)) {
+        if (void* p = GlobalLock(h)) {
+            memcpy(p, text.c_str(), bytes);
+            GlobalUnlock(h);
+        }
+        SetClipboardData(CF_UNICODETEXT, h);
+    }
+    CloseClipboard();
+}
+
+static void ShowNotice(const std::wstring& text);
+
+static void CopyCleanUrlToClipboard(const std::wstring& url) {
+    int removed = 0;
+    std::wstring cleaned = StripTrackingParams(url, &removed);
+    if (removed > 0) g.strippedCount += removed;
+    CopyTextToClipboard(cleaned);
+    ShowNotice(removed > 0
+        ? (L"COPIED CLEAN LINK (-" + std::to_wstring(removed) + L" TRACKER" + (removed == 1 ? L"" : L"S") + L")")
+        : L"COPIED LINK (ALREADY CLEAN)");
+}
 
 class Client : public CefClient, public CefLifeSpanHandler, public CefDisplayHandler, public CefLoadHandler,
                public CefKeyboardHandler, public CefDownloadHandler, public CefContextMenuHandler,
@@ -3648,6 +4059,15 @@ public:
             if (!u.empty()) { if (g.incognito) CreateTab(u, true, -1); else LaunchIncognito(u); }
             return true;
         }
+        if (browser && browser->GetMainFrame()) {
+            std::wstring openerOrigin = OriginOf(browser->GetMainFrame()->GetURL().ToWString());
+            if (!openerOrigin.empty() && SpGet(openerOrigin, L"popups") == 2) {
+                std::wstring h = HostOnly(openerOrigin);
+                for (auto& c : h) c = (wchar_t)towupper(c);
+                ShowNotice(L"POP-UP BLOCKED: " + h);
+                return true;
+            }
+        }
         // Keep the popup (so window.opener works for logins) but host it as a new tab.
         auto tab = std::make_unique<Tab>();
         int id = tab->id = g.nextId++;
@@ -3661,7 +4081,7 @@ public:
         g.pendingPopups.push_back(id);
         windowInfo = ChildInfo(ContentRect());
         client = this;
-        settings = BrowserSettings();
+        settings = BrowserSettings(true);
         SendState();
         return false;
     }
@@ -3676,6 +4096,8 @@ public:
 
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
         g_all.push_back(browser);
+        if (g.a11yTree) ApplyAccessibility(browser);
+        if (g.reducedMotion.load()) ApplyReducedMotion(browser);
         DarkenBrowserWindow(browser->GetHost()->GetWindowHandle());
         if (g.creatingChrome) { g.chrome = browser; g.chromeId = browser->GetIdentifier(); return; }
         if (g.creatingPanel) {
@@ -3892,7 +4314,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
     // Runs on the IO thread: only the atomics and the read-only block list are used here.
     CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, CefRefPtr<CefRequest> request,
                                                                    bool is_navigation, bool, const CefString&, bool&) override {
-        if ((!g.blockAds.load() && !g.blockTrackers.load()) || is_navigation || !browser || !g_blocklistReady.load()) return nullptr;
+        if (!browser) return nullptr;
         int bid = browser->GetIdentifier();
         if (bid == g.chromeId.load() || bid == g.panelId.load()) return nullptr;
         std::string ru = request->GetURL().ToString();
@@ -3905,37 +4327,72 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
         size_t at = reqHost.rfind('@'); if (at != std::string::npos) reqHost.erase(0, at + 1);
         size_t col = reqHost.find(':'); if (col != std::string::npos) reqHost.resize(col);
         for (auto& c : reqHost) c = (char)tolower((unsigned char)c);
-        if (reqHost.empty() || !IsBlockedHost(reqHost)) return nullptr;
-        bool isTrk = IsTrackerHost(reqHost);
-        if (isTrk ? !g.blockTrackers.load() : !g.blockAds.load()) return nullptr;
-        // the site that is open, from its main frame
-        std::string page = browser->GetMainFrame() ? browser->GetMainFrame()->GetURL().ToString() : "";
-        if (page.compare(0, 18, "https://neonnet.ui") == 0) return nullptr;
-        std::string pSite;
-        size_t ps = 0;
-        if (page.compare(0, 8, "https://") == 0) ps = 8;
-        else if (page.compare(0, 7, "http://") == 0) ps = 7;
-        if (ps) {
-            size_t pe = page.find_first_of("/?#", ps);
-            std::string pHost = page.substr(ps, pe == std::string::npos ? std::string::npos : pe - ps);
-            size_t pat = pHost.rfind('@'); if (pat != std::string::npos) pHost.erase(0, pat + 1);
-            size_t pcol = pHost.find(':'); if (pcol != std::string::npos) pHost.resize(pcol);
-            for (auto& c : pHost) c = (char)tolower((unsigned char)c);
-            if (!pHost.empty()) {
-                pSite = std::string(SiteOf(pHost));
-                if (pSite == SiteOf(reqHost)) return nullptr;   // first party
+        if (reqHost.empty()) return nullptr;
+
+        if ((g.blockAds.load() || g.blockTrackers.load()) && !is_navigation && g_blocklistReady.load() && IsBlockedHost(reqHost)) {
+            bool isTrk = IsTrackerHost(reqHost);
+            if (isTrk ? g.blockTrackers.load() : g.blockAds.load()) {
+                std::string page = browser->GetMainFrame() ? browser->GetMainFrame()->GetURL().ToString() : "";
+                if (page.compare(0, 18, "https://neonnet.ui") != 0) {
+                    std::string pSite;
+                    size_t ps = 0;
+                    if (page.compare(0, 8, "https://") == 0) ps = 8;
+                    else if (page.compare(0, 7, "http://") == 0) ps = 7;
+                    if (ps) {
+                        size_t pe = page.find_first_of("/?#", ps);
+                        std::string pHost = page.substr(ps, pe == std::string::npos ? std::string::npos : pe - ps);
+                        size_t pat = pHost.rfind('@'); if (pat != std::string::npos) pHost.erase(0, pat + 1);
+                        size_t pcol = pHost.find(':'); if (pcol != std::string::npos) pHost.resize(pcol);
+                        for (auto& c : pHost) c = (char)tolower((unsigned char)c);
+                        if (!pHost.empty()) pSite = std::string(SiteOf(pHost));
+                    }
+                    bool exempt = (!pSite.empty() && pSite == SiteOf(reqHost));
+                    if (!exempt && !pSite.empty()) {
+                        std::lock_guard<std::mutex> lk(g_blockMu);
+                        exempt = (isTrk ? g_trackersExempt.count(pSite) : g_adsExempt.count(pSite)) > 0;
+                    }
+                    if (!exempt) return new BlockHandler(isTrk, std::move(reqHost));
+                }
             }
         }
-        if (!pSite.empty()) {
-            std::lock_guard<std::mutex> lk(g_blockMu);
-            if (isTrk ? g_trackersExempt.count(pSite) : g_adsExempt.count(pSite)) return nullptr;
+
+        if (g.strictReferrer.load()) {
+            std::string ref = request->GetReferrerURL().ToString();
+            size_t rs = 0;
+            if (ref.compare(0, 8, "https://") == 0) rs = 8;
+            else if (ref.compare(0, 7, "http://") == 0) rs = 7;
+            if (rs) {
+                size_t re = ref.find_first_of("/?#", rs);
+                std::string refHostPort = ref.substr(rs, re == std::string::npos ? std::string::npos : re - rs);
+                std::string refHost = refHostPort;
+                size_t rat = refHost.rfind('@'); if (rat != std::string::npos) refHost.erase(0, rat + 1);
+                size_t rcol = refHost.find(':'); if (rcol != std::string::npos) refHost.resize(rcol);
+                for (auto& c : refHost) c = (char)tolower((unsigned char)c);
+                if (!refHost.empty() && SiteOf(refHost) != SiteOf(reqHost)) {
+                    std::string refOrigin = ref.substr(0, rs) + refHostPort + "/";
+                    if (ref != refOrigin) return new StrictReferrerHandler(std::move(refOrigin));
+                }
+            }
         }
-        return new BlockHandler(isTrk, std::move(reqHost));
+        return nullptr;
     }
     bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool, bool) override {
         if (!frame->IsMain() || IsUiBrowser(browser)) return false;
         Tab* t = TabOf(browser);
         std::wstring url = request->GetURL().ToWString();
+        if (g.stripTracking.load() && t && request->GetMethod() == "GET" &&
+            (url.rfind(L"http://", 0) == 0 || url.rfind(L"https://", 0) == 0)) {
+            std::wstring host = HostOnly(url);
+            if (!IsTrackerExemptHost(host)) {
+                int removed = 0;
+                std::wstring cleaned = StripTrackingParams(url, &removed);
+                if (removed > 0 && cleaned != url) {
+                    g.strippedCount += removed;
+                    CefPostTask(TID_UI, new NavTask(t->id, cleaned));
+                    return true;
+                }
+            }
+        }
         if (t && !t->upgradedTo.empty() && url != t->upgradedTo) { t->upgradedFrom.clear(); t->upgradedTo.clear(); }   // another page
         if (!g.httpsOnly || !t || url.rfind(L"http://", 0) != 0 || request->GetMethod() != "GET") return false;
         std::wstring host = HostOnly(url);
@@ -4077,6 +4534,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
             int at = 0;
             model->InsertItemAt(at++, MENU_OPEN_LINK_TAB, "Open link in new tab");
             if (!g.incognito && httpLink) model->InsertItemAt(at++, MENU_OPEN_LINK_INCOGNITO, "Open link in incognito window");
+            if (httpLink) model->InsertItemAt(at++, MENU_COPY_CLEAN_LINK, "Copy clean link");
             model->InsertSeparatorAt(at);
         }
         std::wstring sel = params->GetSelectionText().ToWString();
@@ -4229,6 +4687,11 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
         if (command_id == MENU_OPEN_LINK_INCOGNITO) {
             std::wstring u = params->GetLinkUrl().ToWString();
             if (u.rfind(L"http", 0) == 0) LaunchIncognito(u);
+            return true;
+        }
+        if (command_id == MENU_COPY_CLEAN_LINK) {
+            std::wstring u = params->GetLinkUrl().ToWString();
+            if (u.rfind(L"http", 0) == 0) CopyCleanUrlToClipboard(u);
             return true;
         }
         if (command_id == MENU_SEARCH_SELECTION) {
@@ -4487,7 +4950,7 @@ static std::string SettingsJson() {
          ",\"fastConnections\":" + std::to_string(RegGetDword(L"FastConnections", 8)) +
          ",\"dlSubfolder\":" + b(RegGetDword(L"DlSubfolder", 1) != 0) +
          ",\"dlCategories\":" + b(RegGetDword(L"DlCategories", 1) != 0) +
-         ",\"defaultBrowser\":" + b(browserreg::IsDefault()) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"blockTrackers\":" + b(g.blockTrackers.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
+         ",\"defaultBrowser\":" + b(browserreg::IsDefault()) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"blockTrackers\":" + b(g.blockTrackers.load()) + ",\"stripTracking\":" + b(g.stripTracking.load()) + ",\"strippedCount\":" + std::to_string(g.strippedCount.load()) + ",\"block3pCookies\":" + b(g.block3pCookies.load()) + ",\"strictReferrer\":" + b(g.strictReferrer.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"a11yTree\":" + b(g.a11yTree) + ",\"reducedMotion\":" + b(g.reducedMotion.load()) + ",\"highContrast\":" + b(g.highContrast.load()) + ",\"minFontSize\":" + std::to_string(g.minFontSize) + ",\"smoothScroll\":" + b(RegGetDword(L"SmoothScroll", 1) != 0) + ",\"smoothStep\":" + std::to_string(RegGetDword(L"SmoothStep", 120)) + ",\"smoothTime\":" + std::to_string(RegGetDword(L"SmoothTime", 400)) + ",\"devDock\":" + std::to_string(RegGetDword(L"DevToolsDock", 0)) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
          ",\"ramLimitMB\":" + std::to_string(RegGetDword(L"RamLimitMB", 0)) +
          ",\"bgLimit\":" + b(RegGetDword(L"BgLimit", 0) != 0) +
          ",\"batterySaver\":" + b(RegGetDword(L"BatterySaver", 0) != 0) +
@@ -4500,7 +4963,7 @@ static std::string SettingsJson() {
          ",\"readerFont\":" + JsonUtf8(RegGetString(L"ReaderFont").empty() ? L"sans" : RegGetString(L"ReaderFont")) +
          ",\"readerSize\":" + std::to_string(RegGetDword(L"ReaderSize", 18)) +
          ",\"scriptTotal\":" + std::to_string(scriptTotal) + ",\"scriptEnabled\":" + std::to_string(scriptEnabled) +
-         ",\"downloadDir\":" + JsonUtf8(DownloadBaseDir(false)) + ",\"bookmarksBar\":" + b(RegGetDword(L"BookmarksBar", 1) != 0) + ",\"forceDark\":" + b(RegGetDword(L"ForceDark", 0) != 0) +
+         ",\"downloadDir\":" + JsonUtf8(DownloadBaseDir(false)) + ",\"bookmarksBar\":" + b(RegGetDword(L"BookmarksBar", 1) != 0) + ",\"forceDark\":" + b(RegGetDword(L"ForceDark", 0) != 0) + ",\"lightMode\":" + b(g.lightMode.load()) + ",\"lang\":" + JsonUtf8(g.langId.load() == 1 ? L"id" : L"en") + ",\"welcomeDismissed\":" + b(g.welcomeDismissed.load()) +
          ",\"dohMode\":" + JsonUtf8(RegGetString(L"DohMode").empty() ? L"automatic" : RegGetString(L"DohMode")) +
          ",\"dohProvider\":" + JsonUtf8(RegGetString(L"DohProvider").empty() ? L"cloudflare" : RegGetString(L"DohProvider")) +
          ",\"dohCustom\":" + JsonUtf8(RegGetString(L"DohCustom")) + ",\"dohProviders\":[";
@@ -4524,6 +4987,9 @@ static std::string SettingsJson() {
         o += "],\"trackersExempt\":[";
         first = true;
         for (const auto& h : g_trackersExempt) { if (!first) o += ","; first = false; o += JsonUtf8(Wide(h)); }
+        o += "],\"cookie3pExempt\":[";
+        first = true;
+        for (const auto& h : g_cookie3pExempt) { if (!first) o += ","; first = false; o += JsonUtf8(Wide(h)); }
     }
     o += "],\"darkExempt\":[";
     {
@@ -4704,7 +5170,9 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
         bool ok = false;
         if (key == L"search") ok = EngineValidId(val);
-        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"fastDownload" || key == L"dlSubfolder" || key == L"dlCategories" || key == L"restoreSession" || key == L"favicons" || key == L"bookmarksBar" || key == L"httpsOnly" || key == L"blockAds" || key == L"blockTrackers" || key == L"savePasswords" || key == L"smoothScroll" || key == L"netSpeed" || key == L"forceDark" || key == L"bgLimit" || key == L"batterySaver" || key == L"batteryAuto" || key == L"netLimitAll") ok = (val == L"0" || val == L"1");
+        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"fastDownload" || key == L"dlSubfolder" || key == L"dlCategories" || key == L"restoreSession" || key == L"favicons" || key == L"bookmarksBar" || key == L"httpsOnly" || key == L"blockAds" || key == L"blockTrackers" || key == L"stripTracking" || key == L"block3pCookies" || key == L"strictReferrer" || key == L"savePasswords" || key == L"a11yTree" || key == L"reducedMotion" || key == L"highContrast" || key == L"welcomeDismissed" || key == L"smoothScroll" || key == L"netSpeed" || key == L"forceDark" || key == L"lightMode" || key == L"bgLimit" || key == L"batterySaver" || key == L"batteryAuto" || key == L"netLimitAll") ok = (val == L"0" || val == L"1");
+        else if (key == L"lang") ok = (val == L"en" || val == L"id");
+        else if (key == L"minFontSize") ok = (val == L"0" || val == L"12" || val == L"14" || val == L"16" || val == L"18" || val == L"20");
         else if (key == L"fastConnections") ok = (val == L"4" || val == L"8" || val == L"16");
         else if (key == L"ramLimitMB") { int v = _wtoi(val.c_str()); ok = (v == 0 || (v >= 512 && v <= 65536)); }
         else if (key == L"netLimitKB") { int v = _wtoi(val.c_str()); ok = (v == 0 || (v >= 64 && v <= 102400)); }
@@ -4713,7 +5181,7 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         else if (key == L"readerTheme") ok = (val == L"neon" || val == L"dark" || val == L"sepia" || val == L"light");
         else if (key == L"readerFont") ok = (val == L"sans" || val == L"serif" || val == L"mono");
         else if (key == L"readerSize") { int v = _wtoi(val.c_str()); ok = (v >= 14 && v <= 28); }
-        else if (key == L"adsExemptDel" || key == L"trackersExemptDel" || key == L"darkExemptDel") ok = !val.empty() && val.size() < 256;
+        else if (key == L"adsExemptDel" || key == L"trackersExemptDel" || key == L"darkExemptDel" || key == L"cookie3pExemptAdd" || key == L"cookie3pExemptDel") ok = !val.empty() && val.size() < 256;
         else if (key == L"smoothStep") ok = (val == L"70" || val == L"120" || val == L"200");
         else if (key == L"devDock") ok = (val == L"0" || val == L"1" || val == L"2" || val == L"3");
         else if (key == L"defaultBrowser") ok = (val == L"1");
@@ -4865,19 +5333,25 @@ public:
             size_t hpos = body.find("</head>");
             if (hpos != std::string::npos) body.insert(hpos, cssTag);
             else body = cssTag + body;
+            // The design tokens come first, so a page's own style can still refine a value.
+            size_t hopen = body.find("<head>");
+            if (hopen != std::string::npos) body.insert(hopen + 6, TokensStyleTag());
             return new StringResource(std::move(body), "text/html", 200);
         }
         // Unknown neonnet:// page: a themed page with a proper title (the tab would otherwise
         // be named after the address). Nothing from the request is echoed back.
         static const char NOT_FOUND[] =
             "<!doctype html><html><head><meta charset=\"utf-8\"><title>NOT FOUND</title><style>"
-            "html,body{margin:0;height:100%;background:#12062c;color:#e8d8ff;font:14px Consolas,'Courier New',monospace}"
+            "html,body{margin:0;height:100%;background:var(--bg,#12062c);color:var(--text,#e8d8ff);font:14px Consolas,'Courier New',monospace}"
             "main{max-width:640px;margin:0 auto;padding:12vh 20px}"
-            "h1{margin:0;font:italic 900 56px Impact,'Arial Black',sans-serif;letter-spacing:3px;color:#00e5ff;text-shadow:3px 3px 0 #ff2e97}"
-            "p{color:#8a6fc0;letter-spacing:1px}a{color:#ffd600;text-decoration:none}a:hover{text-decoration:underline}"
+            "h1{margin:0;font:italic 900 56px Impact,'Arial Black',sans-serif;letter-spacing:3px;color:var(--cyan,#00e5ff);text-shadow:3px 3px 0 var(--pink,#ff2e97)}"
+            "p{color:var(--muted,#8a6fc0);letter-spacing:1px}a{color:var(--yellow,#ffd600);text-decoration:none}a:hover{text-decoration:underline}"
             "</style></head><body><main><h1>404</h1><p>&gt; NO SUCH PAGE ON THIS NODE</p>"
             "<p><a href=\"https://neonnet.ui/newtab.html\">&gt; BACK TO THE GRID</a></p></main></body></html>";
-        return new StringResource(NOT_FOUND, "text/html", 404);
+        std::string nf = NOT_FOUND;
+        size_t nh = nf.find("</head>");
+        if (nh != std::string::npos) nf.insert(nh, TokensStyleTag() + ThemeStyleTag());
+        return new StringResource(std::move(nf), "text/html", 404);
     }
     IMPLEMENT_REFCOUNTING(UiSchemeFactory);
 };
@@ -5159,10 +5633,13 @@ static DWORD WINAPI UpdateThread(LPVOID arg) {
     return 0;
 }
 
+static void ShowToast(const std::wstring& text);
+
 static void ShowNotice(const std::wstring& text) {
     g.notice = text;
     SetTimer(g.hwnd, TIMER_NOTICE, 8000, nullptr);
     InvalidateStatus();
+    ShowToast(text);
 }
 
 static void StartUpdateCheck(bool manual) {
@@ -6103,6 +6580,15 @@ static void ExecCmd(int cmd) {
         ShowNotice(g.forceDark ? L"FORCE DARK MODE ON" : L"FORCE DARK MODE OFF");
         break;
     }
+    case CMD_LIGHTMODE: {
+        bool next = !g.lightMode.load();
+        g.lightMode = next;
+        DWORD v = next ? 1 : 0;
+        if (!g.incognito) RegSetBin(L"LightMode", REG_DWORD, &v, sizeof(v));
+        BroadcastThemeAccent();
+        ShowNotice(next ? L"LIGHT MODE ON" : L"DARK MODE ON");
+        break;
+    }
     case CMD_DARK_EXEMPT: ToggleDarkExemptForActive(); break;
     case CMD_PROXY_TOGGLE: {
         if (!ProxySetEnabled(-1)) {
@@ -6113,6 +6599,7 @@ static void ExecCmd(int cmd) {
         break;
     }
     case CMD_CARET: ToggleCaretBrowsing(); break;
+    case CMD_COPY_CLEAN: if (a) CopyCleanUrlToClipboard(DisplayUrl(a)); break;
     case CMD_INCOGNITO: if (g.incognito) CreateTab(NEWTAB, true); else LaunchIncognito(L""); break;
     case CMD_PERFORMANCE: SetPanelOpen(!g.panelOpen); break;
     case CMD_WHATSAPP: SetWaOpen(!g.waOpen); break;
@@ -6167,6 +6654,7 @@ static void ExecCmd(int cmd) {
         for (auto& t : g.tabs) ApplyScan(t->browser);
         SendState();
         InvalidateStatus();
+        if (g.toastHwnd && IsWindowVisible(g.toastHwnd)) InvalidateRect(g.toastHwnd, nullptr, FALSE);
         break;
     }
     case CMD_FULLSCREEN: g.fsUser = !g.fullscreen; if (!g.fsUser) g.fsElement = false; UpdateFullscreen(); break;
@@ -6226,7 +6714,7 @@ static bool IsNoRepeatCmd(int cmd) {
     case CMD_NEWTAB: case CMD_CLOSETAB: case CMD_REOPEN: case CMD_BOOKMARK: case CMD_BOOKMARKS_BAR:
     case CMD_INCOGNITO: case CMD_PERFORMANCE: case CMD_HISTORY: case CMD_DOWNLOADS: case CMD_SETTINGS:
     case CMD_BOOKMARKS: case CMD_EXTENSIONS: case CMD_PALETTE: case CMD_PRINT:
-    case CMD_PIN_TAB: case CMD_MUTE_TAB: case CMD_PROXY_TOGGLE: case CMD_FORCEDARK:
+    case CMD_PIN_TAB: case CMD_MUTE_TAB: case CMD_PROXY_TOGGLE: case CMD_FORCEDARK: case CMD_LIGHTMODE:
     case CMD_SCAN: case CMD_BLOCKADS: case CMD_HELP: case CMD_CARET: case CMD_FULLSCREEN: case CMD_DEVTOOLS:
         return true;
     default: return false;
@@ -6257,8 +6745,17 @@ static bool HandleShortcutKey(bool ctrl, bool shift, bool alt, bool repeat, int 
         if (wi < g.workspaces.size()) { SwitchWorkspace(g.workspaces[wi].id); return true; }
     } else if (!ctrl && !alt && !shift) {
         if (vk == VK_F5) cmd = CMD_RELOAD;
-        else if (vk == VK_F6) cmd = CMD_FOCUSURL;
         else if (vk == VK_ESCAPE && g.fsUser) cmd = CMD_FULLSCREEN;
+    }
+    if (vk == VK_F6 && !ctrl && !alt && !repeat) {
+        HWND f = GetFocus();
+        HWND cw = g.chrome ? g.chrome->GetHost()->GetWindowHandle() : nullptr;
+        if (cw && (f == cw || IsChild(cw, f))) {
+            RunInChrome(std::wstring(L"window.__nn&&window.__nn({type:'cycleFocus',shift:") + (shift ? L"true" : L"false") + L"})");
+        } else {
+            FocusUrl();
+        }
+        return true;
     }
     if (!cmd) return false;
     ExecCmd(cmd);
@@ -6298,7 +6795,7 @@ static int MenuHit(const MenuState& st, POINT p) {
 
 // Thin dark lines over the window, like the CRT effect of the rest of the UI.
 static void PaintScanlines(HDC mem, int w, int h) {
-    if (g.scan) {
+    if (g.scan && !g.reducedMotion.load() && !g.highContrast.load()) {
         BITMAPINFO bi{}; bi.bmiHeader = { sizeof(BITMAPINFOHEADER), 1, 1, 1, 32, BI_RGB };
         void* bits = nullptr;
         HBITMAP dot = CreateDIBSection(mem, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
@@ -6321,13 +6818,13 @@ static void PaintMenu(HWND hwnd, MenuState& st, HDC hdc) {
     HDC mem = CreateCompatibleDC(hdc);
     HBITMAP bmp = CreateCompatibleBitmap(hdc, w, h);
     HGDIOBJ oldBmp = SelectObject(mem, bmp);
-    HBRUSH bg = CreateSolidBrush(C_MENU_BG); FillRect(mem, &rc, bg); DeleteObject(bg);
+    HBRUSH bg = CreateSolidBrush(MenuBgCol()); FillRect(mem, &rc, bg); DeleteObject(bg);
     SelectObject(mem, st.font);
     SetBkMode(mem, TRANSPARENT);
 
     // header
     RECT hr{ S(14), S(6), w - S(14), S(26) };
-    SetTextColor(mem, C_YELLOW);
+    SetTextColor(mem, YellowCol());
     std::wstring head = L"> " + st.title;
     DrawTextW(mem, head.c_str(), -1, &hr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
@@ -6335,7 +6832,7 @@ static void PaintMenu(HWND hwnd, MenuState& st, HDC hdc) {
         const MenuItem& it = st.items[i];
         RECT r = st.rows[i];
         if (!it.cmd) {
-            HPEN pen = CreatePen(PS_SOLID, 1, C_SEP);
+            HPEN pen = CreatePen(PS_SOLID, 1, SepCol());
             HGDIOBJ op = SelectObject(mem, pen);
             int y = (r.top + r.bottom) / 2;
             MoveToEx(mem, r.left + S(10), y, nullptr); LineTo(mem, r.right - S(10), y);
@@ -6353,11 +6850,11 @@ static void PaintMenu(HWND hwnd, MenuState& st, HDC hdc) {
             FillRgn(mem, rg, hb);
             DeleteObject(rg); DeleteObject(hb);
         }
-        COLORREF tc = it.disabled ? C_DIM : hot ? C_BG : C_TEXT;
-        COLORREF kc = it.disabled ? C_DIM : hot ? C_BG : C_MUTED;
+        COLORREF tc = it.disabled ? DimCol() : hot ? MenuBgCol() : TextCol();
+        COLORREF kc = it.disabled ? DimCol() : hot ? MenuBgCol() : MutedCol();
         if (it.checked) {
             RECT cr{ r.left + S(12), r.top, r.left + S(30), r.bottom };
-            SetTextColor(mem, hot ? C_BG : Accent());
+            SetTextColor(mem, hot ? MenuBgCol() : Accent());
             DrawTextW(mem, L"\x25A0", -1, &cr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         }
         RECT tr{ r.left + S(32), r.top, r.right - S(16), r.bottom };
@@ -6539,23 +7036,23 @@ static void PaintDialog(HWND hwnd, DlgState& st, HDC hdc) {
     HDC mem = CreateCompatibleDC(hdc);
     HBITMAP bmp = CreateCompatibleBitmap(hdc, w, h);
     HGDIOBJ oldBmp = SelectObject(mem, bmp);
-    HBRUSH bg = CreateSolidBrush(C_MENU_BG); FillRect(mem, &rc, bg); DeleteObject(bg);
+    HBRUSH bg = CreateSolidBrush(MenuBgCol()); FillRect(mem, &rc, bg); DeleteObject(bg);
     SelectObject(mem, st.font);
     SetBkMode(mem, TRANSPARENT);
 
     RECT hr{ S(18), S(8), w - S(18), S(30) };
-    SetTextColor(mem, C_YELLOW);
+    SetTextColor(mem, YellowCol());
     std::wstring head = L"> " + st.title;
     DrawTextW(mem, head.c_str(), -1, &hr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 
-    SetTextColor(mem, C_TEXT);
+    SetTextColor(mem, TextCol());
     DrawTextW(mem, st.message.c_str(), -1, &st.msgR, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
 
     for (auto& f : st.fields) {
-        SetTextColor(mem, C_MUTED);
+        SetTextColor(mem, MutedCol());
         DrawTextW(mem, f.label.c_str(), -1, &f.labelR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        HBRUSH eb = CreateSolidBrush(C_BG); FillRect(mem, &f.boxR, eb); DeleteObject(eb);
-        HPEN pen = CreatePen(PS_SOLID, 1, C_CYAN);
+        HBRUSH eb = CreateSolidBrush(BgCol()); FillRect(mem, &f.boxR, eb); DeleteObject(eb);
+        HPEN pen = CreatePen(PS_SOLID, 1, SecondaryAccent());
         HGDIOBJ op = SelectObject(mem, pen);
         HGDIOBJ ob = SelectObject(mem, GetStockObject(NULL_BRUSH));
         Rectangle(mem, f.boxR.left, f.boxR.top, f.boxR.right, f.boxR.bottom);
@@ -6568,11 +7065,11 @@ static void PaintDialog(HWND hwnd, DlgState& st, HDC hdc) {
         int k = S(7);
         POINT pts[5] = { {b.r.left, b.r.top}, {b.r.right - k, b.r.top}, {b.r.right, b.r.top + k}, {b.r.right, b.r.bottom}, {b.r.left, b.r.bottom} };
         HRGN rg = CreatePolygonRgn(pts, 5, WINDING);
-        HBRUSH fill = CreateSolidBrush(hot ? C_CYAN : def ? Accent() : C_MENU_BG);
+        HBRUSH fill = CreateSolidBrush(hot ? SecondaryAccent() : def ? Accent() : MenuBgCol());
         FillRgn(mem, rg, fill);
-        if (!hot && !def) { HBRUSH fr = CreateSolidBrush(C_MUTED); FrameRgn(mem, rg, fr, 1, 1); DeleteObject(fr); }
+        if (!hot && !def) { HBRUSH fr = CreateSolidBrush(MutedCol()); FrameRgn(mem, rg, fr, 1, 1); DeleteObject(fr); }
         DeleteObject(fill); DeleteObject(rg);
-        SetTextColor(mem, hot || def ? C_BG : C_TEXT);
+        SetTextColor(mem, hot || def ? MenuBgCol() : TextCol());
         RECT tr = b.r;
         DrawTextW(mem, b.text.c_str(), -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     }
@@ -6586,6 +7083,156 @@ static void PaintDialog(HWND hwnd, DlgState& st, HDC hdc) {
 
     BitBlt(hdc, 0, 0, w, h, mem, 0, 0, SRCCOPY);
     SelectObject(mem, oldBmp); DeleteObject(bmp); DeleteDC(mem);
+}
+
+// ---------------------------------------------------------------------------
+// Brief neon toast in the top-right corner of the viewport (2 seconds).
+
+static HFONT ToastFont() {
+    return CreateFontW(-S(12), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                       CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
+}
+
+static void PaintToast(HWND hwnd, HDC hdc) {
+    RECT rc; GetClientRect(hwnd, &rc);
+    int w = rc.right, h = rc.bottom, c = S(MENU_CUT_DIP);
+    if (w <= 0 || h <= 0) return;
+
+    HDC mem = CreateCompatibleDC(hdc);
+    HBITMAP bmp = CreateCompatibleBitmap(hdc, w, h);
+    HGDIOBJ oldBmp = SelectObject(mem, bmp);
+
+    HBRUSH bg = CreateSolidBrush(MenuBgCol());
+    FillRect(mem, &rc, bg);
+    DeleteObject(bg);
+
+    // Left neon accent stripe
+    RECT stripe{ 0, 0, S(4), h };
+    HBRUSH sb = CreateSolidBrush(SecondaryAccent());
+    FillRect(mem, &stripe, sb);
+    DeleteObject(sb);
+
+    HFONT font = ToastFont();
+    HGDIOBJ oldFont = SelectObject(mem, font);
+    SetBkMode(mem, TRANSPARENT);
+
+    RECT pr{ S(12), 0, S(28), h };
+    SetTextColor(mem, SecondaryAccent());
+    DrawTextW(mem, L">", -1, &pr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    RECT tr{ S(26), 0, w - S(14), h };
+    SetTextColor(mem, TextCol());
+    DrawTextW(mem, g.toastText.c_str(), -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+    SelectObject(mem, oldFont);
+    DeleteObject(font);
+
+    PaintScanlines(mem, w, h);
+
+    HPEN border = CreatePen(PS_SOLID, 1, Accent());
+    HGDIOBJ op = SelectObject(mem, border);
+    POINT pts[7] = { {0, 0}, {w - c - 1, 0}, {w - 1, c}, {w - 1, h - 1}, {c, h - 1}, {0, h - c - 1}, {0, 0} };
+    Polyline(mem, pts, 7);
+    SelectObject(mem, op);
+    DeleteObject(border);
+
+    BitBlt(hdc, 0, 0, w, h, mem, 0, 0, SRCCOPY);
+    SelectObject(mem, oldBmp); DeleteObject(bmp); DeleteDC(mem);
+}
+
+static LRESULT CALLBACK ToastProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+    case WM_ERASEBKGND: return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        PaintToast(hwnd, hdc);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_TIMER:
+        if (wp == 1) {
+            ULONGLONG elapsed = GetTickCount64() - g.toastShownAt;
+            if (elapsed >= 2000) {
+                KillTimer(hwnd, 1);
+                g.toastAlpha = 0;
+                ShowWindow(hwnd, SW_HIDE);
+            } else if (elapsed >= 1700 && !g.reducedMotion.load()) {
+                BYTE next = (BYTE)std::max(0, std::min(242, (int)(242 * (2000 - elapsed) / 300)));
+                if (next != g.toastAlpha) {
+                    g.toastAlpha = next;
+                    SetLayeredWindowAttributes(hwnd, 0, g.toastAlpha, LWA_ALPHA);
+                }
+            }
+        }
+        return 0;
+    case WM_NCHITTEST: return HTTRANSPARENT;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static void PositionToast() {
+    if (!g.toastHwnd || !g.hwnd) return;
+    if (g.closing || IsIconic(g.hwnd) || !IsWindowVisible(g.hwnd) || g.toastText.empty()) {
+        ShowWindow(g.toastHwnd, SW_HIDE);
+        return;
+    }
+    RECT cr = ContentRect();
+    int cw = cr.right - cr.left, ch = cr.bottom - cr.top;
+    if (cw < S(120) || ch < S(60)) {
+        ShowWindow(g.toastHwnd, SW_HIDE);
+        return;
+    }
+
+    HDC dc = GetDC(g.hwnd);
+    HFONT font = ToastFont();
+    HGDIOBJ of = SelectObject(dc, font);
+    RECT mr{ 0, 0, 0, 0 };
+    DrawTextW(dc, g.toastText.c_str(), -1, &mr, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+    SelectObject(dc, of);
+    DeleteObject(font);
+    ReleaseDC(g.hwnd, dc);
+
+    int maxW = std::max(S(160), cw - S(32));
+    int w = std::min(maxW, std::max(S(140), (int)(mr.right - mr.left) + S(44)));
+    int h = S(34);
+    int c = S(MENU_CUT_DIP);
+
+    POINT tr{ cr.right, cr.top };
+    ClientToScreen(g.hwnd, &tr);
+    int x = tr.x - w - S(16);
+    int y = tr.y + S(14);
+
+    POINT rp[6] = { {0, 0}, {w - c, 0}, {w, c}, {w, h}, {c, h}, {0, h - c} };
+    SetWindowRgn(g.toastHwnd, CreatePolygonRgn(rp, 6, WINDING), FALSE);
+    SetWindowPos(g.toastHwnd, HWND_TOP, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+static void ShowToast(const std::wstring& text) {
+    if (!g.hwnd || g.closing || text.empty()) return;
+    static bool registered = false;
+    if (!registered) {
+        WNDCLASSEXW wc{ sizeof(wc) };
+        wc.style = CS_DROPSHADOW;
+        wc.lpfnWndProc = ToastProc;
+        wc.hInstance = g.hmod;
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.lpszClassName = L"NeonNetToast";
+        registered = RegisterClassExW(&wc) != 0;
+    }
+    if (!g.toastHwnd) {
+        g.toastHwnd = CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+            L"NeonNetToast", L"", WS_POPUP, 0, 0, 10, 10, g.hwnd, nullptr, g.hmod, nullptr);
+        if (!g.toastHwnd) return;
+    }
+    g.toastText = text;
+    g.toastAlpha = 242;
+    g.toastShownAt = GetTickCount64();
+    SetLayeredWindowAttributes(g.toastHwnd, 0, g.toastAlpha, LWA_ALPHA);
+    PositionToast();
+    InvalidateRect(g.toastHwnd, nullptr, FALSE);
+    SetTimer(g.toastHwnd, 1, 40, nullptr);
 }
 
 static int DlgButtonAt(const DlgState& st, POINT p) {
@@ -6609,7 +7256,7 @@ static LRESULT CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_CTLCOLOREDIT: {
         if (!st) break;
         HDC dc = (HDC)wp;
-        SetTextColor(dc, C_CYAN); SetBkColor(dc, C_BG);
+        SetTextColor(dc, SecondaryAccent()); SetBkColor(dc, BgCol());
         return (LRESULT)st->editBrush;
     }
     case WM_MOUSEMOVE: {
@@ -6651,7 +7298,7 @@ static int RunDialog(DlgState& st) {
     }
     st.font = CreateFontW(-S(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                           CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
-    st.editBrush = CreateSolidBrush(C_BG);
+    st.editBrush = CreateSolidBrush(BgCol());
 
     // layout
     int W = S(480), pad = S(18);
@@ -7279,8 +7926,8 @@ static void OnChromeCommand(const std::wstring& msg) {
             { L"bookmarks_bar", CMD_BOOKMARKS_BAR }, { L"history", CMD_HISTORY }, { L"downloads", CMD_DOWNLOADS },
             { L"extensions", CMD_EXTENSIONS }, { L"settings", CMD_SETTINGS }, { L"perf", CMD_PERFORMANCE },
             { L"find", CMD_FIND }, { L"zoomin", CMD_ZOOMIN }, { L"zoomout", CMD_ZOOMOUT },
-            { L"zoomreset", CMD_ZOOMRESET }, { L"print", CMD_PRINT }, { L"blockads", CMD_BLOCKADS }, { L"blocktrackers", CMD_BLOCKTRACKERS },
-            { L"scan", CMD_SCAN }, { L"forcedark", CMD_FORCEDARK }, { L"darkexempt", CMD_DARK_EXEMPT }, { L"proxy", CMD_PROXY_TOGGLE }, { L"fullscreen", CMD_FULLSCREEN },
+            { L"zoomreset", CMD_ZOOMRESET }, { L"print", CMD_PRINT }, { L"blockads", CMD_BLOCKADS }, { L"blocktrackers", CMD_BLOCKTRACKERS }, { L"copyclean", CMD_COPY_CLEAN },
+            { L"scan", CMD_SCAN }, { L"forcedark", CMD_FORCEDARK }, { L"lightmode", CMD_LIGHTMODE }, { L"darkexempt", CMD_DARK_EXEMPT }, { L"proxy", CMD_PROXY_TOGGLE }, { L"fullscreen", CMD_FULLSCREEN },
             { L"devtools", CMD_DEVTOOLS }, { L"caret", CMD_CARET }, { L"pin", CMD_PIN_TAB },
             { L"mute", CMD_MUTE_TAB }, { L"split", CMD_SPLIT_VIEW }, { L"splitswap", CMD_SPLIT_SWAP },
             { L"reader", CMD_READER_MODE }, { L"wa", CMD_WHATSAPP }, { L"help", CMD_HELP }, { L"about", CMD_ABOUT },
@@ -7698,6 +8345,19 @@ public:
         noAutofill(CefRequestContext::GetGlobalContext());
         ApplyDohPrefs();
         ApplyProxyPrefs();
+        ApplyCookiePrefs();
+        {
+            std::lock_guard<std::mutex> lk(g_blockMu);
+            for (const auto& s : g_cookie3pExempt) ApplyCookie3pException(s, true);
+        }
+        {
+            std::lock_guard<std::mutex> lk(g_spMu);
+            for (const auto& s : g_sp) {
+                for (const auto& kv : s.second) {
+                    if (kv.first == L"javascript" || kv.first == L"popups") ApplySiteContentSettingUI(s.first, kv.first, kv.second);
+                }
+            }
+        }
 
         CefRegisterSchemeHandlerFactory("https", "neonnet.ui", new UiSchemeFactory());
         CefRegisterSchemeHandlerFactory("https", "chrome.neonnet.ui", new UiSchemeFactory());
@@ -7710,6 +8370,11 @@ public:
             g.reqCtx->SetPreference("download_bubble.partial_view_enabled", noBubble, err);
             noAutofill(g.reqCtx);
             ApplyProxyPrefs();
+            ApplyCookiePrefs();
+            {
+                std::lock_guard<std::mutex> lk(g_blockMu);
+                for (const auto& s : g_cookie3pExempt) ApplyCookie3pException(s, true);
+            }
             g.reqCtx->RegisterSchemeHandlerFactory("https", "neonnet.ui", new UiSchemeFactory());
             g.reqCtx->RegisterSchemeHandlerFactory("https", "chrome.neonnet.ui", new UiSchemeFactory());
         }
@@ -8030,7 +8695,7 @@ static void Paint(HDC hdc) {
     HDC mem = CreateCompatibleDC(hdc);
     HBITMAP bmp = CreateCompatibleBitmap(hdc, w, h);
     HGDIOBJ oldBmp = SelectObject(mem, bmp);
-    HBRUSH bg = CreateSolidBrush(C_BG); FillRect(mem, &rc, bg); DeleteObject(bg);
+    HBRUSH bg = CreateSolidBrush(BgCol()); FillRect(mem, &rc, bg); DeleteObject(bg);
 
     if (!g.fullscreen) {
         if (IsSplitActive()) {
@@ -8064,18 +8729,18 @@ static void Paint(HDC hdc) {
         SetBkMode(mem, TRANSPARENT);
         RECT tr = st; tr.left += S(12) + (IsZoomed(g.hwnd) ? 0 : S(CUT_DIP) / 2); tr.right -= S(12); tr.top += 1;
         Tab* a = Active();
-        std::wstring left; COLORREF lc = C_MUTED;
+        std::wstring left; COLORREF lc = MutedCol();
         if (!g.alert.empty()) { left = g.alert; lc = Accent(); }
         else if (!g.hoverText.empty()) { left = g.hoverText; lc = SecondaryAccent(); }
-        else if (a && a->loading) { left = L"LOADING..."; lc = C_YELLOW; }
-        else if (!g.download.empty()) { left = g.download; lc = C_YELLOW; }
+        else if (a && a->loading) { left = L"LOADING..."; lc = YellowCol(); }
+        else if (!g.download.empty()) { left = g.download; lc = YellowCol(); }
         else if (!g.notice.empty()) { left = g.notice; lc = SecondaryAccent(); }
-        else if (g.upd == U_DOWNLOADING) { left = L"DOWNLOADING UPDATE v" + g.updVersion + L"  " + std::to_wstring(g.updPercent) + L"%"; lc = C_YELLOW; }
-        else if (g.upd == U_READY) { left = L"UPDATE v" + g.updVersion + L" READY - INSTALLS WHEN NEONNET CLOSES"; lc = C_YELLOW; }
-        else if (g.upd == U_AVAILABLE) { left = L"NEONNET v" + g.updVersion + L" IS AVAILABLE - SEE THE MENU"; lc = C_YELLOW; }
+        else if (g.upd == U_DOWNLOADING) { left = L"DOWNLOADING UPDATE v" + g.updVersion + L"  " + std::to_wstring(g.updPercent) + L"%"; lc = YellowCol(); }
+        else if (g.upd == U_READY) { left = L"UPDATE v" + g.updVersion + L" READY - INSTALLS WHEN NEONNET CLOSES"; lc = YellowCol(); }
+        else if (g.upd == U_AVAILABLE) { left = L"NEONNET v" + g.updVersion + L" IS AVAILABLE - SEE THE MENU"; lc = YellowCol(); }
         else if (a && !a->errorUrl.empty()) { left = L"SIGNAL LOST"; lc = Accent(); }
-        else if (!g.chrome) { left = L"INITIALIZING..."; lc = C_YELLOW; }
-        else if (g.incognito) { left = L"INCOGNITO - HISTORY AND COOKIES ARE NOT SAVED"; lc = C_GREEN; }
+        else if (!g.chrome) { left = L"INITIALIZING..."; lc = YellowCol(); }
+        else if (g.incognito) { left = L"INCOGNITO - HISTORY AND COOKIES ARE NOT SAVED"; lc = GreenCol(); }
         else left = L"LINK STABLE";
 
         SYSTEMTIME t; GetLocalTime(&t);
@@ -8118,10 +8783,19 @@ static void MakeFont() {
 // Window procedure
 
 static void BroadcastThemeAccent() {
-    if (g.hwnd) InvalidateRect(g.hwnd, nullptr, TRUE);
+    if (g.hwnd) {
+        DarkenBrowserWindow(g.hwnd);
+        InvalidateRect(g.hwnd, nullptr, TRUE);
+    }
+    if (g.toastHwnd && IsWindowVisible(g.toastHwnd)) InvalidateRect(g.toastHwnd, nullptr, FALSE);
     SendState();
-    std::wstring js = L"(()=>{let s=document.getElementById('nn-accent');if(!s){s=document.createElement('style');s.id='nn-accent';document.head.appendChild(s);}s.textContent=" +
-                      JsonStr(Wide(ThemeRuleCss())) + L";})();";
+    std::wstring js = L"(()=>{document.documentElement.classList.toggle('light'," +
+                      std::wstring(g.lightMode.load() ? L"true" : L"false") +
+                      L");document.documentElement.classList.toggle('hc'," +
+                      std::wstring(g.highContrast.load() ? L"true" : L"false") +
+                      L");let s=document.getElementById('nn-accent');if(!s){s=document.createElement('style');s.id='nn-accent';document.head.appendChild(s);}s.textContent=" +
+                      JsonStr(Wide(ThemeRuleCss())) +
+                      L";window.__nnSetLang&&window.__nnSetLang(" + JsonStr(g.langId.load() == 1 ? L"id" : L"en") + L");})();";
     auto push = [&](CefRefPtr<CefBrowser> b) {
         if (b && b->GetMainFrame()) b->GetMainFrame()->ExecuteJavaScript(js, "", 0);
     };
@@ -8198,10 +8872,89 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         DWORD v = val == L"1" ? 1 : 0;
         RegSetBin(L"SavePasswords", REG_DWORD, &v, sizeof(v));
         g.savePasswords = v != 0;
+    } else if (key == L"a11yTree") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"Accessibility", REG_DWORD, &v, sizeof(v));
+        g.a11yTree = v != 0;
+        for (auto& b : g_all) ApplyAccessibility(b);
+        ShowNotice(g.a11yTree ? L"SCREEN READER ACCESSIBILITY ON" : L"SCREEN READER ACCESSIBILITY OFF");
+    } else if (key == L"reducedMotion") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"ReducedMotion", REG_DWORD, &v, sizeof(v));
+        g.reducedMotion = v != 0;
+        BroadcastThemeAccent();
+        for (auto& t : g.tabs) if (t->browser && !t->discarded) { ApplyReducedMotion(t->browser); ApplyScan(t->browser); }
+        ShowNotice(g.reducedMotion.load() ? L"REDUCED MOTION ON" : L"REDUCED MOTION OFF");
+    } else if (key == L"highContrast") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"HighContrast", REG_DWORD, &v, sizeof(v));
+        g.highContrast = v != 0;
+        BroadcastThemeAccent();
+        for (auto& t : g.tabs) if (t->browser && !t->discarded) ApplyScan(t->browser);
+        ShowNotice(g.highContrast.load() ? L"HIGH CONTRAST THEME ON" : L"HIGH CONTRAST THEME OFF");
+    } else if (key == L"minFontSize") {
+        int px = _wtoi(val.c_str());
+        if (px < 0 || px > 24) px = 0;
+        DWORD v = (DWORD)px;
+        RegSetBin(L"MinFontSize", REG_DWORD, &v, sizeof(v));
+        g.minFontSize = px;
+        ShowNotice(px > 0 ? (L"MINIMUM FONT SIZE: " + std::to_wstring(px) + L" PX (NEW TABS)") : L"MINIMUM FONT SIZE: DEFAULT");
     } else if (key == L"blockAds") {
         if ((val == L"1") != g.blockAds.load()) ExecCmd(CMD_BLOCKADS);
     } else if (key == L"blockTrackers") {
         if ((val == L"1") != g.blockTrackers.load()) ExecCmd(CMD_BLOCKTRACKERS);
+    } else if (key == L"stripTracking") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"StripTracking", REG_DWORD, &v, sizeof(v));
+        g.stripTracking = v != 0;
+        ShowNotice(g.stripTracking.load() ? L"URL TRACKING STRIPPER ON" : L"URL TRACKING STRIPPER OFF");
+    } else if (key == L"block3pCookies") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"Block3pCookies", REG_DWORD, &v, sizeof(v));
+        g.block3pCookies = v != 0;
+        ApplyCookiePrefs();
+        ShowNotice(g.block3pCookies.load() ? L"BLOCK 3RD-PARTY COOKIES ON" : L"BLOCK 3RD-PARTY COOKIES OFF");
+    } else if (key == L"strictReferrer") {
+        DWORD v = val == L"1" ? 1 : 0;
+        RegSetBin(L"StrictReferrer", REG_DWORD, &v, sizeof(v));
+        g.strictReferrer = v != 0;
+        ShowNotice(g.strictReferrer.load() ? L"STRICT CROSS-SITE REFERRER ON" : L"STRICT CROSS-SITE REFERRER OFF");
+    } else if (key == L"cookie3pExemptAdd") {
+        std::string h = Utf8(val);
+        size_t p = h.find("://"); if (p != std::string::npos) h.erase(0, p + 3);
+        size_t sl = h.find_first_of("/?#"); if (sl != std::string::npos) h.resize(sl);
+        size_t cl = h.find(':'); if (cl != std::string::npos) h.resize(cl);
+        for (auto& c : h) c = (char)tolower((unsigned char)c);
+        if (!h.empty()) {
+            { std::lock_guard<std::mutex> lk(g_blockMu); g_cookie3pExempt.insert(h); }
+            SaveShieldExempt();
+            ApplyCookie3pException(h, true);
+            g.lastStateJson.clear();
+            SendState();
+        }
+    } else if (key == L"cookie3pExemptDel") {
+        std::vector<std::string> removed;
+        {
+            std::lock_guard<std::mutex> lk(g_blockMu);
+            if (val == L"*") { removed.assign(g_cookie3pExempt.begin(), g_cookie3pExempt.end()); g_cookie3pExempt.clear(); }
+            else { std::string h = Utf8(val); if (g_cookie3pExempt.erase(h)) removed.push_back(h); }
+        }
+        SaveShieldExempt();
+        for (const auto& s : removed) ApplyCookie3pException(s, false);
+        g.lastStateJson.clear();
+        SendState();
+    } else if (key == L"lang") {
+        bool isId = (val == L"id");
+        std::wstring lv = isId ? L"id" : L"en";
+        if (!g.incognito) RegSetBin(L"Language", REG_SZ, lv.c_str(), (DWORD)((lv.size() + 1) * sizeof(wchar_t)));
+        g.langId = isId ? 1 : 0;
+        BroadcastThemeAccent();
+        ShowNotice(isId ? L"BAHASA: INDONESIA" : L"LANGUAGE: ENGLISH");
+    } else if (key == L"welcomeDismissed") {
+        DWORD v = val == L"1" ? 1 : 0;
+        if (!g.incognito) RegSetBin(L"WelcomeDismissed", REG_DWORD, &v, sizeof(v));
+        g.welcomeDismissed = v != 0;
+        SendState();
     } else if (key == L"adsExemptDel" || key == L"trackersExemptDel") {
         {
             std::lock_guard<std::mutex> lk(g_blockMu);
@@ -8333,6 +9086,11 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
             }
             BroadcastThemeAccent();
         }
+    } else if (key == L"lightMode") {
+        DWORD v = val == L"1" ? 1 : 0;
+        g.lightMode = (v != 0);
+        if (!g.incognito) RegSetBin(L"LightMode", REG_DWORD, &v, sizeof(v));
+        BroadcastThemeAccent();
     }
 }
 
@@ -9090,6 +9848,7 @@ static void ShowAlert(const std::wstring& text) {
     g.alert = text;
     SetTimer(g.hwnd, TIMER_ALERT, 12000, nullptr);
     InvalidateStatus();
+    ShowToast(text);
 }
 
 // Where a copy of `name` goes. The extension is checked against a list of media types, so a
@@ -9234,7 +9993,26 @@ static void DoDownloadAction(int act, long long id) {
         size_t dot = path.rfind(L'.');
         bool isPdf = dot != std::wstring::npos && _wcsicmp(path.c_str() + dot, L".pdf") == 0;
         if (isPdf) CreateTab(NormalizeArgUrl(path), true, -1);
-        else if (store::DownloadOpenable(path)) ShellExecuteW(g.hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        else if (store::DownloadOpenable(path)) {
+            auto isHighRisk = [](const std::wstring& p) {
+                size_t d = p.rfind(L'.');
+                if (d == std::wstring::npos) return false;
+                static const wchar_t* const exts[] = { L".exe", L".msi", L".bat", L".ps1", L".vbs", L".scr", L".cmd", L".com" };
+                for (auto* e : exts) if (_wcsicmp(p.c_str() + d, e) == 0) return true;
+                return false;
+            };
+            if (isHighRisk(path)) {
+                size_t sl = path.find_last_of(L"\\/");
+                std::wstring name = sl == std::wstring::npos ? path : path.substr(sl + 1);
+                DlgState st;
+                st.title = L"HIGH-RISK FILE WARNING";
+                st.message = L"\"" + name + L"\" is an executable or script file.\nOnly open files from sources you trust.\n\nOpen this file anyway?";
+                st.buttons = { { L"OPEN ANYWAY", 1 }, { L"CANCEL", 0 } };
+                st.defId = 0; st.cancelId = 0;
+                if (RunDialog(st) != 1) return;
+            }
+            ShellExecuteW(g.hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
     } else if (act == DLA_SHOW) {
         std::wstring args = L"/select,\"" + path + L"\"";
         ShellExecuteW(g.hwnd, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
@@ -9343,6 +10121,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_MOVE: case WM_MOVING:
         if (g.chrome) g.chrome->GetHost()->NotifyMoveOrResizeStarted();
         if (Tab* a = Active()) if (a->browser) a->browser->GetHost()->NotifyMoveOrResizeStarted();
+        if (g.toastHwnd && IsWindowVisible(g.toastHwnd)) PositionToast();
         break;
     case WM_DPICHANGED: {
         g.dpi = HIWORD(wp); MakeFont();
@@ -9603,9 +10382,27 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     g.favicons = RegGetDword(L"ShowFavicons", 1) != 0;
     g.bookmarksBar = RegGetDword(L"BookmarksBar", 1) != 0;
     g.httpsOnly = RegGetDword(L"HttpsOnly", 0) != 0;
+    g.stripTracking = RegGetDword(L"StripTracking", 1) != 0;
+    g.block3pCookies = RegGetDword(L"Block3pCookies", 0) != 0;
+    g.strictReferrer = RegGetDword(L"StrictReferrer", 0) != 0;
     g.savePasswords = RegGetDword(L"SavePasswords", 1) != 0;
     g.smooth = RegGetDword(L"SmoothScroll", 1) != 0;
     g.forceDark = RegGetDword(L"ForceDark", 0) != 0;
+    g.a11yTree = RegGetDword(L"Accessibility", 0) != 0;
+    { DWORD rm = RegGetDword(L"ReducedMotion", 2); g.reducedMotion = (rm == 2) ? SystemReducedMotion() : (rm != 0); }
+    {
+        DWORD hcReg = RegGetDword(L"HighContrast", 2);
+        if (hcReg == 2) {
+            HIGHCONTRASTW hc{ sizeof(hc) };
+            g.highContrast = SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0) && (hc.dwFlags & HCF_HIGHCONTRASTON);
+        } else {
+            g.highContrast = hcReg != 0;
+        }
+    }
+    { DWORD mf = RegGetDword(L"MinFontSize", 0); g.minFontSize = (mf >= 10 && mf <= 24) ? (int)mf : 0; }
+    g.lightMode = RegGetDword(L"LightMode", 0) != 0;
+    g.langId = (RegGetString(L"Language") == L"id") ? 1 : 0;
+    g.welcomeDismissed = RegGetDword(L"WelcomeDismissed", 0) != 0;
     { DWORD d = RegGetDword(L"DevToolsDock", 0); g.devDock = d <= 3 ? (int)d : 0; }
     { DWORD s = RegGetDword(L"SmoothStep", 120), t = RegGetDword(L"SmoothTime", 400); g.smoothStep = (s >= 40 && s <= 400) ? (int)s : 120; g.smoothTime = (t >= 100 && t <= 1500) ? (int)t : 400; }
     g.netSpeed = RegGetDword(L"NetSpeed", 1) != 0;
@@ -9676,7 +10473,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     // Must stay off: with session cookies persisted CEF switches Chromium to "restore last
     // session" and re-opens old tabs as stray Chrome-style windows on every start.
     settings.persist_session_cookies = false;
-    settings.background_color = CEF_BG;
+    settings.background_color = CefBgCol();
     settings.log_severity = LOGSEVERITY_DISABLE;
 
     auto showMainWindow = [&] {

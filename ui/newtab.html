@@ -1,19 +1,28 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>NEW TAB</title>
 <style>
-:root{--bg:#12062c;--bg2:#0a0420;--pink:#ff2e97;--pink2:#ff7bc0;--cyan:#00e5ff;--yellow:#ffd600;--muted:#8a6fc0;--green:#35ffa0}
-:root.incog{--pink:#35ffa0;--pink2:#9dffd0}
-#ghost{display:none;width:min(940px,100%);margin-top:14px;padding:10px 14px;border:1px solid var(--pink);background:rgba(10,4,32,.92);
-  color:#e8d8ff;line-height:1.55;font-size:12px}
+#ghost{display:none;width:min(940px,100%);margin-top:14px;padding:10px 14px;border:1px solid var(--pink);background:color-mix(in srgb,var(--bg2) 92%,transparent);
+  color:var(--text);line-height:1.55;font-size:12px}
 #ghost b{color:var(--pink)}
 :root.incog #ghost{display:block}
 *{box-sizing:border-box}
-html,body{margin:0;height:100%;background:var(--bg);color:#e8d8ff;font:13px "Cascadia Mono","Consolas","Courier New",monospace}
+:is(button,input,select,a,[tabindex]):focus-visible{outline:2px solid var(--cyan);outline-offset:2px;box-shadow:0 0 0 2px var(--bg2),0 0 8px var(--cyan)}
+/* A clip-path also clips outlines and outer shadows, so on the cut-corner shapes the focus ring is drawn inside them */
+form:focus-within{box-shadow:inset 0 0 0 2px var(--cyan),inset 0 0 12px rgba(var(--cyan-rgb,0,229,255),.3)}
+#q:focus-visible{outline:none;box-shadow:none}
+form button:focus-visible,.dial-link:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--cyan)}
+#note:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px "Cascadia Mono","Consolas","Courier New",monospace}
 body{overflow-x:hidden;overflow-y:auto}
 #sky{position:fixed;inset:0 0 30% 0;background:linear-gradient(#12062c 0%,#2a0f55 55%,color-mix(in srgb,var(--pink) 24%,#12062c) 100%);overflow:hidden;z-index:0}
+html.light #sky{background:linear-gradient(#f4f2fa 0%,#e7dff7 55%,color-mix(in srgb,var(--pink) 16%,#f4f2fa) 100%);}
+html.light #scan{background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.04) 2px 3px);}
+html.light #sun{background:linear-gradient(#e8a317 0%,#ff9a3c 45%,var(--pink) 100%)}
+html.light #floor::after{background:linear-gradient(var(--bg2) 0%,rgba(255,255,255,.55) 18%,transparent 45%);}
+html.light h1{text-shadow:2px 2px 0 color-mix(in srgb,var(--pink) 45%,transparent);}
 #sun{position:absolute;left:50%;bottom:-80px;width:220px;height:220px;margin-left:-110px;border-radius:50%;
   filter:drop-shadow(0 0 24px color-mix(in srgb,var(--pink) 55%,transparent));
   background:linear-gradient(var(--yellow) 0%,#ff9a3c 45%,var(--pink) 100%);
@@ -32,7 +41,7 @@ html.idle #grid{animation-play-state:paused}
 @media (prefers-reduced-motion:reduce){#grid{animation:none}}
 #floor::after{content:"";position:absolute;inset:0;background:linear-gradient(var(--bg2) 0%,rgba(10,4,32,.6) 18%,transparent 45%);pointer-events:none}
 @keyframes run{from{transform:rotateX(58deg) translate3d(0,0,0)}to{transform:rotateX(58deg) translate3d(0,48px,0)}}
-#scan{position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.16) 2px 3px);z-index:4}
+#scan{position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.08) 2px 3px);z-index:4}
 #hud{position:relative;display:flex;justify-content:space-between;padding:12px 18px 0;color:var(--muted);z-index:2}
 #hud b{color:var(--yellow);font-weight:normal}
 #clock{color:var(--cyan)}
@@ -40,31 +49,31 @@ main{position:relative;display:flex;flex-direction:column;align-items:center;z-i
 h1{margin:0;font:italic 900 clamp(28px,5.2vw,58px) Impact,"Arial Black",sans-serif;letter-spacing:4px;color:var(--cyan);
   text-shadow:3px 3px 0 var(--pink),0 0 18px color-mix(in srgb,var(--cyan) 55%,transparent)}
 .sub{margin:6px 0 16px;color:var(--yellow);letter-spacing:3px}
-form{width:min(640px,100%);display:flex;border:1px solid var(--cyan);background:rgba(10,4,32,.92);
+form{width:min(640px,100%);display:flex;border:1px solid var(--cyan);background:color-mix(in srgb,var(--bg2) 92%,transparent);
   clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px))}
 form span{color:var(--pink);padding:0 8px 0 14px;align-self:center}
 #q{flex:1;height:44px;background:none;border:0;outline:0;color:var(--cyan);font:15px "Cascadia Mono","Consolas",monospace}
-#q::placeholder{color:#5a4a8a}
+#q::placeholder{color:var(--muted);opacity:1}
 form button{border:0;background:var(--pink);color:var(--bg);font:bold 14px "Cascadia Mono","Consolas",monospace;padding:0 22px;cursor:pointer}
 form button:hover{background:var(--cyan)}
 
 #board{width:min(940px,100%);display:grid;grid-template-columns:1.35fr 1fr;gap:14px;margin-top:18px;align-items:stretch}
-.panel{background:rgba(10,4,32,.88);border:1px solid rgba(138,111,192,.45);border-top:2px solid var(--cyan);padding:12px 14px;
+.panel{background:color-mix(in srgb,var(--bg2) 90%,transparent);border:1px solid rgba(138,111,192,.45);border-top:2px solid var(--cyan);padding:12px 14px;
   display:flex;flex-direction:column;min-width:0}
 .panel.pad-panel{border-top-color:var(--pink)}
 .ph{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
 .ptit{color:var(--yellow);font-size:11px;font-weight:bold;letter-spacing:1.5px;white-space:nowrap}
 .pacts{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.pbtn{height:22px;padding:0 8px;border:1px solid rgba(138,111,192,.55);background:var(--bg2);color:var(--cyan);font:inherit;font-size:10px;
+.pbtn{height:22px;padding:0 8px;border:1px solid rgba(138,111,192,.55);background:var(--bg2);color:var(--cyan);font:inherit;font-size:11px;
   letter-spacing:.8px;cursor:pointer}
 .pbtn:hover{border-color:var(--cyan);background:var(--cyan);color:var(--bg)}
 .pbtn.on{border-color:var(--pink);color:var(--bg);background:var(--pink)}
 .pbtn.dim{color:var(--muted)}
 .pbtn.dim:hover{border-color:var(--pink);background:var(--pink);color:var(--bg)}
-.pstat{font-size:10px;color:var(--green);letter-spacing:.8px}
+.pstat{font-size:11px;color:var(--green);letter-spacing:.8px}
 
 #links{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-.dial-tile{position:relative;display:flex;flex-direction:column;border:1px solid var(--cyan);background:rgba(18,6,44,.86);
+.dial-tile{position:relative;display:flex;flex-direction:column;border:1px solid var(--cyan);background:color-mix(in srgb,var(--bg) 88%,transparent);
   clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
 .dial-link{display:block;padding:9px 10px;color:var(--cyan);text-decoration:none;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px}
 .dial-link span{color:var(--yellow);margin-right:7px}
@@ -72,15 +81,15 @@ form button:hover{background:var(--cyan)}
 .dial-tile:hover .dial-link,.dial-tile:hover .dial-link span{color:var(--bg)}
 .dial-ctl{display:none;gap:3px;padding:0 6px 6px;justify-content:flex-end}
 body.editing .dial-ctl{display:flex}
-body.editing .dial-tile:hover{background:rgba(18,6,44,.95)}
+body.editing .dial-tile:hover{background:color-mix(in srgb,var(--bg) 96%,transparent)}
 body.editing .dial-tile:hover .dial-link{color:var(--cyan)}
 body.editing .dial-tile:hover .dial-link span{color:var(--yellow)}
-.dial-ctl button{border:1px solid rgba(138,111,192,.6);background:var(--bg2);color:#e8d8ff;font:inherit;font-size:10px;padding:1px 5px;cursor:pointer}
+.dial-ctl button{border:1px solid rgba(138,111,192,.6);background:var(--bg2);color:var(--text);font:inherit;font-size:11px;padding:1px 5px;cursor:pointer}
 .dial-ctl button:hover{border-color:var(--pink);color:var(--pink)}
 .dial-empty{grid-column:1 / -1;padding:18px;text-align:center;border:1px dashed var(--muted);color:var(--muted);font-size:12px}
 
-#note{flex:1;min-height:142px;width:100%;resize:vertical;background:rgba(18,6,44,.75);border:1px solid rgba(138,111,192,.45);
-  color:#e8d8ff;padding:10px;font:12px/1.55 "Cascadia Mono","Consolas",monospace;outline:0}
+#note{flex:1;min-height:142px;width:100%;resize:vertical;background:color-mix(in srgb,var(--bg) 80%,transparent);border:1px solid rgba(138,111,192,.45);
+  color:var(--text);padding:10px;font:12px/1.55 "Cascadia Mono","Consolas",monospace;outline:0}
 #note:focus{border-color:var(--pink)}
 #note::placeholder{color:var(--muted)}
 
@@ -92,12 +101,12 @@ body.editing .dial-tile:hover .dial-link span{color:var(--yellow)}
 #dialModal.on{display:flex}
 .dbox{width:min(380px,calc(100vw - 32px));background:var(--bg2);border:1px solid var(--cyan);border-top:2px solid var(--pink);
   padding:16px;box-shadow:0 16px 40px rgba(0,0,0,.8)}
-.dbox h3{margin:0 0 12px;color:var(--yellow);font-size:13px;letter-spacing:1.5px}
+.dbox h2{margin:0 0 12px;color:var(--yellow);font-size:13px;letter-spacing:1.5px}
 .dbox label{display:block;color:var(--muted);font-size:11px;margin:8px 0 4px}
 .dbox input{width:100%;height:34px;padding:0 10px;background:var(--bg);border:1px solid rgba(138,111,192,.55);color:var(--cyan);
   font:inherit;outline:0}
 .dbox input:focus{border-color:var(--cyan)}
-.derr{min-height:16px;color:var(--pink2);font-size:11px;margin-top:6px}
+.derr{min-height:16px;color:var(--red);font-size:11px;margin-top:6px}
 .dacts{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
 .dacts button{height:30px;padding:0 14px;border:1px solid var(--cyan);background:var(--bg);color:var(--cyan);font:inherit;font-size:11px;font-weight:bold;cursor:pointer}
 .dacts button.prim{background:var(--pink);border-color:var(--pink);color:var(--bg)}
@@ -106,7 +115,16 @@ body.editing .dial-tile:hover .dial-link span{color:var(--yellow)}
 @media (max-width:780px){
   #board{grid-template-columns:1fr}
   #links{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #tipsGrid{grid-template-columns:1fr!important}
 }
+#tipsCard{display:none;width:min(940px,100%);margin-top:14px;border-top:2px solid var(--yellow)}
+#tipsCard.show{display:flex}
+#tipsGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.tip-item{border:1px solid rgba(138,111,192,.38);background:color-mix(in srgb,var(--bg) 82%,transparent);padding:8px 10px;display:flex;flex-direction:column;gap:4px}
+.tip-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.tip-key{color:var(--pink);font-weight:bold;font-size:11px;letter-spacing:.8px}
+.tip-kbd{color:var(--yellow);font-size:11px;border:1px solid rgba(138,111,192,.45);padding:1px 5px}
+.tip-desc{color:var(--text);font-size:11px;line-height:1.45;opacity:.92}
 </style>
 </head>
 <body>
@@ -149,6 +167,17 @@ body.editing .dial-tile:hover .dial-link span{color:var(--yellow)}
     </div>
   </section>
 
+  <section class="panel" id="tipsCard" aria-label="Quick Start Tips">
+    <div class="ph">
+      <span class="ptit" id="tipsTitle">// QUICK START TIPS</span>
+      <div class="pacts">
+        <button class="pbtn" type="button" id="tipsLangBtn" aria-label="Switch language">ID / EN</button>
+        <button class="pbtn dim" type="button" id="tipsClose" aria-label="Dismiss Quick Start Tips">&#10005; DISMISS</button>
+      </div>
+    </div>
+    <div id="tipsGrid"></div>
+  </section>
+
   <div id="ghost">
     <b>&gt; GHOST MODE</b><br>
     NeonNet does not save your history, cookies or site data from this window, and forgets them when it closes.
@@ -160,7 +189,7 @@ body.editing .dial-tile:hover .dial-link span{color:var(--yellow)}
 
 <div id="dialModal">
   <div class="dbox">
-    <h3 id="dmTitle">ADD SPEED DIAL</h3>
+    <h2 id="dmTitle">ADD SPEED DIAL</h2>
     <label for="dmName">TITLE</label>
     <input id="dmName" maxlength="60" placeholder="e.g. GitHub">
     <label for="dmUrl">URL</label>
@@ -176,9 +205,89 @@ body.editing .dial-tile:hover .dial-link span{color:var(--yellow)}
 <div id="scan"></div>
 <script>
 const $ = s => document.querySelector(s);
-let searchBase = 'https://www.google.com/search?q=';
+let searchBase = 'https://www.google.com/search?q=', curLang = 'en', curIncog = false, dials = [], editDials = false;
+const NT_I18N = {
+  en: {
+    sub: '> SEARCH THE GRID_', ph: 'search or enter address', go: 'GO',
+    dialTitle: '// SPEED DIAL', add: '+ ADD', edit: 'EDIT', done: 'DONE',
+    noteTitle: '// QUICK NOTES', copy: 'COPY', clear: 'CLEAR',
+    notePh: 'Paste temporary links, snippets, or quick notes here... (auto-saved locally)',
+    bm: '\u2605 BOOKMARKS', hist: '\u23F1 HISTORY', dl: '\u2B07 DOWNLOADS', set: '\u2699 SETTINGS',
+    tipsTitle: '// QUICK START TIPS', dismiss: '\u2715 DISMISS', langBtn: 'BAHASA ID',
+    tips: [
+      { k: 'DOCK', s: 'Ctrl+Alt+W', d: 'Pin WhatsApp, Instagram, or Discord in the side dock while browsing.' },
+      { k: 'SHIELD', s: 'TOOLBAR', d: 'Built-in Ad & Tracker Blocker + automatic URL tracking stripper.' },
+      { k: 'READ', s: 'Ctrl+Alt+R', d: 'Clean Reader Mode for distraction-free articles on any webpage.' },
+      { k: 'SPLIT VIEW', s: 'RIGHT-CLICK TAB', d: 'View and work with two tabs side-by-side inside the same window.' },
+      { k: 'WORKSPACES', s: 'Alt+1..9', d: 'Keep work, study, and personal tabs neatly separated.' },
+      { k: 'COMMAND PALETTE', s: 'Ctrl+Shift+P', d: 'Jump to any open tab, bookmark, or browser command instantly.' }
+    ]
+  },
+  id: {
+    sub: '> TELUSURI JARINGAN_', ph: 'cari atau masukkan alamat web', go: 'BUKA',
+    dialTitle: '// PINTASAN CEPAT', add: '+ TAMBAH', edit: 'UBAH', done: 'SELESAI',
+    noteTitle: '// CATATAN CEPAT', copy: 'SALIN', clear: 'HAPUS',
+    notePh: 'Tempel tautan sementara, cuplikan teks, atau catatan cepat di sini... (tersimpan lokal)',
+    bm: '\u2605 MARKAH', hist: '\u23F1 RIWAYAT', dl: '\u2B07 UNDUHAN', set: '\u2699 PENGATURAN',
+    tipsTitle: '// TIPS MULAI CEPAT', dismiss: '\u2715 TUTUP', langBtn: 'ENGLISH',
+    tips: [
+      { k: 'DOCK', s: 'Ctrl+Alt+W', d: 'Sematkan WhatsApp, Instagram, atau Discord di panel samping sambil browsing.' },
+      { k: 'SHIELD', s: 'TOOLBAR', d: 'Pemblokir Iklan & Pelacak bawaan + pembersih parameter pelacak URL.' },
+      { k: 'READ', s: 'Ctrl+Alt+R', d: 'Mode Baca bebas gangguan untuk membaca artikel panjang dengan nyaman.' },
+      { k: 'SPLIT VIEW', s: 'KLIK KANAN TAB', d: 'Buka dan bandingkan dua tab secara berdampingan dalam satu jendela.' },
+      { k: 'WORKSPACES', s: 'Alt+1..9', d: 'Pisahkan grup tab kerja, belajar, dan santai agar tetap rapi.' },
+      { k: 'COMMAND PALETTE', s: 'Ctrl+Shift+P', d: 'Buka cepat tab, markah, atau perintah browser hanya dengan mengetik.' }
+    ]
+  }
+};
+function applyNtLang(l){
+  curLang = (l === 'id') ? 'id' : 'en';
+  const t = NT_I18N[curLang];
+  document.documentElement.lang = curLang;
+  if(!curIncog){ $('.sub').textContent = t.sub; }
+  $('#q').placeholder = t.ph;
+  $('#f button').textContent = t.go;
+  $('#dialCard .ptit').textContent = t.dialTitle;
+  $('#dialAdd').textContent = t.add;
+  $('#dialEdit').textContent = editDials ? t.done : t.edit;
+  $('#padCard .ptit').textContent = t.noteTitle;
+  $('#noteCopy').textContent = t.copy;
+  $('#noteClear').textContent = t.clear;
+  $('#note').placeholder = t.notePh;
+  const moreLinks = document.querySelectorAll('#more a');
+  if(moreLinks.length >= 4){
+    moreLinks[0].textContent = t.bm; moreLinks[1].textContent = t.hist;
+    moreLinks[2].textContent = t.dl; moreLinks[3].textContent = t.set;
+  }
+  $('#tipsTitle').textContent = t.tipsTitle;
+  $('#tipsClose').textContent = t.dismiss;
+  $('#tipsLangBtn').textContent = t.langBtn;
+  const tg = $('#tipsGrid'); tg.textContent = '';
+  for(const item of t.tips){
+    const c = document.createElement('div'); c.className = 'tip-item';
+    c.innerHTML = '<div class="tip-top"><span class="tip-key"></span><span class="tip-kbd"></span></div><div class="tip-desc"></div>';
+    c.querySelector('.tip-key').textContent = item.k;
+    c.querySelector('.tip-kbd').textContent = item.s;
+    c.querySelector('.tip-desc').textContent = item.d;
+    tg.appendChild(c);
+  }
+}
+window.__nnSetLang = applyNtLang;
+applyNtLang('en');
+$('#tipsLangBtn').onclick = () => {
+  const next = curLang === 'en' ? 'id' : 'en';
+  applyNtLang(next);
+  fetch('/api/settings/set?key=lang&value=' + encodeURIComponent(next), {cache:'no-store'}).catch(() => {});
+};
+$('#tipsClose').onclick = () => {
+  $('#tipsCard').classList.remove('show');
+  fetch('/api/settings/set?key=welcomeDismissed&value=1', {cache:'no-store'}).catch(() => {});
+};
 fetch('/api/settings', {cache:'no-store'}).then(r => r.json()).then(s => {
   if(/^https?:\/\//.test(s.searchUrl)) searchBase = s.searchUrl;
+  curIncog = !!s.incognito;
+  applyNtLang(s.lang || 'en');
+  $('#tipsCard').classList.toggle('show', !s.welcomeDismissed && !s.incognito);
   if(s.incognito){
     document.documentElement.classList.add('incog');
     document.querySelector('h1').textContent = 'GHOST MODE';
@@ -241,7 +350,7 @@ for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel']) {
 }
 
 // ---- Speed Dial & Quick Notes ----------------------------------------------------------
-let dials = [], editDials = false, editIdx = -1, isIncog = false;
+let editIdx = -1, isIncog = false;
 let noteDirty = false, noteTimer = 0, lastSavedNote = '';
 const noteEl = $('#note'), noteStat = $('#noteStat');
 

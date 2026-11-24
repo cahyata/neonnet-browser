@@ -14,6 +14,7 @@
 #define IDR_PERMISSIONS 211
 #define IDR_EXTENSIONS 212
 #define IDR_YT_ADSKIP  213
+#define IDR_TOKENS     214
 
 #define APP_VERSION    L"1.10.0"
 #define APP_PUBLISHER  L"NeonNet"

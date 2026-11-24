@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NeonNet design system</title>
+<!-- Open this file in a browser. It uses ../ui/tokens.css, so run tools/gen_tokens.ps1 first if that file is missing. -->
+<link rel="stylesheet" href="../ui/tokens.css">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--surface);color:var(--text);font:13px/1.6 var(--font-mono)}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:var(--z-scan);background:repeating-linear-gradient(0deg,transparent 0 2px,var(--scanline) 2px 3px)}
+body.noscan::after{display:none}
+a{color:var(--accent-secondary)}
+:focus-visible{outline:2px solid var(--accent-secondary);outline-offset:2px}
+.skip{position:absolute;left:12px;top:-60px;padding:8px 14px;background:var(--accent-secondary);color:var(--surface);font-weight:bold;z-index:100}
+.skip:focus{top:8px}
+header.bar{position:sticky;top:0;z-index:var(--z-sticky);background:var(--surface);border-bottom:1px solid var(--accent-secondary);display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap;padding:10px var(--space-6)}
+.brand{color:var(--highlight);font-weight:bold;letter-spacing:1.5px}.brand b{color:var(--accent-primary)}
+.bar nav{display:flex;gap:var(--space-3);flex-wrap:wrap;flex:1}
+.bar nav a{padding:4px 10px;border:1px solid var(--text-muted);color:var(--text-muted);text-decoration:none;font-size:11px;font-weight:bold;letter-spacing:1px}
+.bar nav a:hover{background:var(--accent-secondary);border-color:var(--accent-secondary);color:var(--surface)}
+.themes{display:flex;gap:var(--space-1)}
+.themes button,.chk{font:bold 11px var(--font-mono);letter-spacing:1px;background:var(--surface-inset);border:1px solid var(--text-muted);color:var(--text-muted);padding:5px 10px;cursor:pointer}
+.themes button[aria-pressed="true"]{border-color:var(--success);color:var(--success)}
+main{max-width:1100px;margin:0 auto;padding:var(--space-7) var(--space-6) 80px}
+h1{margin:0;font:italic 900 40px var(--font-display);letter-spacing:3px;color:var(--accent-secondary);text-shadow:3px 3px 0 var(--accent-primary)}
+.lead{color:var(--highlight);letter-spacing:2px;margin:6px 0 var(--space-7)}
+section{margin-bottom:48px;scroll-margin-top:70px}
+h2{font:bold 12px var(--font-mono);color:var(--highlight);letter-spacing:2px;margin:0 0 var(--space-4);padding-bottom:6px;border-bottom:1px solid var(--accent-primary);text-transform:uppercase}
+h3{font:bold 11px var(--font-mono);letter-spacing:1px;color:var(--text-muted);margin:var(--space-5) 0 var(--space-2);text-transform:uppercase}
+p.note{color:var(--text-muted);max-width:70ch;margin:0 0 var(--space-4)}
+code{color:var(--success)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:var(--space-3)}
+.sw{border:1px solid var(--border);background:var(--surface-raised)}
+.sw i{display:block;height:44px;border-bottom:1px solid var(--border)}
+.sw div{padding:6px 8px;font-size:11px}.sw b{display:block;color:var(--text-strong)}.sw span{color:var(--text-muted);word-break:break-all}
+.sp{display:flex;align-items:center;gap:var(--space-3);margin:4px 0}.sp i{display:block;height:12px;background:var(--accent-primary)}.sp span{color:var(--text-muted);font-size:11px}
+.stage{background:var(--surface);border:1px solid var(--border);padding:var(--space-5);display:flex;gap:var(--space-3);flex-wrap:wrap;align-items:center}
+.stage.col{flex-direction:column;align-items:stretch}
+.cut-sm{clip-path:polygon(0 0,calc(100% - var(--cut-sm)) 0,100% var(--cut-sm),100% 100%,var(--cut-sm) 100%,0 calc(100% - var(--cut-sm)))}
+.btn{height:32px;padding:0 14px;background:none;border:1px solid var(--accent-primary);color:var(--accent-primary);font:bold 13px var(--font-mono);display:inline-flex;align-items:center;cursor:pointer;white-space:nowrap}
+.btn:hover:not(:disabled){background:var(--accent-primary);color:var(--surface)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.danger,.tog.danger{border-color:var(--danger);color:var(--danger)}
+.btn.danger:hover,.tog.danger:hover{background:var(--danger);border-color:var(--danger);color:var(--surface)}
+.tog{min-width:68px;height:30px;padding:0 11px;background:var(--surface-inset);border:1px solid var(--text-muted);color:var(--text-muted);font:bold 13px var(--font-mono);letter-spacing:1px;cursor:pointer}
+.tog[aria-pressed="true"]{border-color:var(--success);color:var(--success)}
+.tog:hover:not(:disabled){background:var(--accent-secondary);border-color:var(--accent-secondary);color:var(--surface)}
+.go{height:30px;padding:0 14px;border:0;background:var(--accent-primary);color:var(--surface);font:bold 13px var(--font-mono);cursor:pointer;clip-path:polygon(0 0,calc(100% - var(--cut-sm)) 0,100% var(--cut-sm),100% 100%,0 100%)}
+.go:hover{background:var(--accent-secondary)}
+.go:focus-visible,.tab:focus-visible,.cut-sm:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent-secondary)}
+.hud{height:30px;padding:0 10px;border:1px solid var(--text-muted);color:var(--text-muted);font:bold 11px var(--font-mono);letter-spacing:1px;display:inline-flex;align-items:center;text-decoration:none}
+.hud.on{border-color:var(--accent-secondary);color:var(--accent-secondary)}
+.addr{height:32px;display:flex;align-items:center;border:1px solid var(--accent-secondary);background:var(--surface-inset);max-width:420px;width:100%}
+.addr span{color:var(--accent-primary);padding:0 6px 0 10px}
+.addr input{flex:1;min-width:0;height:100%;background:none;border:0;outline:0;color:var(--accent-secondary);font:12px var(--font-mono)}
+.addr:focus-within{box-shadow:inset 0 0 0 2px var(--accent-secondary),inset 0 0 12px rgba(0,229,255,.3)}
+input::placeholder{color:var(--text-muted);opacity:1}
+.txt,select{height:32px;background:var(--surface-inset);color:var(--accent-secondary);border:1px solid var(--accent-secondary);padding:0 9px;font:inherit;width:260px;max-width:100%}
+.txt:focus-visible,select:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent-secondary)}
+.err{color:var(--danger);font-size:12px}
+.strip{display:flex;align-items:flex-end;gap:var(--space-1);border-bottom:1px solid var(--accent-secondary);height:38px;width:100%;overflow:hidden}
+.tab{display:flex;align-items:center;gap:var(--space-2);height:30px;padding:0 8px 0 10px;width:170px;flex:0 1 170px;color:var(--text-muted);border:1px solid transparent;border-bottom:none;clip-path:polygon(0 0,calc(100% - var(--cut-tab)) 0,100% var(--cut-tab),100% 100%,0 100%);position:relative;min-width:0;font-size:12px}
+.tab .n{color:var(--highlight)}.tab .t{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tab.active{background:var(--surface-active);color:var(--accent-primary-soft);border-color:var(--accent-primary)}
+.tab.split{border-color:var(--accent-secondary);background:rgba(0,229,255,.08)}
+.hero{background:linear-gradient(135deg,var(--surface) 0%,var(--surface-active) 100%);border:1px solid var(--accent-secondary);border-bottom:2px solid var(--accent-primary);padding:var(--space-5) var(--space-6);width:100%;clip-path:polygon(0 0,calc(100% - var(--cut-lg)) 0,100% var(--cut-lg),100% 100%,var(--cut-lg) 100%,0 calc(100% - var(--cut-lg)))}
+.pop{background:var(--surface-inset);border:1px solid var(--accent-secondary);border-top:2px solid var(--accent-primary);box-shadow:0 12px 28px var(--shadow);padding:10px 12px;font-size:12px;width:280px}
+.pop .hd{color:var(--accent-secondary);font-weight:bold;font-size:11px;letter-spacing:1.1px;margin-bottom:8px}
+.sec{background:var(--surface-raised);border:1px solid var(--divider);padding:var(--space-3);width:100%}
+.row{display:flex;align-items:center;gap:var(--space-5);padding:12px 8px;border-bottom:1px solid var(--border);min-height:50px}
+.row:last-child{border-bottom:0}
+.row:hover,.row:focus-within{background:var(--surface-hover);box-shadow:inset 3px 0 0 var(--accent-secondary)}
+.lab{flex:1;min-width:0}.lab b{display:block;color:var(--text-strong)}.lab span{display:block;color:var(--text-muted);font-size:12px;line-height:1.5}
+.badge{padding:1px 6px;border:1px solid var(--success);color:var(--success);font-size:11px;letter-spacing:1px}
+.tag{padding:1px 5px;border:1px solid var(--text-muted);color:var(--text-muted);font-size:11px;letter-spacing:.6px;text-transform:uppercase}
+.tag.mode{border-color:var(--highlight);color:var(--highlight);font-weight:bold}
+.tag.bad{border-color:var(--danger);color:var(--danger);font-weight:bold}
+.count{min-width:16px;height:16px;padding:0 4px;border-radius:var(--radius-count);background:var(--accent-primary);color:var(--surface);font-size:11px;font-weight:bold;line-height:16px;text-align:center}
+.toast{background:var(--success);color:var(--surface);padding:5px 14px;font-weight:bold;letter-spacing:1px}
+.lr{display:flex;align-items:center;gap:12px;padding:6px 8px;min-height:32px;width:100%}
+.lr:hover,.lr:focus-within{background:var(--surface-hover);box-shadow:inset 3px 0 0 var(--accent-secondary)}
+.lr .time{color:var(--text-muted);width:44px}.lr .t{color:var(--accent-secondary)}.lr .h{color:var(--text-muted);flex:1}
+.lr .x{width:24px;height:24px;background:none;border:0;color:var(--text-muted);opacity:0;cursor:pointer;font:inherit}
+.lr:hover .x,.lr:focus-within .x{opacity:1}.lr .x:hover{background:var(--danger);color:var(--surface)}
+.pal{background:var(--surface-inset);border:1px solid var(--accent-secondary);border-top:2px solid var(--accent-primary);box-shadow:0 16px 36px var(--shadow);width:100%;max-width:520px;clip-path:polygon(0 0,calc(100% - var(--cut-md)) 0,100% var(--cut-md),100% 100%,var(--cut-md) 100%,0 calc(100% - var(--cut-md)))}
+.pal .hd{display:flex;gap:8px;height:40px;align-items:center;padding:0 12px;background:var(--surface);box-shadow:inset 0 -2px 0 var(--accent-secondary)}
+.pal .hd b{color:var(--accent-primary)}.pal .hd span{color:var(--text-muted)}
+.pi{display:flex;align-items:center;gap:10px;padding:7px 12px;border-left:2px solid transparent;font-size:12px}
+.pi.sel{background:var(--surface-hover);border-left-color:var(--accent-secondary);color:var(--accent-secondary)}
+.pk{min-width:34px;text-align:center;font-size:11px;font-weight:bold;padding:2px 5px;border:1px solid var(--accent-secondary);color:var(--accent-secondary)}
+.pk.cmd{border-color:var(--accent-primary);color:var(--accent-primary)}
+.ty{margin:6px 0}.ty small{display:block;color:var(--text-muted);font:normal 400 11px/16px var(--font-mono);letter-spacing:0;text-shadow:none}
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (max-width:640px){main{padding-inline:16px}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+<header class="bar">
+  <div class="brand">&#9632; <b>NEON</b>NET // DESIGN SYSTEM</div>
+  <nav aria-label="Catalog sections">
+    <a href="#color">COLOR</a><a href="#type">TYPE</a><a href="#space">SPACE &amp; CUTS</a><a href="#actions">ACTIONS</a><a href="#inputs">INPUTS</a><a href="#nav">NAVIGATION</a><a href="#surfaces">SURFACES</a><a href="#status">STATUS</a>
+  </nav>
+  <div class="themes" role="group" aria-label="Theme">
+    <button type="button" data-t="dark" aria-pressed="true">DARK</button>
+    <button type="button" data-t="light" aria-pressed="false">LIGHT</button>
+    <button type="button" data-t="contrast-dark" aria-pressed="false">HC DARK</button>
+    <button type="button" data-t="contrast-light" aria-pressed="false">HC LIGHT</button>
+    <button type="button" class="chk" id="scan" aria-pressed="true">SCANLINES</button>
+  </div>
+</header>
+<main id="main" tabindex="-1" data-theme="dark">
+  <h1>NEONNET</h1>
+  <div class="lead">&gt; DESIGN SYSTEM // TOKENS AND COMPONENTS</div>
+
+  <section id="color">
+    <h2>Color</h2>
+    <p class="note">Colours are named for their role. The values below are read live from <code>ui/tokens.css</code>, so they follow the theme buttons above. Change a value in <code>design/tokens.json</code>, run <code>tools/gen_tokens.ps1</code>, and reload.</p>
+    <div class="grid" id="swatches"></div>
+  </section>
+
+  <section id="type">
+    <h2>Type</h2>
+    <p class="note">Two system fonts, no font files. Mono for everything; the display face only for page heroes. The smallest text is 11px.</p>
+    <div class="ty" style="font:italic 900 40px/1.3 var(--font-display);letter-spacing:3px;color:var(--accent-secondary);text-shadow:3px 3px 0 var(--accent-primary)">DISPLAY-LG 40/44<small>Impact, italic 900, uppercase. Page heroes.</small></div>
+    <div class="ty" style="font:13px/21px var(--font-mono)">body 13/21 &mdash; Used when you type words instead of an address.</div>
+    <div class="ty" style="font:12px/16px var(--font-mono)">chrome 12/16 &mdash; neonnet://settings</div>
+    <div class="ty" style="font:bold 12px/18px var(--font-mono);letter-spacing:2px;color:var(--highlight)">SECTION-TITLE 12/18 &mdash; SEARCH 01 // ADDRESS BAR</div>
+    <div class="ty" style="font:bold 11px/16px var(--font-mono);letter-spacing:1px">LABEL 11/16 &mdash; SETTINGS</div>
+    <div class="ty" style="font:11px/16px var(--font-mono);color:var(--text-muted)">caption 11/16 &mdash; https://neonnet.ui/settings.html</div>
+  </section>
+
+  <section id="space">
+    <h2>Space &amp; cuts</h2>
+    <div id="spaces"></div>
+    <h3>Cut corners (clip-path)</h3>
+    <p class="note">NeonNet has no rounded corners. Corners are cut with <code>clip-path</code> using the <code>--cut-*</code> tokens.</p>
+    <div class="stage">
+      <div class="sec cut-sm" style="width:140px;padding:14px;text-align:center">cut-sm 8</div>
+      <div class="hero" style="width:200px;padding:14px;text-align:center">cut-lg 14</div>
+      <div class="pal" style="width:200px;padding:14px;text-align:center">cut-md 12</div>
+    </div>
+  </section>
+
+  <section id="actions">
+    <h2>Actions</h2>
+    <p class="note">Primary actions are pink-outlined, toggles show their state as a word, delete and clear are red and ask for a second click. Focus is drawn inside the clipped <code>GO</code> button: press Tab to see it.</p>
+    <div class="stage">
+      <button class="btn" type="button">SET AS DEFAULT</button>
+      <button class="btn" type="button" disabled>DISABLED</button>
+      <button class="btn danger" type="button" id="armBtn">CLEAR</button>
+      <button class="go" type="button">GO</button>
+    </div>
+    <div class="stage" style="margin-top:8px">
+      <button class="tog" type="button" aria-pressed="true">ON</button>
+      <button class="tog" type="button" aria-pressed="false">OFF</button>
+      <button class="tog danger" type="button">DEL</button>
+      <a class="hud on" href="#actions">SETTINGS</a><a class="hud" href="#actions">HISTORY</a><a class="hud" href="#actions">DOWNLOADS</a>
+    </div>
+  </section>
+
+  <section id="inputs">
+    <h2>Inputs</h2>
+    <div class="stage col">
+      <div class="addr cut-sm"><span>&gt;&gt;</span><input value="neonnet://settings" aria-label="Address"></div>
+      <input class="txt cut-sm" placeholder="https://... (empty = new tab page)" aria-label="Home page">
+      <select class="cut-sm" aria-label="Range"><option>Last 24 hours</option><option>All time</option></select>
+      <div class="err" role="status">The address must start with https://</div>
+    </div>
+  </section>
+
+  <section id="nav">
+    <h2>Navigation</h2>
+    <h3>Tab strip</h3>
+    <div class="stage"><div class="strip" role="tablist" aria-label="Tabs">
+      <div class="tab" role="tab" tabindex="0"><span class="n">01</span><span class="t">PINNED</span></div>
+      <div class="tab active" role="tab" tabindex="0" aria-selected="true"><span class="n">02</span><span class="t">NEONNET SETTINGS</span></div>
+      <div class="tab" role="tab" tabindex="0"><span class="n">03</span><span class="t">IDLE TAB</span></div>
+      <div class="tab split" role="tab" tabindex="0"><span class="n">04</span><span class="t">SPLIT VIEW</span></div>
+    </div></div>
+    <h3>Command palette</h3>
+    <div class="stage"><div class="pal" role="dialog" aria-label="Command palette"><div class="hd"><b>&gt;</b><span>settings</span></div>
+      <div class="pi sel"><span class="pk cmd">CMD</span>Open settings</div><div class="pi"><span class="pk">TAB</span>NeonNet settings</div></div></div>
+  </section>
+
+  <section id="surfaces">
+    <h2>Surfaces</h2>
+    <div class="stage col">
+      <div class="hero"><div style="font:italic 900 34px var(--font-display);letter-spacing:3px;color:var(--accent-secondary);text-shadow:3px 3px 0 var(--accent-primary)">SETTINGS</div><div style="color:var(--highlight);letter-spacing:2px;font-size:12px">&gt; SYSTEM CONFIG // CHANGES APPLY AT ONCE</div></div>
+      <div class="sec">
+        <div class="row"><div class="lab"><b>Site icons on tabs</b><span>Shows each site's own icon in its tab.</span></div><button class="tog" type="button" aria-pressed="true">ON</button></div>
+        <div class="row"><div class="lab"><b>Saved passwords</b><span>Locked with your Windows account.</span></div><button class="btn" type="button">MANAGE</button></div>
+        <div class="row"><div class="lab"><b>Clear browsing data</b><span>Deletes the data you tick, for the chosen period.</span></div><button class="btn danger" type="button">CLEAR</button></div>
+      </div>
+      <div class="pop" role="dialog" aria-label="Recent downloads"><div class="hd">RECENT DOWNLOADS</div>List and actions go here.</div>
+      <div style="width:100%">
+        <div class="lr"><span class="time">19:54</span><span class="t">NeonNet user guide</span><span class="h">cahyata.github.io</span><button class="x" type="button" aria-label="Remove from history">&#10005;</button></div>
+        <div class="lr"><span class="time">19:53</span><span class="t">YouTube</span><span class="h">www.youtube.com</span><button class="x" type="button" aria-label="Remove from history">&#10005;</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="status">
+    <h2>Status</h2>
+    <div class="stage">
+      <span class="badge">CONFIG</span><span class="tag">Programs</span><span class="tag mode">TURBO 8x</span><span class="tag bad">BLOCKED</span><span class="count">3</span>
+      <div class="toast" role="status">SAVED</div>
+    </div>
+  </section>
+</main>
+<script>
+(function(){
+  var main=document.getElementById('main'),root=document.documentElement;
+  var colors=['surface','surface-inset','surface-raised','surface-raised-hover','surface-hover','surface-active','surface-code','divider','border','text','text-strong','text-muted','text-disabled','accent-primary','accent-primary-soft','accent-secondary','highlight','success','danger','shadow','scanline'];
+  var spaces=['space-1','space-2','space-3','space-4','space-5','space-6','space-7'];
+  function render(){
+    var cs=getComputedStyle(main),sw=document.getElementById('swatches');sw.textContent='';
+    colors.forEach(function(n){
+      var v=cs.getPropertyValue('--'+n).trim(),d=document.createElement('div');d.className='sw';
+      d.innerHTML='<i style="background:var(--'+n+')"></i><div><b>--'+n+'</b><span>'+v+'</span></div>';sw.appendChild(d);
+    });
+    var sp=document.getElementById('spaces');sp.textContent='';
+    spaces.forEach(function(n){var v=cs.getPropertyValue('--'+n).trim(),d=document.createElement('div');d.className='sp';d.innerHTML='<i style="width:'+v+'"></i><span>--'+n+' '+v+'</span>';sp.appendChild(d);});
+  }
+  document.querySelectorAll('.themes button[data-t]').forEach(function(b){
+    b.addEventListener('click',function(){
+      var t=b.getAttribute('data-t');
+      document.querySelectorAll('.themes button[data-t]').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false');});
+      root.setAttribute('data-theme',t);main.setAttribute('data-theme',t);document.body.setAttribute('data-theme',t);render();
+    });
+  });
+  var scan=document.getElementById('scan');
+  scan.addEventListener('click',function(){var on=scan.getAttribute('aria-pressed')!=='true';scan.setAttribute('aria-pressed',on?'true':'false');document.body.classList.toggle('noscan',!on);});
+  // Two clicks to delete, as in the app.
+  var arm=document.getElementById('armBtn'),timer=0,label=arm.textContent;
+  arm.addEventListener('click',function(){
+    if(!timer){arm.textContent='CONFIRM?';timer=setTimeout(function(){timer=0;arm.textContent=label;},3000);return;}
+    clearTimeout(timer);timer=0;arm.textContent=label;
+  });
+  var q=/[?&]theme=([\w-]+)/.exec(location.search),start=q?q[1]:'dark',sb=document.querySelector('.themes button[data-t="'+start+'"]');
+  if(sb){sb.click();}else{root.setAttribute('data-theme','dark');document.body.setAttribute('data-theme','dark');render();}
+})();
+</script>
+</body>
+</html>
