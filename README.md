@@ -54,6 +54,14 @@ NeonNet is a native Win32 browser built on the [Chromium Embedded Framework](htt
 - **Userscripts** (`.user.js`) with `GM_*` APIs, a built-in editor and drag-and-drop import.
 - Remappable keyboard shortcuts, smooth scrolling and docked developer tools.
 
+### Coming in the next release
+
+These are in the source code but not in version 1.10.0:
+
+- High contrast theme, reduced motion, minimum font size and screen reader support.
+- Tracking parameter removal, third-party cookie blocking and a strict cross-site referrer.
+- Bahasa Indonesia as an interface language.
+
 ## Screenshots
 
 | Browsing | Settings, light theme |
@@ -118,7 +126,8 @@ The first build downloads the pinned CEF version (about 175 MB) and takes a few 
 src/         browser source (C++): window, tabs, storage, updater, userscripts
 ui/          interface and built-in pages (HTML), embedded into NeonNet.dll
 installer/   the setup program
-tools/       CEF download, icon and blocklist scripts
+design/      design tokens and component catalog
+tools/       CEF download, icon, design token and blocklist scripts
 docs/        documentation
 ```
 
