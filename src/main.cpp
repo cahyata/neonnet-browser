@@ -1224,6 +1224,21 @@ static std::wstring ErrorText(int code) {
     }
 }
 
+// The host in "user@host:port", "[v6]:port" or a bare IPv6 address: lower case, without brackets.
+static std::string HostFromAuthority(std::string a) {
+    size_t at = a.rfind('@'); if (at != std::string::npos) a.erase(0, at + 1);
+    if (!a.empty() && a[0] == '[') {
+        size_t e = a.find(']');
+        a = e == std::string::npos ? std::string() : a.substr(1, e - 1);
+    } else {
+        // two or more colons without brackets are an IPv6 address, not a port
+        size_t colon = a.find(':');
+        if (colon != std::string::npos && a.find(':', colon + 1) == std::string::npos) a.resize(colon);
+    }
+    for (auto& c : a) c = (char)tolower((unsigned char)c);
+    return a;
+}
+
 // scheme, lower-case host (without brackets or user name) and port of an address; port 0 = none given
 static void SplitUrl(const std::wstring& u, std::wstring& scheme, std::wstring& host, int& port) {
     scheme.clear(); host.clear(); port = 0;
@@ -3547,6 +3562,8 @@ static void LoadBlocklistAsync() {
 
 // The part of a host name a site is known by: example.com, or example.co.uk for the common two-part endings.
 static std::string_view SiteOf(std::string_view host) {
+    // an IP address has no parent: it is a site of its own
+    if (host.find(':') != std::string_view::npos || host.find_first_not_of("0123456789.") == std::string_view::npos) return host;
     size_t d1 = host.rfind('.');
     if (d1 == std::string_view::npos || d1 == 0) return host;
     size_t d2 = host.rfind('.', d1 - 1);
@@ -3750,8 +3767,9 @@ static void ApplyCookie3pException(const std::string& site, bool allow) {
     auto setFor = [&](CefRefPtr<CefRequestContext> ctx) {
         if (!ctx) return;
         cef_content_setting_values_t val = allow ? CEF_CONTENT_SETTING_VALUE_ALLOW : CEF_CONTENT_SETTING_VALUE_DEFAULT;
-        ctx->SetContentSetting(CefString(), "https://" + site + "/", CEF_CONTENT_SETTING_TYPE_COOKIES, val);
-        ctx->SetContentSetting(CefString(), "http://" + site + "/", CEF_CONTENT_SETTING_TYPE_COOKIES, val);
+        const std::string host = site.find(':') != std::string::npos ? "[" + site + "]" : site;   // IPv6
+        ctx->SetContentSetting(CefString(), "https://" + host + "/", CEF_CONTENT_SETTING_TYPE_COOKIES, val);
+        ctx->SetContentSetting(CefString(), "http://" + host + "/", CEF_CONTENT_SETTING_TYPE_COOKIES, val);
     };
     setFor(CefRequestContext::GetGlobalContext());
     if (g.reqCtx) setFor(g.reqCtx);
@@ -4221,10 +4239,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
         else if (ru.compare(0, 7, "http://") == 0) hs = 7;
         else return nullptr;
         size_t he = ru.find_first_of("/?#", hs);
-        std::string reqHost = ru.substr(hs, he == std::string::npos ? std::string::npos : he - hs);
-        size_t at = reqHost.rfind('@'); if (at != std::string::npos) reqHost.erase(0, at + 1);
-        size_t col = reqHost.find(':'); if (col != std::string::npos) reqHost.resize(col);
-        for (auto& c : reqHost) c = (char)tolower((unsigned char)c);
+        std::string reqHost = HostFromAuthority(ru.substr(hs, he == std::string::npos ? std::string::npos : he - hs));
         if (reqHost.empty()) return nullptr;
 
         if ((On(Setting::BlockAds) || On(Setting::BlockTrackers)) && !is_navigation && g_blocklistReady.load() && IsBlockedHost(reqHost)) {
@@ -4238,10 +4253,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
                     else if (page.compare(0, 7, "http://") == 0) ps = 7;
                     if (ps) {
                         size_t pe = page.find_first_of("/?#", ps);
-                        std::string pHost = page.substr(ps, pe == std::string::npos ? std::string::npos : pe - ps);
-                        size_t pat = pHost.rfind('@'); if (pat != std::string::npos) pHost.erase(0, pat + 1);
-                        size_t pcol = pHost.find(':'); if (pcol != std::string::npos) pHost.resize(pcol);
-                        for (auto& c : pHost) c = (char)tolower((unsigned char)c);
+                        std::string pHost = HostFromAuthority(page.substr(ps, pe == std::string::npos ? std::string::npos : pe - ps));
                         if (!pHost.empty()) pSite = std::string(SiteOf(pHost));
                     }
                     bool exempt = (!pSite.empty() && pSite == SiteOf(reqHost));
@@ -4262,10 +4274,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
             if (rs) {
                 size_t re = ref.find_first_of("/?#", rs);
                 std::string refHostPort = ref.substr(rs, re == std::string::npos ? std::string::npos : re - rs);
-                std::string refHost = refHostPort;
-                size_t rat = refHost.rfind('@'); if (rat != std::string::npos) refHost.erase(0, rat + 1);
-                size_t rcol = refHost.find(':'); if (rcol != std::string::npos) refHost.resize(rcol);
-                for (auto& c : refHost) c = (char)tolower((unsigned char)c);
+                std::string refHost = HostFromAuthority(refHostPort);
                 if (!refHost.empty() && SiteOf(refHost) != SiteOf(reqHost)) {
                     std::string refOrigin = ref.substr(0, rs) + refHostPort + "/";
                     if (ref != refOrigin) return new StrictReferrerHandler(std::move(refOrigin));
@@ -5276,10 +5285,14 @@ static ULONGLONG RegGetQword(const wchar_t* name) {
     return v;
 }
 
+// Of any length: the lists of per-site exceptions grow with every site added.
 static std::wstring RegGetString(const wchar_t* name) {
-    wchar_t buf[512] = {}; DWORD sz = sizeof(buf);
-    if (RegGetValueW(HKEY_CURRENT_USER, REG_KEY, name, RRF_RT_REG_SZ, nullptr, buf, &sz) != ERROR_SUCCESS) return {};
-    return buf;
+    DWORD sz = 0;
+    if (RegGetValueW(HKEY_CURRENT_USER, REG_KEY, name, RRF_RT_REG_SZ, nullptr, nullptr, &sz) != ERROR_SUCCESS || !sz || sz > 4 * 1024 * 1024) return {};
+    std::wstring s(sz / sizeof(wchar_t), L'\0');
+    if (RegGetValueW(HKEY_CURRENT_USER, REG_KEY, name, RRF_RT_REG_SZ, nullptr, s.data(), &sz) != ERROR_SUCCESS) return {};
+    s.resize(wcsnlen(s.c_str(), s.size()));
+    return s;
 }
 
 // Home button and start-up page: the page chosen in the settings, else the new tab page.
@@ -5816,11 +5829,8 @@ static std::wstring HostOf(Tab* t) {
     std::wstring u = DisplayUrl(t);
     if (u.rfind(L"http://", 0) != 0 && u.rfind(L"https://", 0) != 0) return {};
     if (u.rfind(UI_HOST, 0) == 0 || u.rfind(CHROME_UI_HOST, 0) == 0) return {};
-    size_t s = u.find(L"://") + 3, e = u.find_first_of(L"/?#", s);
-    std::wstring h = u.substr(s, e == std::wstring::npos ? std::wstring::npos : e - s);
-    size_t at = h.rfind(L'@'); if (at != std::wstring::npos) h.erase(0, at + 1);
-    size_t colon = h.find(L':'); if (colon != std::wstring::npos) h.resize(colon);
-    for (auto& c : h) c = (wchar_t)towlower(c);
+    std::wstring sc, h; int p;
+    SplitUrl(u, sc, h, p);
     if (h.rfind(L"www.", 0) == 0) h.erase(0, 4);
     return h;
 }
@@ -8718,8 +8728,7 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         std::string h = Utf8(val);
         size_t p = h.find("://"); if (p != std::string::npos) h.erase(0, p + 3);
         size_t sl = h.find_first_of("/?#"); if (sl != std::string::npos) h.resize(sl);
-        size_t cl = h.find(':'); if (cl != std::string::npos) h.resize(cl);
-        for (auto& c : h) c = (char)tolower((unsigned char)c);
+        h = HostFromAuthority(h);
         if (!h.empty()) {
             { std::lock_guard<std::mutex> lk(g_blockMu); g_cookie3pExempt.insert(h); }
             SaveShieldExempt();

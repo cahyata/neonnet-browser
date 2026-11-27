@@ -15,6 +15,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 - Typing a `neonnet://` address in the new tab box opens it.
 - Two downloads with the same name that start together get separate files.
 - **Smooth scrolling:** after a fast touchpad swipe the page no longer moves on by itself once the scrolling has stopped.
+- **Per-site exceptions:** a list longer than about 30 sites is no longer read as empty at the next start (and then overwritten).
+- **IP addresses:** each is a site of its own (`10.0.1.10` and `192.168.1.10` were both treated as `1.10`), and IPv6 addresses are no longer cut off. An exception saved earlier for an IP address has to be added again.
+- A cookie exception typed with a user name in the address stores the host only.
 
 ### Changed
 - Changing light mode, Force Dark or automatic updates on the Settings page shows the same status notice as the menu.
