@@ -1,116 +1,141 @@
+<!-- prettier-ignore -->
+<div align="center">
+
+<img src="docs/images/logo.png" alt="NeonNet logo" height="96" />
+
 # NeonNet
 
-A synthwave / cyber-HUD themed web browser for Windows. Available in **Dark Synthwave** and **Light (Cyber Paper)** themes with customizable neon accents, clipped window corners, CRT scanlines, and an animated new tab page with a sunset, moving grid, Speed Dial, and Quick Notes.
+**A synthwave / cyber-HUD themed web browser for Windows, with its own Chromium engine.**
 
-NeonNet ships its own Chromium engine. It does not need Edge, WebView2 or any other runtime.
+[![Latest release](https://img.shields.io/github/v/release/cahyata/neonnet-browser?style=flat-square&color=ff2e97&label=release)](https://github.com/cahyata/neonnet-browser/releases/latest)
+![Windows 10 and 11, 64-bit](https://img.shields.io/badge/Windows-10%20%7C%2011%20(x64)-00bcd4?style=flat-square)
+![Chromium 156](https://img.shields.io/badge/Chromium-156-4285f4?style=flat-square&logo=googlechrome&logoColor=white)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-00599c?style=flat-square&logo=cplusplus&logoColor=white)
+[![MIT license](https://img.shields.io/badge/license-MIT-ffd166?style=flat-square)](LICENSE)
+
+[Download](https://github.com/cahyata/neonnet-browser/releases/latest) • [Features](#features) • [Build from source](#build-from-source) • [User guide](https://cahyata.github.io/neonnet-browser/)
+
+<img src="docs/images/new-tab.png" alt="NeonNet new tab page with a synthwave sunset, Speed Dial and Quick Notes" width="900" />
+
+</div>
+
+NeonNet is a native Win32 browser built on the [Chromium Embedded Framework](https://github.com/chromiumembedded/cef). It does not need Edge, WebView2 or any other runtime. The whole interface is its own: clipped window corners, neon accents, CRT scanlines, and an animated new tab page, in a **Dark Synthwave** or **Light (Cyber Paper)** theme.
 
 > Built and vibecoded with **Claude** and **Antigravity (Gemini)**.
 
-![New tab page (Dark Synthwave)](docs/images/new-tab.png)
-
-![New tab page (Light Cyber Paper)](docs/images/new-tab-light.png)
-
-![Browsing](docs/images/browsing.png)
-
-![Settings (Light Mode)](docs/images/settings-light.png)
-
-![Signal Lost error page](docs/images/signal-lost.png)
-
 ## Features
 
-- **Tabs & Workspaces:** open, close, switch, drag to reorder, pin, mute, duplicate, horizontal wheel scroll, hover tooltips, and Opera GX-style **Workspaces** for organizing tab groups. Popups open as tabs, and you can optionally restore your last session on startup.
-- **Split View (`Ctrl+Alt+S`), Reader Mode (`Ctrl+Alt+R`) & Social Dock (`Ctrl+Alt+W`):** view two tabs side-by-side with a draggable divider, switch any article into a clean Reader Mode (`NEON`, `DARK`, `SEPIA`, `LIGHT` themes), and open a resizable left Social Dock for WhatsApp, Instagram, and Discord.
-- **Dark & Light Themes + Custom Accents:** switch between **Dark Synthwave** and **Light (Cyber Paper)** UI modes, pick or customize neon accent colors, enable **Force Dark Mode** on websites with per-site exceptions, and remap keyboard shortcuts in Settings.
-- **Turbo Multi-Connection Downloads:** IDM-style parallel byte-range downloads (`4` / `8` / `16` connections) routed through Chromium's network stack with zero-freeze NTFS sparse file I/O, a toolbar Downloads popover with live segmented progress bars, and auto-categorized folders in `Downloads\NeonNet Download`.
-- **Command Palette (`Ctrl+K`):** instant fuzzy search across open tabs, workspaces, bookmarks, history, settings, and browser commands.
-- **Ad & Tracker Shield & YouTube Ad Skipper:** toolbar Shield popover with independent **Block Ads** and **Block Trackers** toggles, per-site exceptions, and a native C++ YouTube ad skipper.
-- **Performance Panel (`Ctrl+Shift+M`):** docked sidebar with 24-sample SVG RAM/CPU sparklines, memory cleaner, sleeping tabs, Battery Saver (`ON/OFF` and `Auto <=25%`), and optional RAM, CPU, and network download limiters.
-- **New Tab Page:** animated sunset and perspective grid with customizable **Speed Dial** tiles and a persistent **Quick Notes** scratchpad.
-- **Address Bar & Search:** built-in Google and custom search engines (`%s` / `{query}`), inline bookmarks/history suggestions, and a clickable zoom percentage badge.
-- **Scanlines, Smooth Scrolling & HUD Status Bar:** optional CRT line effect (`SCAN`), animated wheel and keyboard scrolling, and live network download/upload speed in the status bar.
-- **"SIGNAL LOST" Error Page & Warnings:** themed error page with a `RETRY` button when a site fails to load, plus themed certificate and HTTPS-only warnings.
-- **Privacy & Security:** incognito windows (`Ctrl+Shift+N`), clear browsing data, HTTPS-only mode, proxy profiles, per-site permissions (`neonnet://permissions`), and saved passwords encrypted with your Windows account (DPAPI).
-- **Extensions (Userscripts):** `Ctrl+Shift+E` (`neonnet://extensions`) manages `.user.js` userscripts with `@match`/`@include`/`@exclude`, `@run-at`, and `GM_*` APIs.
-- **Find in Page, Bookmarks, History & Downloads:** `Ctrl+F`, `Ctrl+D`, `Ctrl+H`, `Ctrl+Shift+O` for bookmarks (with nested folders, bookmarks bar via `Ctrl+Shift+B`, and HTML import/export), `Ctrl+J` for downloads, and `Ctrl+Shift+T` to reopen closed tabs.
-- **Developer Tools & Single Window:** docked DevTools (`F12`), Chromium sandbox enabled for renderer/GPU processes, and `NeonNet.exe <url>` opens new tabs in the existing window.
-- **Installer & Automatic Updates:** per-user by default (no admin rights needed) or all-users install, default-browser registration, and background auto-updates verified against SHA-256 checksums.
+### Tabs and navigation
 
-## Download and install
+- **Workspaces** to group tabs, with pinning, drag to reorder, muting, duplicating, reopening closed tabs and session restore.
+- **Split View** for two tabs side by side, and a **Social Dock** for WhatsApp, Instagram and Discord.
+- **Command Palette** (`Ctrl+Shift+P`) to search open tabs, bookmarks, history and browser commands.
+- **Address bar** with local suggestions from bookmarks and history, and custom search engines.
+- **Reader Mode** with four themes and adjustable fonts.
+- **Bookmarks** with folders, a bookmarks bar and HTML import/export, plus history and find in page.
 
-Download `NeonNet-Setup.exe` from the Releases page, run it and click **INSTALL**. See the [user guide](docs/USER-GUIDE.md) for details.
+### Privacy and security
 
-Requirements: Windows 10 version 1803 or newer (64-bit), or Windows 11.
+- **Shield** with separate ad and tracker blockers, per-site exceptions and a built-in YouTube ad skipper.
+- **Incognito windows**, HTTPS-only mode, certificate warnings and per-site permissions.
+- **DNS-over-HTTPS** and a browser-only **proxy tunnel** (SOCKS5, HTTPS or HTTP profiles).
+- **Saved passwords** encrypted with your Windows account (DPAPI).
+- The Chromium sandbox stays enabled.
 
-## Building from source
+### Downloads and performance
+
+- **Multi-connection downloads** (4, 8 or 16 parallel connections), sorted into folders by file type.
+- **Performance panel** with RAM and CPU graphs per tab, sleeping tabs and memory cleanup.
+- **Limiters** for RAM, background CPU and download speed, and a **Battery Saver**.
+
+### Customization
+
+- Neon accent presets or your own colors, scanlines, and **Force Dark Mode** with per-site exceptions.
+- **Userscripts** (`.user.js`) with `GM_*` APIs, a built-in editor and drag-and-drop import.
+- Remappable keyboard shortcuts, smooth scrolling and docked developer tools.
+
+## Screenshots
+
+| Browsing | Settings, light theme |
+|---|---|
+| ![A web page open in NeonNet](docs/images/browsing.png) | ![Settings page in the Light Cyber Paper theme](docs/images/settings-light.png) |
+| **New tab, light theme** | **Error page** |
+| ![New tab page in the Light Cyber Paper theme](docs/images/new-tab-light.png) | ![Signal Lost error page with a Retry button](docs/images/signal-lost.png) |
+
+## Getting started
+
+You need Windows 10 version 1803 or newer (64-bit), or Windows 11, and about 450 MB of disk space.
+
+1. Download `NeonNet-Setup.exe` from the [latest release](https://github.com/cahyata/neonnet-browser/releases/latest).
+2. Run it and click **INSTALL**. Administrator rights are only needed if you install for all users.
+3. Launch NeonNet. A per-user install updates itself, and verifies each download against its SHA-256 checksum.
+
+> [!NOTE]
+> The installer is not code signed, so Windows SmartScreen may warn you. If you trust where the file came from, click **More info**, then **Run anyway**.
+
+### Keyboard shortcuts
+
+| Keys | Action |
+|---|---|
+| `Ctrl+Shift+P` | Command Palette |
+| `Ctrl+T` / `Ctrl+W` / `Ctrl+Shift+T` | New, close and reopen tab |
+| `Ctrl+Shift+N` | Incognito window |
+| `Ctrl+Alt+S` | Split View |
+| `Ctrl+Alt+R` | Reader Mode |
+| `Ctrl+Alt+W` | Social Dock |
+| `Ctrl+Shift+M` | Performance panel |
+| `Ctrl+Shift+E` | Userscripts |
+| `Ctrl+,` | Settings |
+
+The [user guide](docs/USER-GUIDE.md) has the full list. Press `F1` in the browser to open it online.
+
+## Build from source
+
+Install Visual Studio 2022 (or Build Tools) with the **Desktop development with C++** workload. CMake, Python and Ninja are not needed.
 
 ```bash
+git clone https://github.com/cahyata/neonnet-browser.git
+cd neonnet-browser
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-Requires Visual Studio 2022 with the "Desktop development with C++" workload. The Chromium Embedded Framework is downloaded automatically on the first build. Full instructions are in [docs/BUILD.md](docs/BUILD.md).
+The first build downloads the pinned CEF version (about 175 MB) and takes a few minutes. Allow about 2 GB of disk space.
+
+| Output | Contents |
+|---|---|
+| `build/app/NeonNet.exe` | Ready-to-run app |
+| `dist/NeonNet-Setup.exe` | Installer, with its `.sha256` checksum |
+
+> [!TIP]
+> Use `build.ps1 -NoInstaller` for faster test builds, and `-Clean` to rebuild from scratch.
+
+> [!IMPORTANT]
+> A test build in `build/app` uses the same profile as an installed copy (`%LOCALAPPDATA%\NeonNet\Profile`).
+
+### Project structure
+
+```
+src/         browser source (C++): window, tabs, storage, updater, userscripts
+ui/          interface and built-in pages (HTML), embedded into NeonNet.dll
+installer/   the setup program
+tools/       CEF download, icon and blocklist scripts
+docs/        documentation
+```
+
+## Limitations
+
+- DRM video and audio (Netflix, Disney+, the Spotify web player) does not play.
+- H.264 and AAC are not included because of patent licenses, so most `.mp4` files can only be opened in your own media player. VP9, AV1, Opus and MP3 work, which covers YouTube.
+- Chrome Web Store extensions and account sync are not supported. Userscripts cover many extension use cases.
+- Sites that ask for a user name and password through HTTP sign-in do not load.
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
-| [User guide](docs/USER-GUIDE.md) | Installing, features, shortcuts, data locations, uninstalling, FAQ |
-| [Building](docs/BUILD.md) | Prerequisites, build steps, outputs, troubleshooting |
-| [Architecture](docs/ARCHITECTURE.md) | How it works inside: processes, window, tabs, UI messaging |
+| [User guide](docs/USER-GUIDE.md) | Features, shortcuts, data locations, uninstalling, FAQ |
+| [Building](docs/BUILD.md) | Prerequisites, build steps, troubleshooting |
+| [Architecture](docs/ARCHITECTURE.md) | Processes, window, tabs and UI messaging |
 | [Installer](docs/INSTALLER.md) | Installer format, install and uninstall flow |
-| [Maintenance and releases](docs/MAINTENANCE.md) | Updating Chromium, release checklist, publishing on GitHub |
-| [Changelog](CHANGELOG.md) | Version history |
-| [Security policy](SECURITY.md) | How to report a vulnerability |
-| [Third-party notices](THIRD_PARTY_NOTICES.md) | Third-party components and their licenses |
-
-## Repository layout
-
-```
-neonnet-browser/
-├─ src/
-│  ├─ main.cpp          all browser logic
-│  ├─ updater.cpp/.h    update check, download and checksum
-│  ├─ store.cpp/.h      history, bookmarks (with folders & HTML import/export) and downloads
-│  ├─ perf.cpp/.h       process memory/CPU sampling and limiters
-│  ├─ crash.cpp/.h      unhandled exception and subprocess crash log
-│  ├─ userscripts.cpp/.h  .user.js userscript parser, matcher and storage
-│  ├─ browserreg.h      default browser registry helpers
-│  ├─ resource.h        resource IDs and version
-│  ├─ app.rc            icon, embedded UI pages, version info
-│  ├─ app.manifest      Windows manifest (DPI awareness, common controls)
-│  └─ neonnet.ico       application icon
-├─ ui/
-│  ├─ chrome.html       tab strip, address bar and bookmarks bar
-│  ├─ newtab.html       new tab page
-│  ├─ history.html      history page
-│  ├─ downloads.html    downloads page
-│  ├─ settings.html     settings page
-│  ├─ bookmarks.html    bookmarks page
-│  ├─ performance.html  performance panel
-│  ├─ passwords.html    saved passwords page
-│  ├─ permissions.html  site permissions page
-│  ├─ extensions.html   extensions (userscripts) page
-│  ├─ warning.html      certificate and HTTPS-only warning page
-│  └─ blocklist.txt     tracker and ad domain list
-├─ installer/
-│  ├─ setup.cpp         installer
-│  └─ setup.rc
-├─ tools/
-│  ├─ fetch_cef.ps1     downloads the Chromium Embedded Framework
-│  ├─ rescopy.cpp       puts the icon and version info into NeonNet.exe
-│  └─ make_icon.ps1     regenerates neonnet.ico
-├─ docs/                documentation
-├─ build.ps1            builds everything
-└─ cef_version.txt      pinned Chromium Embedded Framework version
-```
-
-## Limitations
-
-- DRM content (Netflix, Disney+, Spotify web player) does not play. NeonNet warns in the status bar when a site asks for it.
-- H.264 and AAC are not built in (patent licences), so files such as most `.mp4` cannot play inside NeonNet. VP9, AV1, Opus and MP3 work, which covers YouTube. A video NeonNet cannot play can be opened in your own media player instead (see the user guide).
-- No account sync or Chrome Web Store (`.crx`) extensions (NeonNet uses built-in `.user.js` userscripts instead).
-
-## License
-
-NeonNet is released under the [MIT License](LICENSE). Copyright (c) 2026 cahyata.
-
-NeonNet is built on the Chromium Embedded Framework and Chromium, which have their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); the notices are also installed with the app.
+| [Maintenance](docs/MAINTENANCE.md) | Updating Chromium and publishing releases |
+| [Third-party notices](THIRD_PARTY_NOTICES.md) | Components used by NeonNet and their licenses |
