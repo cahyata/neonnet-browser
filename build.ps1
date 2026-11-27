@@ -1,8 +1,9 @@
 # Builds NeonNet.
 #   build\app\              runnable app folder (NeonNet.exe + NeonNet.dll + Chromium runtime)
 #   dist\NeonNet-Setup.exe   installer (setup stub + zipped app folder appended)
-# Usage: powershell -ExecutionPolicy Bypass -File build.ps1 [-NoInstaller] [-Clean]
-param([switch]$NoInstaller, [switch]$Clean)
+#   build\test\              test programs (-Test builds and runs them, nothing else)
+# Usage: powershell -ExecutionPolicy Bypass -File build.ps1 [-NoInstaller] [-Clean] [-Test]
+param([switch]$NoInstaller, [switch]$Clean, [switch]$Test)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 Set-Location $root
@@ -21,6 +22,15 @@ if (-not $vcvars) { throw 'No working MSVC toolset found.' }
 cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object { if ($_ -match '^([^=]+)=(.*)$') { Set-Item -Path "env:$($matches[1])" -Value $matches[2] } }
 
 function Run($exe, [string[]]$a) { & $exe @a; if ($LASTEXITCODE -ne 0) { throw "$exe failed ($LASTEXITCODE)" } }
+
+# --- tests: the modules that need neither CEF nor a window (run before anything is downloaded) ---
+if ($Test) {
+    New-Item -ItemType Directory -Force build\test | Out-Null
+    Run cl @('/nologo','/EHsc','/utf-8','/W3','/wd4244','/wd4996','/std:c++20','/MT','/DUNICODE','/D_UNICODE','/DNOMINMAX','/DWIN32_LEAN_AND_MEAN',
+             '/Isrc','/Fobuild\test\','/Febuild\test\settings_test.exe','tests\settings_test.cpp','src\settings.cpp','/link','advapi32.lib')
+    Run build\test\settings_test.exe @()
+    return
+}
 
 # --- 0. Chromium Embedded Framework (downloaded on demand, version pinned in cef_version.txt) ---
 & "$root\tools\fetch_cef.ps1"

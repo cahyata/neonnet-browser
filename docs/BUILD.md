@@ -35,6 +35,7 @@ The first build takes about 3–5 minutes: it downloads CEF, compiles `libcef_dl
 | (none) | Build the app and the installer |
 | `-NoInstaller` | Build only the app folder. Faster for testing. |
 | `-Clean` | Delete `build/` and `dist/`, then build from scratch |
+| `-Test` | Only build and run the tests (`tests/`, output in `build/test/`). Needs Visual Studio but not CEF, and changes nothing on the computer. |
 
 ## What `build.ps1` does
 

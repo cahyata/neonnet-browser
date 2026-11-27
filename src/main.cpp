@@ -49,6 +49,8 @@
 #include "include/cef_urlrequest.h"
 #include "include/cef_v8.h"
 #include "resource.h"
+#include "json.h"
+#include "presets.h"
 #include "updater.h"
 #include "store.h"
 #include "perf.h"
@@ -442,18 +444,6 @@ static const SearchEngine SEARCH_ENGINES[] = {
     { L"ecosia",     L"Ecosia",     L"https://www.ecosia.org/search?q=" },
 };
 static const int SEARCH_ENGINE_COUNT = (int)(sizeof(SEARCH_ENGINES) / sizeof(SEARCH_ENGINES[0]));
-// DNS-over-HTTPS (DoH) preset providers. `id` is saved in the registry.
-struct DohProvider { const wchar_t* id; const wchar_t* name; const wchar_t* tmpl; };
-static const DohProvider DOH_PROVIDERS[] = {
-    { L"cloudflare", L"Cloudflare (1.1.1.1)",       L"https://cloudflare-dns.com/dns-query" },
-    { L"google",     L"Google (8.8.8.8)",           L"https://dns.google/dns-query" },
-    { L"quad9",      L"Quad9 (Security)",           L"https://dns.quad9.net/dns-query" },
-    { L"adguard",    L"AdGuard DNS (Ad-blocking)",  L"https://dns.adguard-dns.com/dns-query" },
-    { L"opendns",    L"Cisco OpenDNS",              L"https://doh.opendns.com/dns-query" },
-    { L"custom",     L"Custom URL",                 L"" },
-};
-static const int DOH_PROVIDER_COUNT = (int)(sizeof(DOH_PROVIDERS) / sizeof(DOH_PROVIDERS[0]));
-
 static std::wstring ResolveDohTemplate(const std::wstring& provider, const std::wstring& custom) {
     if (provider == L"custom") return custom;
     for (int i = 0; i < DOH_PROVIDER_COUNT; i++) {
@@ -1827,57 +1817,15 @@ static bool ProxyAuthLookup(const std::wstring& host, int port, std::wstring& us
 }
 
 static std::string ProxyJsonList();   // below, next to JsonUtf8
-static std::string JsonUtf8(const std::wstring& w);
 static std::wstring RegGetString(const wchar_t* name);
 
 // ---------------------------------------------------------------------------
 // Theme Accent (customizable neon primary/secondary colors across UI & window frame)
 
-struct ThemePreset {
-    const wchar_t* id;
-    const wchar_t* name;
-    const wchar_t* pink;
-    const wchar_t* cyan;
-    COLORREF pinkCol;
-    COLORREF cyanCol;
-};
-static const ThemePreset THEME_PRESETS[] = {
-    { L"synthwave",   L"Synthwave (Default)", L"#ff2e97", L"#00e5ff", RGB(0xff, 0x2e, 0x97), RGB(0x00, 0xe5, 0xff) },
-    // Cyber Matrix is lime, not mint: mint (#35ffa0) is the ON / success colour and the incognito accent.
-    { L"cybergreen",  L"Cyber Matrix",        L"#a6ff1f", L"#00e5ff", RGB(0xa6, 0xff, 0x1f), RGB(0x00, 0xe5, 0xff) },
-    { L"plasma",      L"Electric Cyan",       L"#00e5ff", L"#b967ff", RGB(0x00, 0xe5, 0xff), RGB(0xb9, 0x67, 0xff) },
-    // The secondary is blue, not yellow: #ffd600 is the chrome highlight (wordmark, headings, nav buttons).
-    { L"amber",       L"Solar Amber",         L"#ff9a3c", L"#3db8ff", RGB(0xff, 0x9a, 0x3c), RGB(0x3d, 0xb8, 0xff) },
-    // Scarlet, leaning orange: the danger red (#ff4d6d) is pinkish, and a pure crimson would look like it.
-    { L"crimson",     L"Crimson Edge",        L"#ff5a1f", L"#00e5ff", RGB(0xff, 0x5a, 0x1f), RGB(0x00, 0xe5, 0xff) },
-    { L"ultraviolet", L"Ultraviolet",         L"#c74cff", L"#00e5ff", RGB(0xc7, 0x4c, 0xff), RGB(0x00, 0xe5, 0xff) },
-};
-static const int THEME_PRESET_COUNT = (int)(sizeof(THEME_PRESETS) / sizeof(THEME_PRESETS[0]));
-
 static std::mutex g_themeMu;
 static std::wstring g_themePreset = L"synthwave";
 static std::wstring g_themePink = L"#ff2e97";
 static std::wstring g_themeCyan = L"#00e5ff";
-
-static bool ParseHexColor(const std::wstring& in, COLORREF& colOut, std::wstring& normOut) {
-    if (in.size() != 7 || in[0] != L'#') return false;
-    unsigned int val = 0;
-    for (int i = 1; i < 7; i++) {
-        wchar_t c = in[i];
-        int d = -1;
-        if (c >= L'0' && c <= L'9') d = c - L'0';
-        else if (c >= L'a' && c <= L'f') d = 10 + (c - L'a');
-        else if (c >= L'A' && c <= L'F') d = 10 + (c - L'A');
-        else return false;
-        val = (val << 4) | (unsigned int)d;
-    }
-    BYTE r = (BYTE)((val >> 16) & 0xff), g2 = (BYTE)((val >> 8) & 0xff), b = (BYTE)(val & 0xff);
-    colOut = RGB(r, g2, b);
-    wchar_t buf[16];
-    swprintf_s(buf, L"#%02x%02x%02x", r, g2, b);
-    normOut = buf;
-    return true;
-}
 
 static std::wstring LightenHex(COLORREF c) {
     int r = (GetRValue(c) + 255) / 2, g2 = (GetGValue(c) + 255) / 2, b = (GetBValue(c) + 255) / 2;
@@ -4826,19 +4774,6 @@ static bool HasQueryParam(const std::wstring& query, const wchar_t* name) {
 static std::wstring RegGetString(const wchar_t* name);
 static bool AutoUpdateEnabled();
 static bool IsInstalledCopy();
-
-static std::string JsonUtf8(const std::wstring& w) {
-    std::string s = CefString(w).ToString(), o = "\"";
-    for (char c : s) {
-        unsigned char u = (unsigned char)c;
-        if (c == '"') o += "\\\"";
-        else if (c == '\\') o += "\\\\";
-        else if (c == '<') o += "\\u003c";
-        else if (u < 0x20) { char b[8]; sprintf_s(b, "\\u%04x", u); o += b; }
-        else o += c;
-    }
-    return o + "\"";
-}
 
 // {"sites":[{"origin":"https://x.com","perms":[{"k":"camera","l":"Camera","v":1}]}]} for neonnet://permissions
 static std::string SpJsonList() {
