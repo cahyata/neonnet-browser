@@ -51,6 +51,7 @@
 #include "resource.h"
 #include "json.h"
 #include "presets.h"
+#include "settings.h"
 #include "updater.h"
 #include "store.h"
 #include "perf.h"
@@ -345,6 +346,7 @@ struct App {
     std::vector<ClosedTab> closed;
 };
 static App g;
+using Setting = settings::Id;
 static std::mutex g_updMu;
 struct UpdSnap {
     UpdState state = U_IDLE;
@@ -450,16 +452,6 @@ static std::wstring ResolveDohTemplate(const std::wstring& provider, const std::
         if (provider == DOH_PROVIDERS[i].id) return DOH_PROVIDERS[i].tmpl;
     }
     return DOH_PROVIDERS[0].tmpl;
-}
-
-static bool ValidDohCustomUrl(const std::wstring& url) {
-    if (url.empty()) return true;
-    if (url.size() >= 300 || url.rfind(L"https://", 0) != 0) return false;
-    if (url.size() <= 8) return false;
-    for (wchar_t c : url) {
-        if (c <= 0x20 || c == 0x7f) return false;
-    }
-    return true;
 }
 
 static void ApplyDohPrefs() {
@@ -1834,33 +1826,17 @@ static std::wstring LightenHex(COLORREF c) {
     return buf;
 }
 
-static void ThemeLoad() {
-    std::wstring pr = RegGetString(L"AccentPreset");
-    std::wstring pk = RegGetString(L"AccentPink");
-    std::wstring cy = RegGetString(L"AccentCyan");
+// Copies the accent settings to what painting and the pages read.
+static void ThemeRefresh() {
+    std::wstring preset = settings::Text(settings::Id::AccentPreset), pink = settings::Text(settings::Id::AccentPink),
+                 cyan = settings::Text(settings::Id::AccentCyan), norm;
     COLORREF pCol = C_PINK, cCol = C_CYAN;
-    std::wstring nPink = L"#ff2e97", nCyan = L"#00e5ff", nPreset = L"synthwave";
-    bool foundPreset = false;
-    for (int i = 0; i < THEME_PRESET_COUNT; i++) {
-        if (pr == THEME_PRESETS[i].id) {
-            nPreset = THEME_PRESETS[i].id;
-            nPink = THEME_PRESETS[i].pink;
-            nCyan = THEME_PRESETS[i].cyan;
-            pCol = THEME_PRESETS[i].pinkCol;
-            cCol = THEME_PRESETS[i].cyanCol;
-            foundPreset = true;
-            break;
-        }
-    }
-    if (!foundPreset && pr == L"custom") {
-        nPreset = L"custom";
-        if (!ParseHexColor(pk, pCol, nPink)) { pCol = C_PINK; nPink = L"#ff2e97"; }
-        if (!ParseHexColor(cy, cCol, nCyan)) { cCol = C_CYAN; nCyan = L"#00e5ff"; }
-    }
+    ParseHexColor(pink, pCol, norm);
+    ParseHexColor(cyan, cCol, norm);
     std::lock_guard<std::mutex> lk(g_themeMu);
-    g_themePreset = nPreset;
-    g_themePink = nPink;
-    g_themeCyan = nCyan;
+    g_themePreset = preset;
+    g_themePink = pink;
+    g_themeCyan = cyan;
     g_accentCol = (DWORD)pCol;
     g_cyanCol = (DWORD)cCol;
 }
@@ -3381,9 +3357,7 @@ public:
         int nd = side == L"bottom" ? 0 : side == L"right" ? 1 : side == L"left" ? 2 : side == L"undocked" ? 3 : -1;
         Tab* t = FindTab(tabId_);
         if (nd < 0 || !t || !t->dev || nd == t->devDock || g.closing) return true;
-        DWORD v = (DWORD)nd;
-        RegSetBin(L"DevToolsDock", REG_DWORD, &v, sizeof(v));   // the next tools open where this choice put them
-        g.devDock = nd;
+        settings::SetNumber(Setting::DevDock, nd);   // the next tools open where this choice put them
         if ((nd == 3) != (t->devDock == 3)) {   // to or from a window of its own: reopen, the kind of host window changes
             t->devReopen = true;
             t->browser->GetHost()->CloseDevTools();
@@ -5149,39 +5123,14 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
     else if (path == L"api/settings/set") {
         std::wstring key = QueryParam(query, L"key"), val = QueryParam(query, L"value");
         bool ok = false;
-        if (key == L"search") ok = EngineValidId(val);
-        else if (key == L"scan" || key == L"autoUpdate" || key == L"askDownload" || key == L"fastDownload" || key == L"dlSubfolder" || key == L"dlCategories" || key == L"restoreSession" || key == L"favicons" || key == L"bookmarksBar" || key == L"httpsOnly" || key == L"blockAds" || key == L"blockTrackers" || key == L"stripTracking" || key == L"block3pCookies" || key == L"strictReferrer" || key == L"savePasswords" || key == L"a11yTree" || key == L"reducedMotion" || key == L"highContrast" || key == L"welcomeDismissed" || key == L"smoothScroll" || key == L"netSpeed" || key == L"forceDark" || key == L"lightMode" || key == L"bgLimit" || key == L"batterySaver" || key == L"batteryAuto" || key == L"netLimitAll") ok = (val == L"0" || val == L"1");
-        else if (key == L"lang") ok = (val == L"en" || val == L"id");
-        else if (key == L"minFontSize") ok = (val == L"0" || val == L"12" || val == L"14" || val == L"16" || val == L"18" || val == L"20");
-        else if (key == L"fastConnections") ok = (val == L"4" || val == L"8" || val == L"16");
-        else if (key == L"ramLimitMB") { int v = _wtoi(val.c_str()); ok = (v == 0 || (v >= 512 && v <= 65536)); }
-        else if (key == L"netLimitKB") { int v = _wtoi(val.c_str()); ok = (v == 0 || (v >= 64 && v <= 102400)); }
-        else if (key == L"dockDefault") ok = (val == L"0" || val == L"1" || val == L"2");
-        else if (key == L"dockWidth") { int v = _wtoi(val.c_str()); ok = (v >= 300 && v <= 900); }
-        else if (key == L"readerTheme") ok = (val == L"neon" || val == L"dark" || val == L"sepia" || val == L"light");
-        else if (key == L"readerFont") ok = (val == L"sans" || val == L"serif" || val == L"mono");
-        else if (key == L"readerSize") { int v = _wtoi(val.c_str()); ok = (v >= 14 && v <= 28); }
+        Setting id;
+        if (settings::Find(key, id)) ok = settings::Allowed(id, val);
+        // the rest are actions, not settings
+        else if (key == L"search") ok = EngineValidId(val);
         else if (key == L"adsExemptDel" || key == L"trackersExemptDel" || key == L"darkExemptDel" || key == L"cookie3pExemptAdd" || key == L"cookie3pExemptDel") ok = !val.empty() && val.size() < 256;
-        else if (key == L"smoothStep") ok = (val == L"70" || val == L"120" || val == L"200");
-        else if (key == L"devDock") ok = (val == L"0" || val == L"1" || val == L"2" || val == L"3");
         else if (key == L"defaultBrowser") ok = (val == L"1");
         else if (key == L"checkUpdate") ok = (val == L"1" || val == L"restart" || val == L"download");
-        else if (key == L"smoothTime") ok = (val == L"250" || val == L"400" || val == L"700");
         else if (key == L"proceed") ok = val.size() < 2100 && (val.rfind(L"cert|https://", 0) == 0 || val.rfind(L"http|http://", 0) == 0);
-        else if (key == L"home") {
-            std::wstring low = val; for (auto& ch : low) ch = towlower(ch);
-            ok = val.empty() || (val.size() < 500 && (low.rfind(L"http://", 0) == 0 || low.rfind(L"https://", 0) == 0 || low.rfind(L"file:///", 0) == 0));
-        } else if (key == L"dohMode") ok = (val == L"off" || val == L"automatic" || val == L"secure");
-        else if (key == L"dohProvider") { for (int i = 0; i < DOH_PROVIDER_COUNT; i++) if (val == DOH_PROVIDERS[i].id) ok = true; }
-        else if (key == L"dohCustom") ok = ValidDohCustomUrl(val);
-        else if (key == L"accentPreset") {
-            if (val == L"custom") ok = true;
-            else for (int i = 0; i < THEME_PRESET_COUNT; i++) if (val == THEME_PRESETS[i].id) ok = true;
-        }
-        else if (key == L"accentPink" || key == L"accentCyan") {
-            COLORREF dummy; std::wstring norm;
-            ok = ParseHexColor(val, dummy, norm);
-        }
         if (!ok) return new StringResource("{\"error\":\"invalid value\"}", "application/json", 400);
         // Applied on the UI thread, and waited for, so that the page can read the result back.
         // The receiver frees the message: after a timeout it may still be reading it. This side never
@@ -6176,52 +6125,6 @@ static void SetWaOpen(bool open) {
     SendState();
 }
 
-static void SetRamLimit(DWORD mb) {
-    g.ramLimitMB = (mb >= 512 && mb <= 65536) ? mb : 0;
-    RegSetBin(L"RamLimitMB", REG_DWORD, &g.ramLimitMB, sizeof(DWORD));
-    UpdatePerfTimer();
-}
-
-static void SetBgLimit(bool on) {
-    g.bgLimit = on;
-    DWORD v = on ? 1 : 0;
-    RegSetBin(L"BgLimit", REG_DWORD, &v, sizeof(v));
-    ApplyBackgroundLimit();
-    UpdatePerfTimer();
-}
-
-static void SetBatterySaver(bool on) {
-    g.batterySaver = on;
-    DWORD v = on ? 1 : 0;
-    RegSetBin(L"BatterySaver", REG_DWORD, &v, sizeof(v));
-    ApplyBackgroundLimit();
-    BroadcastSmooth();
-    UpdatePerfTimer();
-    ShowNotice(IsBatterySaverActive() ? L"BATTERY SAVER ON" : L"BATTERY SAVER OFF");
-}
-
-static void SetBatteryAuto(bool on) {
-    g.batteryAuto = on;
-    DWORD v = on ? 1 : 0;
-    RegSetBin(L"BatteryAuto", REG_DWORD, &v, sizeof(v));
-    ApplyBackgroundLimit();
-    BroadcastSmooth();
-    UpdatePerfTimer();
-}
-
-static void SetNetLimit(DWORD kb) {
-    g.netLimitKB = (kb >= 64 && kb <= 102400) ? kb : 0;
-    RegSetBin(L"NetLimitKB", REG_DWORD, &g.netLimitKB, sizeof(DWORD));
-    ApplyNetworkLimit();
-}
-
-static void SetNetAll(bool all) {
-    g.netLimitAll = all;
-    DWORD v = all ? 1 : 0;
-    RegSetBin(L"NetLimitAll", REG_DWORD, &v, sizeof(v));
-    ApplyNetworkLimit();
-}
-
 // Commands from the panel page (see OnChromeCommand).
 static void OnPerfCommand(const std::wstring& cmd, const std::wstring& arg) {
     int id = _wtoi(arg.c_str());
@@ -6241,12 +6144,12 @@ static void OnPerfCommand(const std::wstring& cmd, const std::wstring& arg) {
     else if (cmd == L"perf.mute") ToggleMute(id);
     else if (cmd == L"perf.keep") ToggleKeepAwake(id);
     else if (cmd == L"perf.unkeep") { g.keepHosts.erase(arg); SaveKeepHosts(); }
-    else if (cmd == L"perf.ram") SetRamLimit((DWORD)_wtoi(arg.c_str()));
-    else if (cmd == L"perf.bg") SetBgLimit(arg == L"1");
-    else if (cmd == L"perf.bat") SetBatterySaver(arg == L"1");
-    else if (cmd == L"perf.batauto") SetBatteryAuto(arg == L"1");
-    else if (cmd == L"perf.net") SetNetLimit((DWORD)_wtoi(arg.c_str()));
-    else if (cmd == L"perf.netall") SetNetAll(arg == L"1");
+    else if (cmd == L"perf.ram") settings::Set(Setting::RamLimitMB, arg);
+    else if (cmd == L"perf.bg") settings::Set(Setting::BgLimit, arg);
+    else if (cmd == L"perf.bat") settings::Set(Setting::BatterySaver, arg);
+    else if (cmd == L"perf.batauto") settings::Set(Setting::BatteryAuto, arg);
+    else if (cmd == L"perf.net") settings::Set(Setting::NetLimitKB, arg);
+    else if (cmd == L"perf.netall") settings::Set(Setting::NetLimitAll, arg);
     else if (cmd == L"perf.hide") SetPanelOpen(false);
     SamplePerf();
     PushPerf();
@@ -6550,6 +6453,8 @@ static void OpenPalette() {
 
 static void ToggleCaretBrowsing();
 
+static void Toggle(Setting id) { settings::SetNumber(id, settings::Flag(id) ? 0 : 1); }
+
 static void ExecCmd(int cmd) {
     Tab* a = Active();
     CefRefPtr<CefBrowser> b = a ? a->browser : nullptr;
@@ -6561,24 +6466,8 @@ static void ExecCmd(int cmd) {
     case CMD_SPLIT_VIEW: ToggleSplitView(); break;
     case CMD_SPLIT_SWAP: SwapSplitPanes(); break;
     case CMD_READER_MODE: ToggleReaderMode(); break;
-    case CMD_FORCEDARK: {
-        g.forceDark = !g.forceDark;
-        DWORD v = g.forceDark ? 1 : 0;
-        RegSetBin(L"ForceDark", REG_DWORD, &v, sizeof(v));
-        for (auto& t : g.tabs) if (t->browser && !t->discarded) ApplyForceDark(t->browser);
-        SendState();
-        ShowNotice(g.forceDark ? L"FORCE DARK MODE ON" : L"FORCE DARK MODE OFF");
-        break;
-    }
-    case CMD_LIGHTMODE: {
-        bool next = !g.lightMode.load();
-        g.lightMode = next;
-        DWORD v = next ? 1 : 0;
-        if (!g.incognito) RegSetBin(L"LightMode", REG_DWORD, &v, sizeof(v));
-        BroadcastThemeAccent();
-        ShowNotice(next ? L"LIGHT MODE ON" : L"DARK MODE ON");
-        break;
-    }
+    case CMD_FORCEDARK: Toggle(Setting::ForceDark); break;
+    case CMD_LIGHTMODE: Toggle(Setting::LightMode); break;
     case CMD_DARK_EXEMPT: ToggleDarkExemptForActive(); break;
     case CMD_PROXY_TOGGLE: {
         if (!ProxySetEnabled(-1)) {
@@ -6617,36 +6506,9 @@ static void ExecCmd(int cmd) {
     case CMD_ZOOMIN: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_IN); break;
     case CMD_ZOOMOUT: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_OUT); break;
     case CMD_ZOOMRESET: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_RESET); break;
-    case CMD_BLOCKADS: {
-        bool on = !g.blockAds.load();
-        if (on) LoadBlocklistAsync();   // about 82 000 names: parse on a background thread without stalling UI
-        g.blockAds = on;
-        DWORD v = on ? 1 : 0;
-        RegSetBin(L"BlockAds", REG_DWORD, &v, sizeof(v));
-        SendState();
-        if (g.chrome) ShowAlert(on ? L"AD BLOCKER ON - RELOAD A PAGE TO SEE THE EFFECT" : L"AD BLOCKER IS OFF");
-        break;
-    }
-    case CMD_BLOCKTRACKERS: {
-        bool on = !g.blockTrackers.load();
-        if (on) LoadBlocklistAsync();
-        g.blockTrackers = on;
-        DWORD v = on ? 1 : 0;
-        RegSetBin(L"BlockTrackers", REG_DWORD, &v, sizeof(v));
-        SendState();
-        if (g.chrome) ShowAlert(on ? L"TRACKER BLOCKER ON - RELOAD A PAGE TO SEE THE EFFECT" : L"TRACKER BLOCKER IS OFF");
-        break;
-    }
-    case CMD_SCAN: {
-        g.scan = !g.scan;
-        DWORD v = g.scan ? 1 : 0;
-        RegSetBin(L"Scanlines", REG_DWORD, &v, sizeof(v));
-        for (auto& t : g.tabs) ApplyScan(t->browser);
-        SendState();
-        InvalidateStatus();
-        if (g.toastHwnd && IsWindowVisible(g.toastHwnd)) InvalidateRect(g.toastHwnd, nullptr, FALSE);
-        break;
-    }
+    case CMD_BLOCKADS: Toggle(Setting::BlockAds); break;
+    case CMD_BLOCKTRACKERS: Toggle(Setting::BlockTrackers); break;
+    case CMD_SCAN: Toggle(Setting::Scanlines); break;
     case CMD_FULLSCREEN: g.fsUser = !g.fullscreen; if (!g.fsUser) g.fsElement = false; UpdateFullscreen(); break;
     case CMD_DEVTOOLS:
         if (Tab* t = Active()) {
@@ -6657,12 +6519,7 @@ static void ExecCmd(int cmd) {
     case CMD_ABOUT: ShowAbout(); break;
     case CMD_HELP: CreateTab(DOCS_URL, true); break;
     case CMD_UPDATE_CHECK: StartUpdateCheck(true); break;
-    case CMD_UPDATE_AUTO: {
-        DWORD v = AutoUpdateEnabled() ? 0 : 1;
-        RegSetBin(L"AutoUpdate", REG_DWORD, &v, sizeof(v));
-        ShowNotice(v ? L"AUTOMATIC UPDATES ON" : L"AUTOMATIC UPDATES OFF");
-        break;
-    }
+    case CMD_UPDATE_AUTO: Toggle(Setting::AutoUpdate); break;
     case CMD_UPDATE_RESTART: g.updRelaunch = true; PostMessageW(g.hwnd, WM_CLOSE, 0, 0); break;
     case CMD_UPDATE_PAGE: if (!g.updPage.empty()) CreateTab(g.updPage, true); break;
     case CMD_FIND: OpenFind(); break;
@@ -6681,15 +6538,7 @@ static void ExecCmd(int cmd) {
         break;
     case CMD_BOOKMARK: ToggleBookmark(); break;
     case CMD_BOOKMARKS: OpenPage(BOOKMARKS_PAGE); break;
-    case CMD_BOOKMARKS_BAR: {
-        g.bookmarksBar = !g.bookmarksBar;
-        g.bmBarDirty = true;
-        DWORD v = g.bookmarksBar ? 1 : 0;
-        RegSetBin(L"BookmarksBar", REG_DWORD, &v, sizeof(v));
-        Layout();
-        SendState();
-        break;
-    }
+    case CMD_BOOKMARKS_BAR: Toggle(Setting::BookmarksBar); break;
     case CMD_HISTORY: OpenPage(HISTORY_PAGE); break;
     case CMD_DOWNLOADS: OpenPage(DOWNLOADS_PAGE); break;
     case CMD_EXTENSIONS: OpenPage(EXTENSIONS_PAGE); break;
@@ -8640,8 +8489,7 @@ static LRESULT CALLBACK WaGripProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_LBUTTONUP && g.dockDragging) {
         g.dockDragging = false;
         ReleaseCapture();
-        DWORD v = (DWORD)g.dockWidthDip;
-        RegSetBin(L"DockWidth", REG_DWORD, &v, sizeof(v));
+        settings::SetNumber(Setting::DockWidth, g.dockWidthDip);
         return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
@@ -8799,46 +8647,161 @@ static void BroadcastThemeAccent() {
 }
 
 // A change made on the settings page (already validated on the IO thread). Runs on the UI thread.
+// The old fields, until everything reads the settings module itself.
+static void MirrorSetting(Setting id) {
+    const bool on = settings::Flag(id);
+    const int n = settings::Number(id);
+    switch (id) {
+    case Setting::Scanlines: g.scan = on; break;
+    case Setting::Favicons: g.favicons = on; break;
+    case Setting::BookmarksBar: g.bookmarksBar = on; break;
+    case Setting::HttpsOnly: g.httpsOnly = on; break;
+    case Setting::BlockAds: g.blockAds = on; break;
+    case Setting::BlockTrackers: g.blockTrackers = on; break;
+    case Setting::StripTracking: g.stripTracking = on; break;
+    case Setting::Block3pCookies: g.block3pCookies = on; break;
+    case Setting::StrictReferrer: g.strictReferrer = on; break;
+    case Setting::SavePasswords: g.savePasswords = on; break;
+    case Setting::A11yTree: g.a11yTree = on; break;
+    case Setting::ReducedMotion: g.reducedMotion = on; break;
+    case Setting::HighContrast: g.highContrast = on; break;
+    case Setting::WelcomeDismissed: g.welcomeDismissed = on; break;
+    case Setting::SmoothScroll: g.smooth = on; break;
+    case Setting::NetSpeed: g.netSpeed = on; break;
+    case Setting::ForceDark: g.forceDark = on; break;
+    case Setting::LightMode: g.lightMode = on; break;
+    case Setting::BgLimit: g.bgLimit = on; break;
+    case Setting::BatterySaver: g.batterySaver = on; break;
+    case Setting::BatteryAuto: g.batteryAuto = on; break;
+    case Setting::NetLimitAll: g.netLimitAll = on; break;
+    case Setting::MinFontSize: g.minFontSize = n; break;
+    case Setting::RamLimitMB: g.ramLimitMB = (DWORD)n; break;
+    case Setting::NetLimitKB: g.netLimitKB = (DWORD)n; break;
+    case Setting::DockWidth: g.dockWidthDip = n; break;
+    case Setting::SmoothStep: g.smoothStep = n; break;
+    case Setting::SmoothTime: g.smoothTime = n; break;
+    case Setting::DevDock: g.devDock = n; break;
+    case Setting::Lang: g.langId = settings::Text(id) == L"id" ? 1 : 0; break;
+    case Setting::DohMode: g.dohMode = settings::Text(id); break;
+    case Setting::DohProvider: g.dohProvider = settings::Text(id); break;
+    case Setting::DohCustom: g.dohCustom = settings::Text(id); break;
+    case Setting::AccentPreset: case Setting::AccentPink: case Setting::AccentCyan: ThemeRefresh(); break;
+    default: break;
+    }
+}
+
+// What follows from a changed setting, whoever changed it (settings page, menu, shortcut,
+// toolbar, performance panel or developer tools). Called by the settings module on the UI thread.
+static void OnSettingChanged(Setting id) {
+    MirrorSetting(id);
+    const bool on = settings::Flag(id);
+    auto eachPage = [](auto fn) { for (auto& t : g.tabs) if (t->browser && !t->discarded) fn(t->browser); };
+    switch (id) {
+    case Setting::Scanlines:
+        for (auto& t : g.tabs) ApplyScan(t->browser);
+        SendState();
+        InvalidateStatus();
+        if (g.toastHwnd && IsWindowVisible(g.toastHwnd)) InvalidateRect(g.toastHwnd, nullptr, FALSE);
+        break;
+    case Setting::AutoUpdate: ShowNotice(on ? L"AUTOMATIC UPDATES ON" : L"AUTOMATIC UPDATES OFF"); break;
+    case Setting::DlSubfolder: case Setting::DlCategories: if (on) DownloadBaseDir(true); break;
+    case Setting::Favicons: case Setting::WelcomeDismissed: SendState(); break;
+    case Setting::BookmarksBar:
+        g.bmBarDirty = true;
+        Layout();
+        SendState();
+        break;
+    case Setting::BlockAds: case Setting::BlockTrackers:
+        if (on) LoadBlocklistAsync();   // about 82 000 names: parse on a background thread without stalling UI
+        SendState();
+        if (g.chrome) ShowAlert(id == Setting::BlockAds ? (on ? L"AD BLOCKER ON - RELOAD A PAGE TO SEE THE EFFECT" : L"AD BLOCKER IS OFF")
+                                                        : (on ? L"TRACKER BLOCKER ON - RELOAD A PAGE TO SEE THE EFFECT" : L"TRACKER BLOCKER IS OFF"));
+        break;
+    case Setting::StripTracking: ShowNotice(on ? L"URL TRACKING STRIPPER ON" : L"URL TRACKING STRIPPER OFF"); break;
+    case Setting::Block3pCookies:
+        ApplyCookiePrefs();
+        ShowNotice(on ? L"BLOCK 3RD-PARTY COOKIES ON" : L"BLOCK 3RD-PARTY COOKIES OFF");
+        break;
+    case Setting::StrictReferrer: ShowNotice(on ? L"STRICT CROSS-SITE REFERRER ON" : L"STRICT CROSS-SITE REFERRER OFF"); break;
+    case Setting::A11yTree:
+        for (auto& b : g_all) ApplyAccessibility(b);
+        ShowNotice(on ? L"SCREEN READER ACCESSIBILITY ON" : L"SCREEN READER ACCESSIBILITY OFF");
+        break;
+    case Setting::ReducedMotion:
+        BroadcastThemeAccent();
+        eachPage([](CefRefPtr<CefBrowser> b) { ApplyReducedMotion(b); ApplyScan(b); });
+        ShowNotice(on ? L"REDUCED MOTION ON" : L"REDUCED MOTION OFF");
+        break;
+    case Setting::HighContrast:
+        BroadcastThemeAccent();
+        eachPage([](CefRefPtr<CefBrowser> b) { ApplyScan(b); });
+        ShowNotice(on ? L"HIGH CONTRAST THEME ON" : L"HIGH CONTRAST THEME OFF");
+        break;
+    case Setting::SmoothScroll: case Setting::SmoothStep: case Setting::SmoothTime: BroadcastSmooth(); break;
+    case Setting::NetSpeed: SetNetSpeed(on); break;
+    case Setting::ForceDark:
+        eachPage([](CefRefPtr<CefBrowser> b) { ApplyForceDark(b); });
+        SendState();
+        ShowNotice(on ? L"FORCE DARK MODE ON" : L"FORCE DARK MODE OFF");
+        break;
+    case Setting::LightMode:
+        BroadcastThemeAccent();
+        ShowNotice(on ? L"LIGHT MODE ON" : L"DARK MODE ON");
+        break;
+    case Setting::BgLimit: case Setting::BatterySaver: case Setting::BatteryAuto:
+        ApplyBackgroundLimit();
+        if (id != Setting::BgLimit) BroadcastSmooth();
+        UpdatePerfTimer();
+        if (id == Setting::BatterySaver) ShowNotice(IsBatterySaverActive() ? L"BATTERY SAVER ON" : L"BATTERY SAVER OFF");
+        PushPerf();
+        break;
+    case Setting::RamLimitMB: UpdatePerfTimer(); PushPerf(); break;
+    case Setting::NetLimitKB: case Setting::NetLimitAll: ApplyNetworkLimit(); PushPerf(); break;
+    case Setting::MinFontSize: {
+        const int px = settings::Number(id);
+        ShowNotice(px > 0 ? (L"MINIMUM FONT SIZE: " + std::to_wstring(px) + L" PX (NEW TABS)") : L"MINIMUM FONT SIZE: DEFAULT");
+        break;
+    }
+    case Setting::DockDefault: SelectDockApp(settings::Number(id)); break;
+    case Setting::DockWidth: Layout(); break;
+    case Setting::Lang:
+        BroadcastThemeAccent();
+        ShowNotice(settings::Text(id) == L"id" ? L"BAHASA: INDONESIA" : L"LANGUAGE: ENGLISH");
+        break;
+    case Setting::DohMode: case Setting::DohProvider: case Setting::DohCustom: ApplyDohPrefs(); break;
+    case Setting::AccentPreset: case Setting::AccentPink: case Setting::AccentCyan: BroadcastThemeAccent(); break;
+    default: break;   // read when it is needed
+    }
+}
+
+static bool SystemHighContrast() {
+    HIGHCONTRASTW hc{ sizeof(hc) };
+    return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0) && (hc.dwFlags & HCF_HIGHCONTRASTON);
+}
+
+static void LoadSettings() {
+    static settings::RegistryStorage storage(REG_KEY);
+    settings::Setup setup;
+    setup.incognito = g.incognito;
+    setup.systemReducedMotion = SystemReducedMotion();
+    setup.systemHighContrast = SystemHighContrast();
+    setup.onChange = OnSettingChanged;
+    settings::Load(storage, setup);
+    for (int i = 0; i < (int)Setting::Count; i++) MirrorSetting((Setting)i);
+    g.dockActive = settings::Number(Setting::DockDefault);   // which dock app is shown can change afterwards
+}
+
+// A change made on the settings page (already validated on the IO thread). Runs on the UI thread.
 static void ApplySetting(const std::wstring& key, const std::wstring& val) {
-    if (key == L"search") {
+    Setting id;
+    if (settings::Find(key, id)) {
+        settings::Set(id, val);
+    } else if (key == L"search") {
         if (EngineSelect(val)) SendState();
-    } else if (key == L"scan") {
-        if ((val == L"1") != g.scan.load()) ExecCmd(CMD_SCAN);
-    } else if (key == L"autoUpdate") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"AutoUpdate", REG_DWORD, &v, sizeof(v));
     } else if (key == L"checkUpdate") {
         if (val == L"restart") ExecCmd(CMD_UPDATE_RESTART);
         else if (val == L"download") ExecCmd(CMD_UPDATE_PAGE);
         else ExecCmd(CMD_UPDATE_CHECK);
-    } else if (key == L"askDownload") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"AskDownload", REG_DWORD, &v, sizeof(v));
-    } else if (key == L"fastDownload") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"FastDownload", REG_DWORD, &v, sizeof(v));
-    } else if (key == L"fastConnections") {
-        DWORD v = (DWORD)_wtoi(val.c_str());
-        if (v != 4 && v != 8 && v != 16) v = 8;
-        RegSetBin(L"FastConnections", REG_DWORD, &v, sizeof(v));
-    } else if (key == L"dlSubfolder") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"DlSubfolder", REG_DWORD, &v, sizeof(v));
-        if (v) DownloadBaseDir(true);
-    } else if (key == L"dlCategories") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"DlCategories", REG_DWORD, &v, sizeof(v));
-        if (v) DownloadBaseDir(true);
-    } else if (key == L"httpsOnly") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"HttpsOnly", REG_DWORD, &v, sizeof(v));
-        g.httpsOnly = v != 0;
-    } else if (key == L"smoothScroll" || key == L"smoothStep" || key == L"smoothTime") {
-        DWORD v = (DWORD)_wtoi(val.c_str());
-        if (key == L"smoothScroll") { RegSetBin(L"SmoothScroll", REG_DWORD, &v, sizeof(v)); g.smooth = v != 0; }
-        else if (key == L"smoothStep") { RegSetBin(L"SmoothStep", REG_DWORD, &v, sizeof(v)); g.smoothStep = (int)v; }
-        else { RegSetBin(L"SmoothTime", REG_DWORD, &v, sizeof(v)); g.smoothTime = (int)v; }
-        BroadcastSmooth();
     } else if (key == L"defaultBrowser") {
         // Windows does not let a program make itself the default browser: make sure NeonNet is in the list
         // (the installer does this too, this also covers a copy that was not installed) and open the page
@@ -8846,71 +8809,6 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH);
         if (!g.incognito) browserreg::Register(HKEY_CURRENT_USER, exe);
         browserreg::OpenDefaultAppsSettings();
-    } else if (key == L"devDock") {
-        DWORD v = (DWORD)_wtoi(val.c_str());
-        RegSetBin(L"DevToolsDock", REG_DWORD, &v, sizeof(v));
-        g.devDock = (int)v;   // used the next time developer tools open
-    } else if (key == L"netSpeed") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"NetSpeed", REG_DWORD, &v, sizeof(v));
-        SetNetSpeed(v != 0);
-    } else if (key == L"forceDark") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"ForceDark", REG_DWORD, &v, sizeof(v));
-        g.forceDark = v != 0;
-        for (auto& t : g.tabs) if (t->browser && !t->discarded) ApplyForceDark(t->browser);
-        SendState();
-    } else if (key == L"savePasswords") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"SavePasswords", REG_DWORD, &v, sizeof(v));
-        g.savePasswords = v != 0;
-    } else if (key == L"a11yTree") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"Accessibility", REG_DWORD, &v, sizeof(v));
-        g.a11yTree = v != 0;
-        for (auto& b : g_all) ApplyAccessibility(b);
-        ShowNotice(g.a11yTree ? L"SCREEN READER ACCESSIBILITY ON" : L"SCREEN READER ACCESSIBILITY OFF");
-    } else if (key == L"reducedMotion") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"ReducedMotion", REG_DWORD, &v, sizeof(v));
-        g.reducedMotion = v != 0;
-        BroadcastThemeAccent();
-        for (auto& t : g.tabs) if (t->browser && !t->discarded) { ApplyReducedMotion(t->browser); ApplyScan(t->browser); }
-        ShowNotice(g.reducedMotion.load() ? L"REDUCED MOTION ON" : L"REDUCED MOTION OFF");
-    } else if (key == L"highContrast") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"HighContrast", REG_DWORD, &v, sizeof(v));
-        g.highContrast = v != 0;
-        BroadcastThemeAccent();
-        for (auto& t : g.tabs) if (t->browser && !t->discarded) ApplyScan(t->browser);
-        ShowNotice(g.highContrast.load() ? L"HIGH CONTRAST THEME ON" : L"HIGH CONTRAST THEME OFF");
-    } else if (key == L"minFontSize") {
-        int px = _wtoi(val.c_str());
-        if (px < 0 || px > 24) px = 0;
-        DWORD v = (DWORD)px;
-        RegSetBin(L"MinFontSize", REG_DWORD, &v, sizeof(v));
-        g.minFontSize = px;
-        ShowNotice(px > 0 ? (L"MINIMUM FONT SIZE: " + std::to_wstring(px) + L" PX (NEW TABS)") : L"MINIMUM FONT SIZE: DEFAULT");
-    } else if (key == L"blockAds") {
-        if ((val == L"1") != g.blockAds.load()) ExecCmd(CMD_BLOCKADS);
-    } else if (key == L"blockTrackers") {
-        if ((val == L"1") != g.blockTrackers.load()) ExecCmd(CMD_BLOCKTRACKERS);
-    } else if (key == L"stripTracking") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"StripTracking", REG_DWORD, &v, sizeof(v));
-        g.stripTracking = v != 0;
-        ShowNotice(g.stripTracking.load() ? L"URL TRACKING STRIPPER ON" : L"URL TRACKING STRIPPER OFF");
-    } else if (key == L"block3pCookies") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"Block3pCookies", REG_DWORD, &v, sizeof(v));
-        g.block3pCookies = v != 0;
-        ApplyCookiePrefs();
-        ShowNotice(g.block3pCookies.load() ? L"BLOCK 3RD-PARTY COOKIES ON" : L"BLOCK 3RD-PARTY COOKIES OFF");
-    } else if (key == L"strictReferrer") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"StrictReferrer", REG_DWORD, &v, sizeof(v));
-        g.strictReferrer = v != 0;
-        ShowNotice(g.strictReferrer.load() ? L"STRICT CROSS-SITE REFERRER ON" : L"STRICT CROSS-SITE REFERRER OFF");
     } else if (key == L"cookie3pExemptAdd") {
         std::string h = Utf8(val);
         size_t p = h.find("://"); if (p != std::string::npos) h.erase(0, p + 3);
@@ -8935,18 +8833,6 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         for (const auto& s : removed) ApplyCookie3pException(s, false);
         g.lastStateJson.clear();
         SendState();
-    } else if (key == L"lang") {
-        bool isId = (val == L"id");
-        std::wstring lv = isId ? L"id" : L"en";
-        if (!g.incognito) RegSetBin(L"Language", REG_SZ, lv.c_str(), (DWORD)((lv.size() + 1) * sizeof(wchar_t)));
-        g.langId = isId ? 1 : 0;
-        BroadcastThemeAccent();
-        ShowNotice(isId ? L"BAHASA: INDONESIA" : L"LANGUAGE: ENGLISH");
-    } else if (key == L"welcomeDismissed") {
-        DWORD v = val == L"1" ? 1 : 0;
-        if (!g.incognito) RegSetBin(L"WelcomeDismissed", REG_DWORD, &v, sizeof(v));
-        g.welcomeDismissed = v != 0;
-        SendState();
     } else if (key == L"adsExemptDel" || key == L"trackersExemptDel") {
         {
             std::lock_guard<std::mutex> lk(g_blockMu);
@@ -8964,40 +8850,6 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         SaveDarkExempt();
         for (auto& t : g.tabs) if (t->browser && !t->discarded) ApplyForceDark(t->browser);
         SendState();
-    } else if (key == L"ramLimitMB") {
-        SetRamLimit((DWORD)_wtoi(val.c_str()));
-        PushPerf();
-    } else if (key == L"bgLimit") {
-        SetBgLimit(val == L"1");
-        PushPerf();
-    } else if (key == L"batterySaver") {
-        SetBatterySaver(val == L"1");
-        PushPerf();
-    } else if (key == L"batteryAuto") {
-        SetBatteryAuto(val == L"1");
-        PushPerf();
-    } else if (key == L"netLimitKB") {
-        SetNetLimit((DWORD)_wtoi(val.c_str()));
-        PushPerf();
-    } else if (key == L"netLimitAll") {
-        SetNetAll(val == L"1");
-        PushPerf();
-    } else if (key == L"dockDefault") {
-        DWORD v = (DWORD)std::max(0, std::min(2, _wtoi(val.c_str())));
-        RegSetBin(L"DockDefault", REG_DWORD, &v, sizeof(v));
-        SelectDockApp((int)v);
-    } else if (key == L"dockWidth") {
-        DWORD v = (DWORD)std::max(300, std::min(900, _wtoi(val.c_str())));
-        RegSetBin(L"DockWidth", REG_DWORD, &v, sizeof(v));
-        g.dockWidthDip = (int)v;
-        Layout();
-    } else if (key == L"readerTheme") {
-        RegSetBin(L"ReaderTheme", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
-    } else if (key == L"readerFont") {
-        RegSetBin(L"ReaderFont", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
-    } else if (key == L"readerSize") {
-        DWORD v = (DWORD)std::max(14, std::min(28, _wtoi(val.c_str())));
-        RegSetBin(L"ReaderSize", REG_DWORD, &v, sizeof(v));
     } else if (key == L"proceed") {
         // "cert|<url>" or "http|<url>" from the warning page. Only what NeonNet itself warned about
         // counts, so a web page that links to the warning page cannot open an exception.
@@ -9008,84 +8860,6 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
             if (cert) g.certAllow.insert(key2); else g.httpAllow.insert(key2);
             // the page that sent this stays on screen until it navigates itself
         }
-    } else if (key == L"favicons") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"ShowFavicons", REG_DWORD, &v, sizeof(v));
-        g.favicons = v != 0;
-        SendState();
-    } else if (key == L"bookmarksBar") {
-        if ((val == L"1") != g.bookmarksBar) ExecCmd(CMD_BOOKMARKS_BAR);
-    } else if (key == L"restoreSession") {
-        DWORD v = val == L"1" ? 1 : 0;
-        RegSetBin(L"RestoreSession", REG_DWORD, &v, sizeof(v));
-    } else if (key == L"home") {
-        if (val.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, L"HomePage");
-        else RegSetBin(L"HomePage", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
-    } else if (key == L"dohMode") {
-        g.dohMode = val;
-        RegSetBin(L"DohMode", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
-        ApplyDohPrefs();
-    } else if (key == L"dohProvider") {
-        g.dohProvider = val;
-        RegSetBin(L"DohProvider", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
-        ApplyDohPrefs();
-    } else if (key == L"dohCustom") {
-        g.dohCustom = val;
-        if (val.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, L"DohCustom");
-        else RegSetBin(L"DohCustom", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
-        ApplyDohPrefs();
-    } else if (key == L"accentPreset") {
-        bool ok = false;
-        COLORREF pCol = C_PINK, cCol = C_CYAN;
-        std::wstring nPink, nCyan;
-        for (int i = 0; i < THEME_PRESET_COUNT; i++) {
-            if (val == THEME_PRESETS[i].id) {
-                nPink = THEME_PRESETS[i].pink;
-                nCyan = THEME_PRESETS[i].cyan;
-                pCol = THEME_PRESETS[i].pinkCol;
-                cCol = THEME_PRESETS[i].cyanCol;
-                ok = true;
-                break;
-            }
-        }
-        if (ok) {
-            {
-                std::lock_guard<std::mutex> lk(g_themeMu);
-                g_themePreset = val; g_themePink = nPink; g_themeCyan = nCyan;
-                g_accentCol = (DWORD)pCol; g_cyanCol = (DWORD)cCol;
-            }
-            if (!g.incognito) {
-                RegSetBin(L"AccentPreset", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
-                RegSetBin(L"AccentPink", REG_SZ, nPink.c_str(), (DWORD)((nPink.size() + 1) * sizeof(wchar_t)));
-                RegSetBin(L"AccentCyan", REG_SZ, nCyan.c_str(), (DWORD)((nCyan.size() + 1) * sizeof(wchar_t)));
-            }
-            BroadcastThemeAccent();
-        } else if (val == L"custom") {
-            { std::lock_guard<std::mutex> lk(g_themeMu); g_themePreset = L"custom"; }
-            if (!g.incognito) RegSetBin(L"AccentPreset", REG_SZ, val.c_str(), (DWORD)((val.size() + 1) * sizeof(wchar_t)));
-            BroadcastThemeAccent();
-        }
-    } else if (key == L"accentPink" || key == L"accentCyan") {
-        COLORREF col; std::wstring norm;
-        if (ParseHexColor(val, col, norm)) {
-            {
-                std::lock_guard<std::mutex> lk(g_themeMu);
-                g_themePreset = L"custom";
-                if (key == L"accentPink") { g_themePink = norm; g_accentCol = (DWORD)col; }
-                else { g_themeCyan = norm; g_cyanCol = (DWORD)col; }
-            }
-            if (!g.incognito) {
-                const wchar_t* cp = L"custom";
-                RegSetBin(L"AccentPreset", REG_SZ, cp, (DWORD)((wcslen(cp) + 1) * sizeof(wchar_t)));
-                RegSetBin(key == L"accentPink" ? L"AccentPink" : L"AccentCyan", REG_SZ, norm.c_str(), (DWORD)((norm.size() + 1) * sizeof(wchar_t)));
-            }
-            BroadcastThemeAccent();
-        }
-    } else if (key == L"lightMode") {
-        DWORD v = val == L"1" ? 1 : 0;
-        g.lightMode = (v != 0);
-        if (!g.incognito) RegSetBin(L"LightMode", REG_DWORD, &v, sizeof(v));
-        BroadcastThemeAccent();
     }
 }
 
@@ -10362,6 +10136,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     if (g.incognito ? incogOwner : firstInstance) {
         std::thread([] { PrefetchCefRuntime(); }).detach();
     }
+    LoadSettings();
     if (g.incognito) {
         std::wstring dataRoot = KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME;
         store::LoadBookmarksReadOnly(dataRoot);
@@ -10375,61 +10150,14 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
         DownloadBaseDir(true);
     }
     EnableDarkMenus();
-    g.scan = RegGetDword(L"Scanlines", 1) != 0;
-    g.favicons = RegGetDword(L"ShowFavicons", 1) != 0;
-    g.bookmarksBar = RegGetDword(L"BookmarksBar", 1) != 0;
-    g.httpsOnly = RegGetDword(L"HttpsOnly", 0) != 0;
-    g.stripTracking = RegGetDword(L"StripTracking", 1) != 0;
-    g.block3pCookies = RegGetDword(L"Block3pCookies", 0) != 0;
-    g.strictReferrer = RegGetDword(L"StrictReferrer", 0) != 0;
-    g.savePasswords = RegGetDword(L"SavePasswords", 1) != 0;
-    g.smooth = RegGetDword(L"SmoothScroll", 1) != 0;
-    g.forceDark = RegGetDword(L"ForceDark", 0) != 0;
-    g.a11yTree = RegGetDword(L"Accessibility", 0) != 0;
-    { DWORD rm = RegGetDword(L"ReducedMotion", 2); g.reducedMotion = (rm == 2) ? SystemReducedMotion() : (rm != 0); }
-    {
-        DWORD hcReg = RegGetDword(L"HighContrast", 2);
-        if (hcReg == 2) {
-            HIGHCONTRASTW hc{ sizeof(hc) };
-            g.highContrast = SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0) && (hc.dwFlags & HCF_HIGHCONTRASTON);
-        } else {
-            g.highContrast = hcReg != 0;
-        }
-    }
-    { DWORD mf = RegGetDword(L"MinFontSize", 0); g.minFontSize = (mf >= 10 && mf <= 24) ? (int)mf : 0; }
-    g.lightMode = RegGetDword(L"LightMode", 0) != 0;
-    g.langId = (RegGetString(L"Language") == L"id") ? 1 : 0;
-    g.welcomeDismissed = RegGetDword(L"WelcomeDismissed", 0) != 0;
-    { DWORD d = RegGetDword(L"DevToolsDock", 0); g.devDock = d <= 3 ? (int)d : 0; }
-    { DWORD s = RegGetDword(L"SmoothStep", 120), t = RegGetDword(L"SmoothTime", 400); g.smoothStep = (s >= 40 && s <= 400) ? (int)s : 120; g.smoothTime = (t >= 100 && t <= 1500) ? (int)t : 400; }
-    g.netSpeed = RegGetDword(L"NetSpeed", 1) != 0;
     if (!g.incognito) PwLoad();
-    ThemeLoad();
     KeybindsLoad();
     NewTabLoad();
     EnginesLoad();
     ProxyLoad();
     SpLoad();
-    g.blockAds = RegGetDword(L"BlockAds", 1) != 0;
-    g.blockTrackers = RegGetDword(L"BlockTrackers", 1) != 0;
     LoadShieldExempt();
     if (g.blockAds || g.blockTrackers) LoadBlocklistAsync();
-    { DWORD r = RegGetDword(L"RamLimitMB", 0); g.ramLimitMB = (r >= 512 && r <= 65536) ? r : 0; }
-    g.bgLimit = RegGetDword(L"BgLimit", 0) != 0;
-    g.batterySaver = RegGetDword(L"BatterySaver", 0) != 0;
-    g.batteryAuto = RegGetDword(L"BatteryAuto", 0) != 0;
-    { DWORD dw = RegGetDword(L"DockWidth", 500); g.dockWidthDip = (dw >= 300 && dw <= 900) ? (int)dw : 500; }
-    { DWORD dd = RegGetDword(L"DockDefault", 0); g.dockActive = (dd <= 2) ? (int)dd : 0; }
-    { DWORD n = RegGetDword(L"NetLimitKB", 0); g.netLimitKB = (n >= 64 && n <= 102400) ? n : 0; }
-    g.netLimitAll = RegGetDword(L"NetLimitAll", 0) != 0;
-    {
-        std::wstring dm = RegGetString(L"DohMode");
-        if (dm == L"off" || dm == L"automatic" || dm == L"secure") g.dohMode = dm;
-        std::wstring dp = RegGetString(L"DohProvider");
-        for (int i = 0; i < DOH_PROVIDER_COUNT; i++) if (dp == DOH_PROVIDERS[i].id) g.dohProvider = dp;
-        std::wstring dc = RegGetString(L"DohCustom");
-        if (ValidDohCustomUrl(dc)) g.dohCustom = dc;
-    }
 
     WNDCLASSEXW wc{ sizeof(wc) };
     wc.lpfnWndProc = WndProc;
