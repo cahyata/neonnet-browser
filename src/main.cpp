@@ -52,6 +52,7 @@
 #include "json.h"
 #include "presets.h"
 #include "settings.h"
+#include "sites.h"
 #include "updater.h"
 #include "store.h"
 #include "perf.h"
@@ -239,8 +240,6 @@ struct App {
     perf::Snapshot perfSnap;
     unsigned long long perfTotal = 0, perfBrowser = 0;   // bytes: all processes, the browser process alone
     double perfCpu = 0;
-    std::set<std::wstring> keepHosts;   // sites whose tabs never go to sleep on their own (registry KeepAwakeHosts)
-    std::set<std::wstring> darkExempt;  // hosts excluded from Force Dark Mode (registry ForceDarkExempt); the UI thread writes it under g_blockMu, because the IO thread lists it
     int sleepBlocked = 0;          // background tabs the RAM limiter would have slept but must not (audio, typing, kept awake)
     int autoUnloaded = 0;          // tabs unloaded by the RAM limiter since NeonNet started
     ULONGLONG lastLimitAct = 0;
@@ -316,6 +315,10 @@ struct App {
 };
 static App g;
 using Setting = settings::Id;
+using sites::HostFromAuthority;
+using sites::OriginOf;
+using sites::SiteOf;
+using sites::SplitUrl;
 static bool On(Setting id) { return settings::Flag(id); }
 static bool Indonesian() { return settings::Text(Setting::Lang) == L"id"; }
 static std::mutex g_updMu;
@@ -543,7 +546,7 @@ static void LaunchIncognito(const std::wstring& url);
 static void ApplyBackgroundLimit();   // performance panel, below
 static void ApplyNetworkLimit();
 static void PushPerf();
-static std::wstring HostOf(Tab* t);
+static std::wstring KeptName(Tab* t);
 static const wchar_t* SleepProtection(Tab* t);
 static std::wstring TempMediaPath(const std::wstring& name, const std::wstring& mime);
 static void OpenTempMedia(const std::wstring& path);
@@ -1188,14 +1191,20 @@ static void ApplyScan(CefRefPtr<CefBrowser> b) {
     if (b) b->GetMainFrame()->ExecuteJavaScript(ScanScript(On(Setting::Scanlines) && !On(Setting::ReducedMotion) && !On(Setting::HighContrast)), b->GetMainFrame()->GetURL(), 0);
 }
 
-static std::wstring DarkHostOf(const std::wstring& url);
-static bool IsDarkExempt(const std::wstring& url);
+// The host of a web page, which can have site exceptions. Empty for anything else, NeonNet's own
+// pages included.
+static std::string WebHost(const std::wstring& url) {
+    if (url.rfind(L"http://", 0) != 0 && url.rfind(L"https://", 0) != 0) return {};
+    if (url.rfind(UI_HOST, 0) == 0 || url.rfind(CHROME_UI_HOST, 0) == 0) return {};
+    std::string host = Utf8(sites::HostOf(url));
+    return host == "neonnet.ui" || host == "www.neonnet.ui" ? std::string() : host;
+}
 
 static void ApplyForceDark(CefRefPtr<CefBrowser> b, const std::wstring& knownUrl = L"") {
     if (!b) return;
     std::wstring url = !knownUrl.empty() ? knownUrl : (b->GetMainFrame() ? b->GetMainFrame()->GetURL().ToWString() : L"");
     bool isUi = url.rfind(UI_HOST, 0) == 0 || url.rfind(L"https://chrome.neonnet.ui/", 0) == 0;
-    bool exempt = IsDarkExempt(url);
+    bool exempt = sites::Excepted(sites::List::ForceDark, WebHost(url));
     CefRefPtr<CefDictionaryValue> p = CefDictionaryValue::Create();
     if (On(Setting::ForceDark) && !isUi && !exempt) p->SetBool("enabled", true);
     b->GetHost()->ExecuteDevToolsMethod(0, "Emulation.setAutoDarkModeOverride", p);
@@ -1224,45 +1233,6 @@ static std::wstring ErrorText(int code) {
     }
 }
 
-// The host in "user@host:port", "[v6]:port" or a bare IPv6 address: lower case, without brackets.
-static std::string HostFromAuthority(std::string a) {
-    size_t at = a.rfind('@'); if (at != std::string::npos) a.erase(0, at + 1);
-    if (!a.empty() && a[0] == '[') {
-        size_t e = a.find(']');
-        a = e == std::string::npos ? std::string() : a.substr(1, e - 1);
-    } else {
-        // two or more colons without brackets are an IPv6 address, not a port
-        size_t colon = a.find(':');
-        if (colon != std::string::npos && a.find(':', colon + 1) == std::string::npos) a.resize(colon);
-    }
-    for (auto& c : a) c = (char)tolower((unsigned char)c);
-    return a;
-}
-
-// scheme, lower-case host (without brackets or user name) and port of an address; port 0 = none given
-static void SplitUrl(const std::wstring& u, std::wstring& scheme, std::wstring& host, int& port) {
-    scheme.clear(); host.clear(); port = 0;
-    size_t s = u.find(L"://");
-    if (s == std::wstring::npos) return;
-    scheme = u.substr(0, s);
-    for (auto& c : scheme) c = (wchar_t)towlower(c);
-    std::wstring a = u.substr(s + 3);
-    a = a.substr(0, a.find_first_of(L"/?#"));
-    size_t at = a.rfind(L'@');
-    if (at != std::wstring::npos) a = a.substr(at + 1);
-    if (!a.empty() && a[0] == L'[') {
-        size_t e = a.find(L']');
-        if (e == std::wstring::npos) return;
-        host = a.substr(1, e - 1);
-        if (e + 1 < a.size() && a[e + 1] == L':') port = _wtoi(a.c_str() + e + 2);
-    } else {
-        size_t c = a.rfind(L':');
-        if (c != std::wstring::npos) { port = _wtoi(a.c_str() + c + 1); a.resize(c); }
-        host = a;
-    }
-    for (auto& c : host) c = (wchar_t)towlower(c);
-}
-
 // "host:port" with the default port filled in: what a certificate exception is kept under
 static std::wstring HostPortKey(const std::wstring& u) {
     std::wstring sc, h; int p;
@@ -1270,8 +1240,6 @@ static std::wstring HostPortKey(const std::wstring& u) {
     if (!p) p = sc == L"http" ? 80 : 443;
     return h + L":" + std::to_wstring(p);
 }
-static std::wstring HostOnly(const std::wstring& u) { std::wstring sc, h; int p; SplitUrl(u, sc, h, p); return h; }
-
 // Addresses HTTPS-only mode leaves alone: this computer, the local network and anything that is
 // not a registered name (address literals and single-word names cannot have a certificate).
 static bool HttpsExempt(const std::wstring& h) {
@@ -1326,16 +1294,6 @@ static std::mutex g_pwMu;                 // the settings page reads the list on
 static std::vector<PwEntry> g_pw;
 static std::set<std::wstring> g_pwNever;
 static int g_pwNextId = 1;
-
-// scheme://host[:port], the unit a saved login belongs to
-static std::wstring OriginOf(const std::wstring& u) {
-    std::wstring sc, h; int p;
-    SplitUrl(u, sc, h, p);
-    if (sc.empty() || h.empty()) return L"";
-    std::wstring o = sc + L"://" + (h.find(L':') != std::wstring::npos ? L"[" + h + L"]" : h);
-    if (p && !((sc == L"http" && p == 80) || (sc == L"https" && p == 443))) o += L":" + std::to_wstring(p);
-    return o;
-}
 
 static std::wstring PwPath() { return KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME + L"\\passwords.dat"; }
 
@@ -2835,8 +2793,8 @@ static std::wstring SiteJson(const std::wstring& url) {
                      L",\"warn\":" + (!internal && sc == L"https" && g.certAllow.count(HostPortKey(url)) ? L"true" : L"false");
     if (!internal) {
         j += L",\"perms\":" + SpPermsJson(origin);
-        j += L",\"darkHost\":" + JsonStr(DarkHostOf(url));
-        j += L",\"darkExempt\":" + std::wstring(IsDarkExempt(url) ? L"true" : L"false");
+        j += L",\"darkHost\":" + JsonStr(Wide(sites::EntryFor(sites::List::ForceDark, WebHost(url))));
+        j += L",\"darkExempt\":" + std::wstring(sites::Excepted(sites::List::ForceDark, WebHost(url)) ? L"true" : L"false");
     }
     return j + L"}";
 }
@@ -3560,28 +3518,6 @@ static void LoadBlocklistAsync() {
     std::thread([] { LoadBlocklist(); }).detach();
 }
 
-// The part of a host name a site is known by: example.com, or example.co.uk for the common two-part endings.
-static std::string_view SiteOf(std::string_view host) {
-    // an IP address has no parent: it is a site of its own
-    if (host.find(':') != std::string_view::npos || host.find_first_not_of("0123456789.") == std::string_view::npos) return host;
-    size_t d1 = host.rfind('.');
-    if (d1 == std::string_view::npos || d1 == 0) return host;
-    size_t d2 = host.rfind('.', d1 - 1);
-    if (d2 == std::string_view::npos) return host;
-    static const std::string_view second[] = { "co", "com", "net", "org", "gov", "edu", "ac", "or", "go" };
-    std::string_view tld = host.substr(d1 + 1);
-    std::string_view sld = host.substr(d2 + 1, d1 - d2 - 1);
-    bool two = tld.size() == 2;
-    bool isSecond = false;
-    for (auto x : second) if (sld == x) { isSecond = true; break; }
-    if (two && isSecond) {
-        if (d2 == 0) return host;
-        size_t d3 = host.rfind('.', d2 - 1);
-        return d3 == std::string_view::npos ? host : host.substr(d3 + 1);
-    }
-    return host.substr(d2 + 1);
-}
-
 static bool IsBlockedHost(std::string_view host) {
     if (!g_blocklistReady.load(std::memory_order_acquire)) return false;
     for (size_t s = 0; s < host.size();) {
@@ -3600,7 +3536,6 @@ struct TabBlockStats {
     std::vector<std::string> adHosts;
 };
 static std::mutex g_blockMu;
-static std::set<std::string> g_adsExempt, g_trackersExempt, g_cookie3pExempt;
 static std::map<int, TabBlockStats> g_tabBlocks;
 
 static bool IsTrackerHost(std::string_view h) {
@@ -3618,48 +3553,10 @@ static bool IsTrackerHost(std::string_view h) {
     return false;
 }
 
-static void SaveShieldExempt() {
-    if (g.incognito) return;   // an incognito window keeps its exceptions in memory: they name the sites visited
-    auto save = [](const wchar_t* name, const std::set<std::string>& st) {
-        std::wstring s;
-        for (const auto& h : st) { if (!s.empty()) s += L';'; s += Wide(h); }
-        if (s.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, name);
-        else RegSetBin(name, REG_SZ, s.c_str(), (DWORD)((s.size() + 1) * sizeof(wchar_t)));
-    };
-    std::lock_guard<std::mutex> lk(g_blockMu);
-    save(L"AdsExemptHosts", g_adsExempt);
-    save(L"TrackersExemptHosts", g_trackersExempt);
-    save(L"Cookie3pExemptHosts", g_cookie3pExempt);
-}
-
-static void LoadShieldExempt() {
-    auto load = [](const wchar_t* name, std::set<std::string>& st) {
-        st.clear();
-        std::string s = Utf8(RegGetString(name));
-        size_t i = 0;
-        while (i < s.size()) {
-            size_t e = s.find(';', i); if (e == std::string::npos) e = s.size();
-            std::string h = s.substr(i, e - i);
-            if (!h.empty() && h.size() < 256) st.insert(h);
-            i = e + 1;
-        }
-    };
-    std::lock_guard<std::mutex> lk(g_blockMu);
-    load(L"AdsExemptHosts", g_adsExempt);
-    load(L"TrackersExemptHosts", g_trackersExempt);
-    load(L"Cookie3pExemptHosts", g_cookie3pExempt);
-}
-
 static std::string ActiveShieldSiteUtf8(Tab* a) {
     if (!a) return {};
-    std::wstring u = DisplayUrl(a);
-    if (u.rfind(L"http://", 0) != 0 && u.rfind(L"https://", 0) != 0) return {};
-    if (u.rfind(UI_HOST, 0) == 0 || u.rfind(CHROME_UI_HOST, 0) == 0) return {};
-    std::wstring sc, h; int p;
-    SplitUrl(u, sc, h, p);
-    for (auto& c : h) c = (char)towlower(c);
-    std::string utf = Utf8(h);
-    return std::string(SiteOf(utf));
+    const std::string host = WebHost(DisplayUrl(a));
+    return std::string(SiteOf(host));
 }
 
 static std::wstring ShieldJsonForTab(Tab* a) {
@@ -3668,12 +3565,10 @@ static std::wstring ShieldJsonForTab(Tab* a) {
     bool adsEx = false, trkEx = false;
     int ads = 0, trk = 0;
     std::vector<std::string> trkList;
+    adsEx = sites::Excepted(sites::List::Ads, site);
+    trkEx = sites::Excepted(sites::List::Trackers, site);
     {
         std::lock_guard<std::mutex> lk(g_blockMu);
-        if (!site.empty()) {
-            adsEx = g_adsExempt.count(site) > 0;
-            trkEx = g_trackersExempt.count(site) > 0;
-        }
         if (bid) {
             auto it = g_tabBlocks.find(bid);
             if (it != g_tabBlocks.end()) {
@@ -3815,7 +3710,7 @@ static std::wstring StripTrackingParams(const std::wstring& url, int* removedOut
     std::wstring frag = (hash == std::wstring::npos) ? L"" : url.substr(hash);
     if (query.empty()) return url;
 
-    std::wstring host = HostOnly(url);
+    std::wstring host = sites::HostOf(url);
     for (auto& c : host) c = (wchar_t)towlower(c);
 
     std::wstring kept;
@@ -3841,14 +3736,6 @@ static std::wstring StripTrackingParams(const std::wstring& url, int* removedOut
     if (removedOut) *removedOut = removed;
     if (removed == 0) return url;
     return base + (kept.empty() ? L"" : (L"?" + kept)) + frag;
-}
-
-static bool IsTrackerExemptHost(const std::wstring& host) {
-    std::string h = Utf8(host);
-    for (auto& c : h) c = (char)tolower((unsigned char)c);
-    std::string site(SiteOf(h));   // exceptions are stored by site, so they cover its subdomains too
-    std::lock_guard<std::mutex> lk(g_blockMu);
-    return g_trackersExempt.count(site) > 0;
 }
 
 static void CopyTextToClipboard(const std::wstring& text) {
@@ -3978,7 +3865,7 @@ public:
         if (browser && browser->GetMainFrame()) {
             std::wstring openerOrigin = OriginOf(browser->GetMainFrame()->GetURL().ToWString());
             if (!openerOrigin.empty() && SpGet(openerOrigin, L"popups") == 2) {
-                std::wstring h = HostOnly(openerOrigin);
+                std::wstring h = sites::HostOf(openerOrigin);
                 for (auto& c : h) c = (wchar_t)towupper(c);
                 ShowNotice(L"POP-UP BLOCKED: " + h);
                 return true;
@@ -4164,10 +4051,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
     if (!frame || !On(Setting::BlockAds)) return;
     std::wstring url = frame->GetURL().ToWString();
     if (url.rfind(L"https://www.youtube.com/", 0) != 0 && url.rfind(L"https://m.youtube.com/", 0) != 0) return;
-    {
-        std::lock_guard<std::mutex> lk(g_blockMu);
-        if (g_adsExempt.count("youtube.com") > 0) return;
-    }
+    if (sites::Excepted(sites::List::Ads, "youtube.com")) return;
     static std::wstring ytJs;
     if (ytJs.empty()) {
         std::string raw;
@@ -4195,7 +4079,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
         if (!t->upgradedTo.empty() && HostPortKey(url) == HostPortKey(t->upgradedTo)) {
             // HTTPS-only mode: the secure address did not work, so ask before using plain http
             shown = t->upgradedFrom;
-            g.warned.insert(L"http|" + HostOnly(shown));
+            g.warned.insert(L"http|" + sites::HostOf(shown));
             page = WarningPageUrl(L"https", shown, (int)errorCode);
             t->upgradedFrom.clear(); t->upgradedTo.clear();
         } else if (IsCertError((int)errorCode)) {
@@ -4257,10 +4141,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
                         if (!pHost.empty()) pSite = std::string(SiteOf(pHost));
                     }
                     bool exempt = (!pSite.empty() && pSite == SiteOf(reqHost));
-                    if (!exempt && !pSite.empty()) {
-                        std::lock_guard<std::mutex> lk(g_blockMu);
-                        exempt = (isTrk ? g_trackersExempt.count(pSite) : g_adsExempt.count(pSite)) > 0;
-                    }
+                    if (!exempt) exempt = sites::Excepted(isTrk ? sites::List::Trackers : sites::List::Ads, pSite);
                     if (!exempt) return new BlockHandler(isTrk, std::move(reqHost));
                 }
             }
@@ -4289,8 +4170,8 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
         std::wstring url = request->GetURL().ToWString();
         if (On(Setting::StripTracking) && t && request->GetMethod() == "GET" &&
             (url.rfind(L"http://", 0) == 0 || url.rfind(L"https://", 0) == 0)) {
-            std::wstring host = HostOnly(url);
-            if (!IsTrackerExemptHost(host)) {
+            std::wstring host = sites::HostOf(url);
+            if (!sites::Excepted(sites::List::Trackers, Utf8(host))) {
                 int removed = 0;
                 std::wstring cleaned = StripTrackingParams(url, &removed);
                 if (removed > 0 && cleaned != url) {
@@ -4302,7 +4183,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
         }
         if (t && !t->upgradedTo.empty() && url != t->upgradedTo) { t->upgradedFrom.clear(); t->upgradedTo.clear(); }   // another page
         if (!On(Setting::HttpsOnly) || !t || url.rfind(L"http://", 0) != 0 || request->GetMethod() != "GET") return false;
-        std::wstring host = HostOnly(url);
+        std::wstring host = sites::HostOf(url);
         if (HttpsExempt(host) || g.httpAllow.count(host)) return false;
         // upgrade: try the same address over https, and keep the original for the warning page
         t->upgradedFrom = url;
@@ -4884,25 +4765,15 @@ static std::string SettingsJson() {
         o += "{\"id\":" + JsonUtf8(THEME_PRESETS[i].id) + ",\"name\":" + JsonUtf8(THEME_PRESETS[i].name) +
              ",\"pink\":" + JsonUtf8(THEME_PRESETS[i].pink) + ",\"cyan\":" + JsonUtf8(THEME_PRESETS[i].cyan) + "}";
     }
-    o += "],\"adsExempt\":[";
-    {
-        std::lock_guard<std::mutex> lk(g_blockMu);
+    auto exceptions = [&](const char* name, sites::List list) {
+        o += std::string("],\"") + name + "\":[";
         bool first = true;
-        for (const auto& h : g_adsExempt) { if (!first) o += ","; first = false; o += JsonUtf8(Wide(h)); }
-        o += "],\"trackersExempt\":[";
-        first = true;
-        for (const auto& h : g_trackersExempt) { if (!first) o += ","; first = false; o += JsonUtf8(Wide(h)); }
-        o += "],\"cookie3pExempt\":[";
-        first = true;
-        for (const auto& h : g_cookie3pExempt) { if (!first) o += ","; first = false; o += JsonUtf8(Wide(h)); }
-    }
-    o += "],\"darkExempt\":[";
-    {
-        // the list in memory, not the registry: an incognito window changes it without saving
-        std::lock_guard<std::mutex> lk(g_blockMu);
-        bool first = true;
-        for (const auto& h : g.darkExempt) { if (!first) o += ","; first = false; o += JsonUtf8(h); }
-    }
+        for (const auto& h : sites::Entries(list)) { if (!first) o += ","; first = false; o += JsonUtf8(h); }
+    };
+    exceptions("adsExempt", sites::List::Ads);
+    exceptions("trackersExempt", sites::List::Trackers);
+    exceptions("cookie3pExempt", sites::List::ThirdPartyCookies);
+    exceptions("darkExempt", sites::List::ForceDark);
     o += "],\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
     return o;
@@ -5750,12 +5621,12 @@ static void PushPerf() {
              L",\"shared\":" + (t->pid && users[t->pid] > 1 ? L"true" : L"false") +
              L",\"audible\":" + (t->audible ? L"true" : L"false") + L",\"muted\":" + (t->muted ? L"true" : L"false") +
              L",\"form\":" + (t->dirty ? L"true" : L"false") +
-             L",\"kept\":" + (!HostOf(t).empty() && g.keepHosts.count(HostOf(t)) ? L"true" : L"false") +
-             L",\"site\":" + JsonStr(HostOf(t)) + L"}";
+             L",\"kept\":" + (sites::Excepted(sites::List::KeepAwake, WebHost(DisplayUrl(t))) ? L"true" : L"false") +
+             L",\"site\":" + JsonStr(KeptName(t)) + L"}";
     }
     j += L"],\"blocked\":" + std::to_wstring(g.sleepBlocked) + L",\"keep\":[";
     bool firstKeep = true;
-    for (const auto& h : g.keepHosts) { if (!firstKeep) j += L","; firstKeep = false; j += JsonStr(h); }
+    for (const auto& h : sites::Entries(sites::List::KeepAwake)) { if (!firstKeep) j += L","; firstKeep = false; j += JsonStr(h); }
     j += L"]}";
     g.panel->GetMainFrame()->ExecuteJavaScript(L"window.nnPerf&&window.nnPerf(" + j + L")", PANEL_UI, 0);
 }
@@ -5824,106 +5695,30 @@ static bool UnloadTab(int id) {
     return true;
 }
 
-// The site of a tab for the keep-awake list: host without "www.", lower case; empty for NeonNet's own pages.
-static std::wstring HostOf(Tab* t) {
-    std::wstring u = DisplayUrl(t);
-    if (u.rfind(L"http://", 0) != 0 && u.rfind(L"https://", 0) != 0) return {};
-    if (u.rfind(UI_HOST, 0) == 0 || u.rfind(CHROME_UI_HOST, 0) == 0) return {};
-    std::wstring sc, h; int p;
-    SplitUrl(u, sc, h, p);
-    if (h.rfind(L"www.", 0) == 0) h.erase(0, 4);
-    return h;
-}
+// The name a tab's site goes by in the keep-awake list; empty when it cannot be on it.
+static std::wstring KeptName(Tab* t) { return Wide(sites::EntryFor(sites::List::KeepAwake, WebHost(DisplayUrl(t)))); }
 
 // Why a background tab must not go to sleep on its own, or null: sound, typed text, a site kept awake.
 // (The selected and the loading tab are handled by the callers.)
 static const wchar_t* SleepProtection(Tab* t) {
     if (GetTickCount64() < t->audioUntil) return L"audio";
     if (t->dirty) return L"form";
-    std::wstring h = HostOf(t);
-    if (!h.empty() && g.keepHosts.count(h)) return L"kept";
+    if (sites::Excepted(sites::List::KeepAwake, WebHost(DisplayUrl(t)))) return L"kept";
     return nullptr;
 }
 
-static void SaveKeepHosts() {
-    if (g.incognito) return;
-    std::wstring s;
-    for (const auto& h : g.keepHosts) { if (!s.empty()) s += L';'; s += h; }
-    if (s.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, L"KeepAwakeHosts");
-    else RegSetBin(L"KeepAwakeHosts", REG_SZ, s.c_str(), (DWORD)((s.size() + 1) * sizeof(wchar_t)));
-}
-
-static void LoadKeepHosts() {
-    std::wstring s = RegGetString(L"KeepAwakeHosts");
-    size_t i = 0;
-    while (i < s.size()) {
-        size_t e = s.find(L';', i); if (e == std::wstring::npos) e = s.size();
-        std::wstring h = s.substr(i, e - i);
-        if (!h.empty() && h.size() < 256) g.keepHosts.insert(h);
-        i = e + 1;
-    }
-}
-
 static void ToggleKeepAwake(int id) {
-    Tab* t = FindTab(id);
-    if (!t) return;
-    std::wstring h = HostOf(t);
-    if (h.empty()) return;
-    if (!g.keepHosts.erase(h)) g.keepHosts.insert(h);
-    SaveKeepHosts();
+    if (Tab* t = FindTab(id)) sites::Toggle(sites::List::KeepAwake, WebHost(DisplayUrl(t)));
 }
 
-static std::wstring DarkHostOf(const std::wstring& url) {
-    if (url.rfind(L"http://", 0) != 0 && url.rfind(L"https://", 0) != 0) return {};
-    if (url.rfind(UI_HOST, 0) == 0 || url.rfind(CHROME_UI_HOST, 0) == 0) return {};
-    std::wstring sc, h; int p;
-    SplitUrl(url, sc, h, p);
-    for (auto& c : h) c = (wchar_t)towlower(c);
-    if (h.rfind(L"www.", 0) == 0) h.erase(0, 4);
-    if (h == L"neonnet.ui") return {};
-    return h;
-}
-static bool IsDarkExempt(const std::wstring& url) {
-    std::wstring h = DarkHostOf(url);
-    return !h.empty() && g.darkExempt.count(h) > 0;
-}
-static void SaveDarkExempt() {
-    if (g.incognito) return;
-    std::wstring s;
-    for (const auto& h : g.darkExempt) { if (!s.empty()) s += L';'; s += h; }
-    if (s.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, L"ForceDarkExempt");
-    else RegSetBin(L"ForceDarkExempt", REG_SZ, s.c_str(), (DWORD)((s.size() + 1) * sizeof(wchar_t)));
-}
-static void LoadDarkExempt() {
-    std::wstring s = RegGetString(L"ForceDarkExempt");
-    std::lock_guard<std::mutex> lk(g_blockMu);
-    g.darkExempt.clear();
-    size_t i = 0;
-    while (i < s.size()) {
-        size_t e = s.find(L';', i); if (e == std::wstring::npos) e = s.size();
-        std::wstring h = s.substr(i, e - i);
-        if (!h.empty() && h.size() < 256) g.darkExempt.insert(h);
-        i = e + 1;
-    }
-}
 static void ToggleDarkExemptForActive() {
     Tab* a = Active();
     if (!a) return;
-    std::wstring h = DarkHostOf(DisplayUrl(a));
-    if (h.empty()) { ShowNotice(L"FORCE DARK EXCEPTION IS FOR WEB SITES ONLY"); return; }
-    bool added = false;
-    {
-        std::lock_guard<std::mutex> lk(g_blockMu);
-        if (!g.darkExempt.erase(h)) { g.darkExempt.insert(h); added = true; }
-    }
-    SaveDarkExempt();
-    for (auto& t : g.tabs) {
-        if (t->browser && !t->discarded && DarkHostOf(DisplayUrl(t.get())) == h) {
-            ApplyForceDark(t->browser);
-        }
-    }
-    SendState();
-    ShowNotice(added ? (L"FORCE DARK: EXCLUDED " + Upper(h)) : (L"FORCE DARK: ENABLED FOR " + Upper(h)));
+    const std::string host = WebHost(DisplayUrl(a));
+    if (host.empty()) { ShowNotice(L"FORCE DARK EXCEPTION IS FOR WEB SITES ONLY"); return; }
+    const bool added = sites::Toggle(sites::List::ForceDark, host);
+    const std::wstring name = Upper(Wide(sites::EntryFor(sites::List::ForceDark, host)));
+    ShowNotice(added ? (L"FORCE DARK: EXCLUDED " + name) : (L"FORCE DARK: ENABLED FOR " + name));
 }
 
 static void ToggleMute(int id) {
@@ -6091,7 +5886,7 @@ static void OnPerfCommand(const std::wstring& cmd, const std::wstring& arg) {
     }
     else if (cmd == L"perf.mute") ToggleMute(id);
     else if (cmd == L"perf.keep") ToggleKeepAwake(id);
-    else if (cmd == L"perf.unkeep") { g.keepHosts.erase(arg); SaveKeepHosts(); }
+    else if (cmd == L"perf.unkeep") sites::Remove(sites::List::KeepAwake, arg);
     else if (cmd == L"perf.ram") settings::Set(Setting::RamLimitMB, arg);
     else if (cmd == L"perf.bg") settings::Set(Setting::BgLimit, arg);
     else if (cmd == L"perf.bat") settings::Set(Setting::BatterySaver, arg);
@@ -6377,8 +6172,8 @@ static void OpenPalette() {
          L",\"canStar\":" + std::wstring(canStar ? L"true" : L"false") +
          L",\"starred\":" + std::wstring(starred ? L"true" : L"false") +
          L",\"forceDark\":" + std::wstring(On(Setting::ForceDark) ? L"true" : L"false") +
-         L",\"darkHost\":" + JsonStr(DarkHostOf(curUrl)) +
-         L",\"darkExempt\":" + std::wstring(IsDarkExempt(curUrl) ? L"true" : L"false") +
+         L",\"darkHost\":" + JsonStr(Wide(sites::EntryFor(sites::List::ForceDark, WebHost(curUrl)))) +
+         L",\"darkExempt\":" + std::wstring(sites::Excepted(sites::List::ForceDark, WebHost(curUrl)) ? L"true" : L"false") +
          L",\"blockAds\":" + std::wstring(On(Setting::BlockAds) ? L"true" : L"false") +
          L",\"proxyOn\":" + std::wstring(proxyOn ? L"true" : L"false") +
          L",\"proxyName\":" + JsonStr(proxyName) +
@@ -7696,15 +7491,8 @@ static void OnChromeCommand(const std::wstring& msg) {
     else if (cmd == L"shield.siteads" || cmd == L"shield.sitetrackers") {
         std::string site = ActiveShieldSiteUtf8(a);
         if (!site.empty()) {
-            {
-                std::lock_guard<std::mutex> lk(g_blockMu);
-                auto& st = (cmd == L"shield.siteads") ? g_adsExempt : g_trackersExempt;
-                if (!st.erase(site)) st.insert(site);
-            }
-            SaveShieldExempt();
-            if (a && a->browser) a->browser->Reload();
-            g.lastStateJson.clear();
-            SendState();
+            sites::Toggle(cmd == L"shield.siteads" ? sites::List::Ads : sites::List::Trackers, site);
+            if (a->browser) a->browser->Reload();
         }
     }
     else if (cmd == L"exec") {
@@ -8140,10 +7928,7 @@ public:
         ApplyDohPrefs();
         ApplyProxyPrefs();
         ApplyCookiePrefs();
-        {
-            std::lock_guard<std::mutex> lk(g_blockMu);
-            for (const auto& s : g_cookie3pExempt) ApplyCookie3pException(s, true);
-        }
+        for (const auto& h : sites::Entries(sites::List::ThirdPartyCookies)) ApplyCookie3pException(Utf8(h), true);
         {
             std::lock_guard<std::mutex> lk(g_spMu);
             for (const auto& s : g_sp) {
@@ -8165,10 +7950,7 @@ public:
             noAutofill(g.reqCtx);
             ApplyProxyPrefs();
             ApplyCookiePrefs();
-            {
-                std::lock_guard<std::mutex> lk(g_blockMu);
-                for (const auto& s : g_cookie3pExempt) ApplyCookie3pException(s, true);
-            }
+            for (const auto& h : sites::Entries(sites::List::ThirdPartyCookies)) ApplyCookie3pException(Utf8(h), true);
             g.reqCtx->RegisterSchemeHandlerFactory("https", "neonnet.ui", new UiSchemeFactory());
             g.reqCtx->RegisterSchemeHandlerFactory("https", "chrome.neonnet.ui", new UiSchemeFactory());
         }
@@ -8693,6 +8475,20 @@ static bool SystemHighContrast() {
     return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0) && (hc.dwFlags & HCF_HIGHCONTRASTON);
 }
 
+// What follows from a changed list of site exceptions, whoever changed it.
+static void OnSitesChanged(sites::List list, const std::vector<std::string>& entries, bool added) {
+    if (list == sites::List::ThirdPartyCookies) for (const auto& e : entries) ApplyCookie3pException(e, added);
+    if (list == sites::List::ForceDark) for (auto& t : g.tabs) if (t->browser && !t->discarded) ApplyForceDark(t->browser);
+    g.lastStateJson.clear();
+    SendState();
+}
+
+// An entry the settings page removes, or "*" for the whole list.
+static void RemoveException(sites::List list, const std::wstring& entry) {
+    if (entry == L"*") sites::Clear(list);
+    else sites::Remove(list, entry);
+}
+
 static void LoadSettings() {
     static settings::RegistryStorage storage(REG_KEY);
     settings::Setup setup;
@@ -8701,6 +8497,7 @@ static void LoadSettings() {
     setup.systemHighContrast = SystemHighContrast();
     setup.onChange = OnSettingChanged;
     settings::Load(storage, setup);
+    sites::Load(storage, g.incognito, OnSitesChanged);
     ThemeRefresh();
     g.dockWidthDip = settings::Number(Setting::DockWidth);   // dragging changes it before it is saved
     g.dockActive = settings::Number(Setting::DockDefault);   // which dock app is shown can change afterwards
@@ -8725,51 +8522,21 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         if (!g.incognito) browserreg::Register(HKEY_CURRENT_USER, exe);
         browserreg::OpenDefaultAppsSettings();
     } else if (key == L"cookie3pExemptAdd") {
-        std::string h = Utf8(val);
-        size_t p = h.find("://"); if (p != std::string::npos) h.erase(0, p + 3);
-        size_t sl = h.find_first_of("/?#"); if (sl != std::string::npos) h.resize(sl);
-        h = HostFromAuthority(h);
-        if (!h.empty()) {
-            { std::lock_guard<std::mutex> lk(g_blockMu); g_cookie3pExempt.insert(h); }
-            SaveShieldExempt();
-            ApplyCookie3pException(h, true);
-            g.lastStateJson.clear();
-            SendState();
-        }
+        sites::Add(sites::List::ThirdPartyCookies, val);
     } else if (key == L"cookie3pExemptDel") {
-        std::vector<std::string> removed;
-        {
-            std::lock_guard<std::mutex> lk(g_blockMu);
-            if (val == L"*") { removed.assign(g_cookie3pExempt.begin(), g_cookie3pExempt.end()); g_cookie3pExempt.clear(); }
-            else { std::string h = Utf8(val); if (g_cookie3pExempt.erase(h)) removed.push_back(h); }
-        }
-        SaveShieldExempt();
-        for (const auto& s : removed) ApplyCookie3pException(s, false);
-        g.lastStateJson.clear();
-        SendState();
-    } else if (key == L"adsExemptDel" || key == L"trackersExemptDel") {
-        {
-            std::lock_guard<std::mutex> lk(g_blockMu);
-            auto& st = (key == L"adsExemptDel") ? g_adsExempt : g_trackersExempt;
-            if (val == L"*") st.clear(); else st.erase(Utf8(val));
-        }
-        SaveShieldExempt();
-        g.lastStateJson.clear();
-        SendState();
+        RemoveException(sites::List::ThirdPartyCookies, val);
+    } else if (key == L"adsExemptDel") {
+        RemoveException(sites::List::Ads, val);
+    } else if (key == L"trackersExemptDel") {
+        RemoveException(sites::List::Trackers, val);
     } else if (key == L"darkExemptDel") {
-        {
-            std::lock_guard<std::mutex> lk(g_blockMu);
-            if (val == L"*") g.darkExempt.clear(); else g.darkExempt.erase(val);
-        }
-        SaveDarkExempt();
-        for (auto& t : g.tabs) if (t->browser && !t->discarded) ApplyForceDark(t->browser);
-        SendState();
+        RemoveException(sites::List::ForceDark, val);
     } else if (key == L"proceed") {
         // "cert|<url>" or "http|<url>" from the warning page. Only what NeonNet itself warned about
         // counts, so a web page that links to the warning page cannot open an exception.
         bool cert = val.rfind(L"cert|", 0) == 0;
         std::wstring url = val.substr(val.find(L'|') + 1);
-        std::wstring key2 = cert ? HostPortKey(url) : HostOnly(url);
+        std::wstring key2 = cert ? HostPortKey(url) : sites::HostOf(url);
         if (g.warned.count((cert ? L"cert|" : L"http|") + key2)) {
             if (cert) g.certAllow.insert(key2); else g.httpAllow.insert(key2);
             // the page that sent this stays on screen until it navigates itself
@@ -10069,7 +9836,6 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     EnginesLoad();
     ProxyLoad();
     SpLoad();
-    LoadShieldExempt();
     if (On(Setting::BlockAds) || On(Setting::BlockTrackers)) LoadBlocklistAsync();
 
     WNDCLASSEXW wc{ sizeof(wc) };
@@ -10144,8 +9910,6 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     UpdateStartup();
     SetTimer(g.hwnd, TIMER_TEMP, 500, nullptr);   // sweep leftover temp copies after startup settles
     UpdatePerfTimer();   // the limiters run without the panel
-    LoadKeepHosts();
-    LoadDarkExempt();
     SetTimer(g.hwnd, TIMER_AUDIO, 1000, nullptr);
     if (On(Setting::NetSpeed)) { NetSample(); SetTimer(g.hwnd, TIMER_NET, 1000, nullptr); }
 

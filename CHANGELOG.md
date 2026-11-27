@@ -25,6 +25,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 
 ### Under the hood
 - All settings live in one module (`src/settings.cpp`) with the project's first automated tests (`build.ps1 -Test`).
+- Reading addresses and the per-site exception lists live in another (`src/sites.cpp`), tested the same way.
 
 ### Accessibility & UI
 - **Light theme contrast:** the neon accents, `ON` green, danger red and yellow now reach 4.5:1 on every light surface. The accent is darkened until it passes instead of to a fixed brightness, and the Extensions page, the bookmarks drop-down and the VPN panel no longer use dark-theme-only colours in light mode.
