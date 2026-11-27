@@ -215,6 +215,7 @@ struct DlgReq {
 };
 
 struct App {
+    // What the user can choose is not here: the settings module owns it (settings.h).
     HMODULE hmod = nullptr;   // NeonNet.dll (resources live here)
     HWND hwnd = nullptr;
     UINT dpi = 96;
@@ -232,18 +233,12 @@ struct App {
     int dockUnread[3]{};
     bool dockMuted[3]{};
     int dockActive = 0, dockCreating = -1;
-    int dockWidthDip = 500;
+    int dockWidthDip = 500;   // the dock as it is now (the DockWidth setting, or what dragging made of it)
     HWND waHeader = nullptr, waGrip = nullptr;
     bool waOpen = false, dockDragging = false;
     perf::Snapshot perfSnap;
     unsigned long long perfTotal = 0, perfBrowser = 0;   // bytes: all processes, the browser process alone
     double perfCpu = 0;
-    DWORD ramLimitMB = 0;          // 0 = off: unload idle background tabs while all processes together use more
-    bool bgLimit = false;          // run background tabs at low priority
-    bool batterySaver = false;     // manual battery saver mode (registry BatterySaver)
-    bool batteryAuto = false;      // auto-enable battery saver on battery <= 25% (registry BatteryAuto)
-    DWORD netLimitKB = 0;          // 0 = off: cap download speed in KB/s via DevTools network conditions
-    bool netLimitAll = false;      // false = background tabs only, true = all tabs
     std::set<std::wstring> keepHosts;   // sites whose tabs never go to sleep on their own (registry KeepAwakeHosts)
     std::set<std::wstring> darkExempt;  // hosts excluded from Force Dark Mode (registry ForceDarkExempt); the UI thread writes it under g_blockMu, because the IO thread lists it
     int sleepBlocked = 0;          // background tabs the RAM limiter would have slept but must not (audio, typing, kept awake)
@@ -261,7 +256,6 @@ struct App {
     int splitLeft = 0, splitRight = 0;   // split view: 0 = off, >0 = left & right tab IDs
     double splitRatio = 0.5;
     bool splitDragging = false;
-    std::atomic<bool> scan{ true };   // atomic: the IO thread reads it for /api/settings
     int dropX0 = 0, dropX1 = 0, dropY0 = 0;       // extent of dropdown/palette, CSS px (0 = default)
     int dropNeed = 0;               // address bar suggestions open: toolbar height needed, CSS px (0 = closed)
     bool fsUser = false, fsElement = false, fullscreen = false;
@@ -272,30 +266,9 @@ struct App {
     std::atomic<int> dlSeq{ 0 };   // bumped by the IO thread too, when the downloads page removes entries
     std::wstring alert;   // urgent status bar message (unsupported video / DRM), shown above everything else
     std::wstring startUrl;
-    bool favicons = true;             // show site icons on tabs (registry ShowFavicons)
-    bool bookmarksBar = true;         // show the bookmarks bar under the address bar (registry BookmarksBar)
-    bool httpsOnly = false;           // HTTPS-only mode (registry HttpsOnly)
-    bool savePasswords = true;        // offer to save passwords (registry SavePasswords)
-    bool smooth = true;               // smooth scrolling (registry SmoothScroll), with the distance of a wheel step in px (100 = the normal step)
-    bool forceDark = false;           // force dark mode on web pages via Blink Auto Dark (registry ForceDark)
-    bool a11yTree = false;            // enable CEF accessibility tree for screen readers (registry Accessibility)
-    std::atomic<bool> reducedMotion{ false }; // reduced motion & comfort mode (registry ReducedMotion)
-    std::atomic<bool> highContrast{ false };  // high-contrast theme (registry HighContrast)
-    int minFontSize = 0;                      // minimum web page font size in px (registry MinFontSize; 0 = default)
-    std::atomic<bool> lightMode{ false }; // UI light mode theme (registry LightMode); atomic: read on IO & UI threads
-    std::atomic<int> langId{ 0 };         // UI language: 0 = en, 1 = id (registry Language)
-    std::atomic<bool> welcomeDismissed{ false }; // New Tab Quick Start card dismissed (registry WelcomeDismissed)
-    int devDock = 0;                  // where developer tools open: 0 bottom, 1 right, 2 left, 3 separate window (registry DevToolsDock)
-    int smoothStep = 120, smoothTime = 400;  // and the length of the animation in ms
-    bool netSpeed = true;             // network speed in the status bar (registry NetSpeed)
     double netDown = 0, netUp = 0;    // bytes per second, last second
     ULONGLONG netTick = 0;
     std::map<DWORD, std::pair<DWORD, DWORD>> netPrev;   // per adapter: last in and out byte counters
-    std::atomic<bool> blockAds{ true };       // block ads (registry BlockAds); atomic: read on the IO thread
-    std::atomic<bool> blockTrackers{ true };  // block trackers (registry BlockTrackers); atomic: read on the IO thread
-    std::atomic<bool> stripTracking{ true };  // strip tracking URL query params (registry StripTracking)
-    std::atomic<bool> block3pCookies{ false }; // block 3rd-party cookies (registry Block3pCookies)
-    std::atomic<bool> strictReferrer{ false }; // trim cross-site Referer to origin (registry StrictReferrer)
     std::atomic<int> blockedCount{ 0 };    // requests blocked since NeonNet started
     std::atomic<int> strippedCount{ 0 };   // tracking URL parameters stripped since NeonNet started
     std::set<std::wstring> certAllow;  // host:port the user chose to open despite a certificate error, until NeonNet closes
@@ -338,15 +311,13 @@ struct App {
     std::map<std::wstring, ULONGLONG> tempOpened;
     std::wstring pendingPlayerUrl;   // media URL to download as a temporary copy for the system player
     std::wstring pendingSaveUrl;     // media URL the user chose to save: no second question
-    // DNS-over-HTTPS (DoH) settings (registry DohMode, DohProvider, DohCustom)
-    std::wstring dohMode = L"automatic";
-    std::wstring dohProvider = L"cloudflare";
-    std::wstring dohCustom;
     // recently closed tabs, newest last
     std::vector<ClosedTab> closed;
 };
 static App g;
 using Setting = settings::Id;
+static bool On(Setting id) { return settings::Flag(id); }
+static bool Indonesian() { return settings::Text(Setting::Lang) == L"id"; }
 static std::mutex g_updMu;
 struct UpdSnap {
     UpdState state = U_IDLE;
@@ -389,51 +360,51 @@ static std::wstring HexOfCol(COLORREF c) {
     return buf;
 }
 static COLORREF BgCol() {
-    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0xff, 0xff, 0xff) : RGB(0x00, 0x00, 0x00);
-    return g.lightMode.load() ? RGB(0xf4, 0xf2, 0xfa) : C_BG;
+    if (On(Setting::HighContrast)) return On(Setting::LightMode) ? RGB(0xff, 0xff, 0xff) : RGB(0x00, 0x00, 0x00);
+    return On(Setting::LightMode) ? RGB(0xf4, 0xf2, 0xfa) : C_BG;
 }
 static cef_color_t CefBgCol() {
-    if (g.highContrast.load()) return g.lightMode.load() ? 0xFFFFFFFF : 0xFF000000;
-    return g.lightMode.load() ? 0xFFF4F2FA : CEF_BG;
+    if (On(Setting::HighContrast)) return On(Setting::LightMode) ? 0xFFFFFFFF : 0xFF000000;
+    return On(Setting::LightMode) ? 0xFFF4F2FA : CEF_BG;
 }
 static COLORREF MenuBgCol() {
-    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0xff, 0xff, 0xff) : RGB(0x00, 0x00, 0x00);
-    return g.lightMode.load() ? RGB(0xff, 0xff, 0xff) : RGB(0x0a, 0x04, 0x20);
+    if (On(Setting::HighContrast)) return On(Setting::LightMode) ? RGB(0xff, 0xff, 0xff) : RGB(0x00, 0x00, 0x00);
+    return On(Setting::LightMode) ? RGB(0xff, 0xff, 0xff) : RGB(0x0a, 0x04, 0x20);
 }
 static COLORREF TextCol() {
-    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x00, 0x00, 0x00) : RGB(0xff, 0xff, 0xff);
-    return g.lightMode.load() ? RGB(0x1a, 0x10, 0x33) : RGB(0xe8, 0xd8, 0xff);
+    if (On(Setting::HighContrast)) return On(Setting::LightMode) ? RGB(0x00, 0x00, 0x00) : RGB(0xff, 0xff, 0xff);
+    return On(Setting::LightMode) ? RGB(0x1a, 0x10, 0x33) : RGB(0xe8, 0xd8, 0xff);
 }
 static COLORREF MutedCol() {
-    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x1a, 0x1a, 0x1a) : RGB(0xe0, 0xe0, 0xff);
-    return g.lightMode.load() ? RGB(0x63, 0x55, 0x8a) : C_MUTED;
+    if (On(Setting::HighContrast)) return On(Setting::LightMode) ? RGB(0x1a, 0x1a, 0x1a) : RGB(0xe0, 0xe0, 0xff);
+    return On(Setting::LightMode) ? RGB(0x63, 0x55, 0x8a) : C_MUTED;
 }
 static COLORREF DimCol() {
-    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x40, 0x40, 0x40) : RGB(0xb8, 0xb8, 0xd8);
-    return g.lightMode.load() ? RGB(0xa8, 0x9c, 0xc8) : RGB(0x4d, 0x3a, 0x73);
+    if (On(Setting::HighContrast)) return On(Setting::LightMode) ? RGB(0x40, 0x40, 0x40) : RGB(0xb8, 0xb8, 0xd8);
+    return On(Setting::LightMode) ? RGB(0xa8, 0x9c, 0xc8) : RGB(0x4d, 0x3a, 0x73);
 }
 static COLORREF YellowCol() {
-    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x7a, 0x38, 0x00) : RGB(0xff, 0xff, 0x00);
-    return g.lightMode.load() ? RGB(0x92, 0x40, 0x0e) : C_YELLOW;
+    if (On(Setting::HighContrast)) return On(Setting::LightMode) ? RGB(0x7a, 0x38, 0x00) : RGB(0xff, 0xff, 0x00);
+    return On(Setting::LightMode) ? RGB(0x92, 0x40, 0x0e) : C_YELLOW;
 }
 static COLORREF GreenCol() {
-    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x00, 0x66, 0x22) : RGB(0x00, 0xff, 0xaa);
-    return g.lightMode.load() ? RGB(0x04, 0x6c, 0x4e) : C_GREEN;
+    if (On(Setting::HighContrast)) return On(Setting::LightMode) ? RGB(0x00, 0x66, 0x22) : RGB(0x00, 0xff, 0xaa);
+    return On(Setting::LightMode) ? RGB(0x04, 0x6c, 0x4e) : C_GREEN;
 }
 static COLORREF SepCol() {
-    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x00, 0x00, 0x00) : RGB(0xff, 0xff, 0xff);
-    return g.lightMode.load() ? RGB(0xd4, 0xcb, 0xe8) : RGB(0x3a, 0x1a, 0x5e);
+    if (On(Setting::HighContrast)) return On(Setting::LightMode) ? RGB(0x00, 0x00, 0x00) : RGB(0xff, 0xff, 0xff);
+    return On(Setting::LightMode) ? RGB(0xd4, 0xcb, 0xe8) : RGB(0x3a, 0x1a, 0x5e);
 }
 static COLORREF Accent() {
     if (g.incognito) return GreenCol();
-    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x00, 0x00, 0xcc) : RGB(0xff, 0xff, 0x00);
+    if (On(Setting::HighContrast)) return On(Setting::LightMode) ? RGB(0x00, 0x00, 0xcc) : RGB(0xff, 0xff, 0x00);
     COLORREF c = (COLORREF)g_accentCol.load();
-    return g.lightMode.load() ? DarkenForLight(c) : c;
+    return On(Setting::LightMode) ? DarkenForLight(c) : c;
 }
 static COLORREF SecondaryAccent() {
-    if (g.highContrast.load()) return g.lightMode.load() ? RGB(0x00, 0x44, 0x88) : RGB(0x00, 0xff, 0xff);
+    if (On(Setting::HighContrast)) return On(Setting::LightMode) ? RGB(0x00, 0x44, 0x88) : RGB(0x00, 0xff, 0xff);
     COLORREF c = (COLORREF)g_cyanCol.load();
-    return g.lightMode.load() ? DarkenForLight(c) : c;
+    return On(Setting::LightMode) ? DarkenForLight(c) : c;
 }
 
 // Search engines for text typed in the address bar. `id` is what is saved in the registry.
@@ -457,9 +428,9 @@ static std::wstring ResolveDohTemplate(const std::wstring& provider, const std::
 static void ApplyDohPrefs() {
     CefRefPtr<CefPreferenceManager> pm = CefPreferenceManager::GetGlobalPreferenceManager();
     if (!pm) return;
-    std::wstring mode = g.dohMode;
+    std::wstring mode = settings::Text(Setting::DohMode);
     if (mode != L"off" && mode != L"automatic" && mode != L"secure") mode = L"automatic";
-    std::wstring tmpl = (mode == L"secure") ? ResolveDohTemplate(g.dohProvider, g.dohCustom) : L"";
+    std::wstring tmpl = (mode == L"secure") ? ResolveDohTemplate(settings::Text(Setting::DohProvider), settings::Text(Setting::DohCustom)) : L"";
     if (mode == L"secure" && tmpl.empty()) mode = L"automatic";
     CefRefPtr<CefValue> mv = CefValue::Create();
     mv->SetString(mode);
@@ -654,7 +625,7 @@ static bool LoadUi(int id, std::string& out) {
 static int Frame() { return (IsZoomed(g.hwnd) || g.fullscreen) ? 0 : S(BORDER_DIP); }
 static RECT ChromeRect() {
     RECT rc; GetClientRect(g.hwnd, &rc); int b = Frame();
-    return { b, b, rc.right - b, b + S(CHROME_DIP + (g.bookmarksBar ? BM_BAR_DIP : 0) + (g.findOpen ? FIND_DIP : 0)) };
+    return { b, b, rc.right - b, b + S(CHROME_DIP + (On(Setting::BookmarksBar) ? BM_BAR_DIP : 0) + (g.findOpen ? FIND_DIP : 0)) };
 }
 // The toolbar browser always covers the full interior height, clipped by SetWindowRgn to
 // either the toolbar rows alone or toolbar + active dropdown/palette card. Keeping its HWND
@@ -1033,7 +1004,7 @@ static void SendState() {
              L",\"loading\":" + (t->loading ? L"true" : L"false") + L",\"discarded\":" + (t->discarded ? L"true" : L"false") +
              L",\"audible\":" + (t->audible ? L"true" : L"false") + L",\"muted\":" + (t->muted ? L"true" : L"false") +
              L",\"pinned\":" + (t->pinned ? L"true" : L"false") +
-             (g.favicons && !t->icon.empty() ? L",\"icon\":" + JsonStr(t->icon) : L"") + L"}";
+             (On(Setting::Favicons) && !t->icon.empty() ? L",\"icon\":" + JsonStr(t->icon) : L"") + L"}";
     }
     j += L"],\"active\":" + std::to_wstring(g.active);
     j += L",\"activeWs\":" + std::to_wstring(g.activeWs) + L",\"workspaces\":[";
@@ -1052,20 +1023,20 @@ static void SendState() {
     j += std::wstring(L",\"canBack\":") + (a && a->canBack ? L"true" : L"false");
     j += std::wstring(L",\"canFwd\":") + (a && a->canFwd && a->errorUrl.empty() ? L"true" : L"false");
     j += std::wstring(L",\"loading\":") + (a && a->loading ? L"true" : L"false");
-    j += std::wstring(L",\"scan\":") + (g.scan ? L"true" : L"false");
-    j += std::wstring(L",\"favicons\":") + (g.favicons ? L"true" : L"false");
+    j += std::wstring(L",\"scan\":") + (On(Setting::Scanlines) ? L"true" : L"false");
+    j += std::wstring(L",\"favicons\":") + (On(Setting::Favicons) ? L"true" : L"false");
     j += std::wstring(L",\"incognito\":") + (g.incognito ? L"true" : L"false");
     j += std::wstring(L",\"perf\":") + (g.panelOpen ? L"true" : L"false");
     j += std::wstring(L",\"max\":") + (IsZoomed(g.hwnd) ? L"true" : L"false");
     std::wstring cur = a ? DisplayUrl(a) : L"";
     j += std::wstring(L",\"canStar\":") + (!g.incognito && store::Recordable(cur) ? L"true" : L"false");
     j += std::wstring(L",\"starred\":") + (store::FindBookmark(cur) ? L"true" : L"false");
-    j += std::wstring(L",\"bookmarksBar\":") + (g.bookmarksBar ? L"true" : L"false");
-    if (g.bookmarksBar && (g.bmBarDirty || g.cachedBmBarJson.empty())) {
+    j += std::wstring(L",\"bookmarksBar\":") + (On(Setting::BookmarksBar) ? L"true" : L"false");
+    if (On(Setting::BookmarksBar) && (g.bmBarDirty || g.cachedBmBarJson.empty())) {
         g.cachedBmBarJson = Wide(store::BookmarksBarJson(L""));
         g.bmBarDirty = false;
     }
-    j += L",\"bar\":" + (g.bookmarksBar ? g.cachedBmBarJson : L"[]");
+    j += L",\"bar\":" + (On(Setting::BookmarksBar) ? g.cachedBmBarJson : L"[]");
     j += std::wstring(L",\"find\":") + (g.findOpen ? L"true" : L"false");
     j += std::wstring(L",\"findCase\":") + (g.findCase ? L"true" : L"false");
     j += L",\"findText\":" + JsonStr(g.findText);
@@ -1083,7 +1054,7 @@ static void SendState() {
     j += L",\"splitRight\":" + std::to_wstring(IsSplitActive() ? g.splitRight : 0);
     j += L",\"canReader\":" + std::wstring(a && CanReaderUrl(cur) ? L"true" : L"false");
     j += L",\"readerMode\":" + std::wstring(a && a->readerMode ? L"true" : L"false");
-    j += L",\"forceDark\":" + std::wstring(g.forceDark ? L"true" : L"false");
+    j += L",\"forceDark\":" + std::wstring(On(Setting::ForceDark) ? L"true" : L"false");
     j += L",\"waOpen\":" + std::wstring(g.waOpen ? L"true" : L"false");
     j += L",\"waUnread\":" + std::to_wstring(TotalDockUnread());
     {
@@ -1106,7 +1077,7 @@ static void SendState() {
 
 static void ApplyAccessibility(CefRefPtr<CefBrowser> b) {
     if (!b || !b->GetHost()) return;
-    b->GetHost()->SetAccessibilityState(g.a11yTree ? STATE_ENABLED : STATE_DEFAULT);
+    b->GetHost()->SetAccessibilityState(On(Setting::A11yTree) ? STATE_ENABLED : STATE_DEFAULT);
 }
 
 static bool SystemReducedMotion() {
@@ -1120,7 +1091,7 @@ static void ApplyReducedMotion(CefRefPtr<CefBrowser> b) {
     CefRefPtr<CefListValue> feats = CefListValue::Create();
     CefRefPtr<CefDictionaryValue> f = CefDictionaryValue::Create();
     f->SetString("name", "prefers-reduced-motion");
-    f->SetString("value", g.reducedMotion.load() ? "reduce" : "");
+    f->SetString("value", On(Setting::ReducedMotion) ? "reduce" : "");
     feats->SetDictionary(0, f);
     p->SetList("features", feats);
     b->GetHost()->ExecuteDevToolsMethod(0, "Emulation.setEmulatedMedia", p);
@@ -1214,7 +1185,7 @@ static std::wstring ScanScript(bool on) {
 }
 
 static void ApplyScan(CefRefPtr<CefBrowser> b) {
-    if (b) b->GetMainFrame()->ExecuteJavaScript(ScanScript(g.scan && !g.reducedMotion.load() && !g.highContrast.load()), b->GetMainFrame()->GetURL(), 0);
+    if (b) b->GetMainFrame()->ExecuteJavaScript(ScanScript(On(Setting::Scanlines) && !On(Setting::ReducedMotion) && !On(Setting::HighContrast)), b->GetMainFrame()->GetURL(), 0);
 }
 
 static std::wstring DarkHostOf(const std::wstring& url);
@@ -1226,7 +1197,7 @@ static void ApplyForceDark(CefRefPtr<CefBrowser> b, const std::wstring& knownUrl
     bool isUi = url.rfind(UI_HOST, 0) == 0 || url.rfind(L"https://chrome.neonnet.ui/", 0) == 0;
     bool exempt = IsDarkExempt(url);
     CefRefPtr<CefDictionaryValue> p = CefDictionaryValue::Create();
-    if (g.forceDark && !isUi && !exempt) p->SetBool("enabled", true);
+    if (On(Setting::ForceDark) && !isUi && !exempt) p->SetBool("enabled", true);
     b->GetHost()->ExecuteDevToolsMethod(0, "Emulation.setAutoDarkModeOverride", p);
 }
 
@@ -1814,11 +1785,6 @@ static std::wstring RegGetString(const wchar_t* name);
 // ---------------------------------------------------------------------------
 // Theme Accent (customizable neon primary/secondary colors across UI & window frame)
 
-static std::mutex g_themeMu;
-static std::wstring g_themePreset = L"synthwave";
-static std::wstring g_themePink = L"#ff2e97";
-static std::wstring g_themeCyan = L"#00e5ff";
-
 static std::wstring LightenHex(COLORREF c) {
     int r = (GetRValue(c) + 255) / 2, g2 = (GetGValue(c) + 255) / 2, b = (GetBValue(c) + 255) / 2;
     wchar_t buf[16];
@@ -1826,29 +1792,22 @@ static std::wstring LightenHex(COLORREF c) {
     return buf;
 }
 
-// Copies the accent settings to what painting and the pages read.
+// The accent colours as painting wants them, kept beside the settings because it reads them often.
 static void ThemeRefresh() {
-    std::wstring preset = settings::Text(settings::Id::AccentPreset), pink = settings::Text(settings::Id::AccentPink),
-                 cyan = settings::Text(settings::Id::AccentCyan), norm;
     COLORREF pCol = C_PINK, cCol = C_CYAN;
-    ParseHexColor(pink, pCol, norm);
-    ParseHexColor(cyan, cCol, norm);
-    std::lock_guard<std::mutex> lk(g_themeMu);
-    g_themePreset = preset;
-    g_themePink = pink;
-    g_themeCyan = cyan;
+    std::wstring norm;
+    ParseHexColor(settings::Text(Setting::AccentPink), pCol, norm);
+    ParseHexColor(settings::Text(Setting::AccentCyan), cCol, norm);
     g_accentCol = (DWORD)pCol;
     g_cyanCol = (DWORD)cCol;
 }
 
 static std::string ThemeRuleCss() {
-    std::wstring p, c; COLORREF pc, cc;
-    {
-        std::lock_guard<std::mutex> lk(g_themeMu);
-        p = g_themePink; c = g_themeCyan;
-        pc = (COLORREF)g_accentCol.load(); cc = (COLORREF)g_cyanCol.load();
-    }
-    bool light = g.lightMode.load();
+    std::wstring p = settings::Text(Setting::AccentPink), c = settings::Text(Setting::AccentCyan), norm;
+    COLORREF pc = C_PINK, cc = C_CYAN;
+    ParseHexColor(p, pc, norm);
+    ParseHexColor(c, cc, norm);
+    bool light = On(Setting::LightMode);
     std::wstring p2;
     if (light) {
         pc = DarkenForLight(pc);
@@ -1879,12 +1838,12 @@ static std::string ThemeRuleCss() {
                 light ? ":root.incog{--accent-primary:#046c4e;--accent-primary-soft:#035940;}" : "",
                 trackCol, trackEdge, trackCol);
     std::string css(buf);
-    if (g.highContrast.load()) {
+    if (On(Setting::HighContrast)) {
         css += light ? ":root:not(.incog){--accent-primary:#0000cc;--accent-primary-soft:#0000ff;--accent-secondary:#004488;--accent-primary-rgb:0,0,204;--accent-secondary-rgb:0,68,136;}"
                      : ":root:not(.incog){--accent-primary:#ffff00;--accent-primary-soft:#ffff80;--accent-secondary:#00ffff;--accent-primary-rgb:255,255,0;--accent-secondary-rgb:0,255,255;}";
         css += "body::after{display:none!important;}";
     }
-    if (g.reducedMotion.load()) {
+    if (On(Setting::ReducedMotion)) {
         css += "html{scroll-behavior:auto!important;}body::after{display:none!important;}"
                "*,*::before,*::after{animation-duration:0.001ms!important;animation-iteration-count:1!important;"
                "transition-duration:0.001ms!important;scroll-behavior:auto!important;}";
@@ -1951,24 +1910,22 @@ static std::string TokensStyleTag() {
 
 static std::string ThemeStyleTag() {
     return "<style id=\"nn-accent\">" + ThemeRuleCss() + "</style><script>" + std::string(NN_A11Y_JS) + "</script>" +
-           (g.lightMode.load() ? "<script>document.documentElement.classList.add('light');</script>" : "") +
-           (g.highContrast.load() ? "<script>document.documentElement.classList.add('hc');</script>" : "") +
+           (On(Setting::LightMode) ? "<script>document.documentElement.classList.add('light');</script>" : "") +
+           (On(Setting::HighContrast) ? "<script>document.documentElement.classList.add('hc');</script>" : "") +
            // The page language also goes on <html lang>, so a screen reader pronounces the page in the right language.
-           (g.langId.load() == 1 ? "<script>window.__nnLang='id';document.documentElement.lang='id';</script>"
+           (Indonesian() ? "<script>window.__nnLang='id';document.documentElement.lang='id';</script>"
                                  : "<script>window.__nnLang='en';document.documentElement.lang='en';</script>");
 }
 
 static std::wstring ThemeStateJson() {
-    std::wstring pr, pk, cy; COLORREF pc;
-    {
-        std::lock_guard<std::mutex> lk(g_themeMu);
-        pr = g_themePreset; pk = g_themePink; cy = g_themeCyan;
-        pc = (COLORREF)g_accentCol.load();
-    }
+    std::wstring pr = settings::Text(Setting::AccentPreset), pk = settings::Text(Setting::AccentPink),
+                 cy = settings::Text(Setting::AccentCyan), norm;
+    COLORREF pc = C_PINK;
+    ParseHexColor(pk, pc, norm);
     return L"{\"preset\":" + JsonStr(pr) + L",\"pink\":" + JsonStr(pk) +
            L",\"pink2\":" + JsonStr(LightenHex(pc)) + L",\"cyan\":" + JsonStr(cy) +
-           L",\"light\":" + (g.lightMode.load() ? L"true" : L"false") +
-           L",\"lang\":" + JsonStr(g.langId.load() == 1 ? L"id" : L"en") + L"}";
+           L",\"light\":" + (On(Setting::LightMode) ? L"true" : L"false") +
+           L",\"lang\":" + JsonStr(Indonesian() ? L"id" : L"en") + L"}";
 }
 static void BroadcastThemeAccent();
 
@@ -2877,7 +2834,7 @@ static void SendSmooth(CefRefPtr<CefFrame> f) {
     if (!f) return;
     CefRefPtr<CefProcessMessage> m = CefProcessMessage::Create("nn.cfg");
     CefRefPtr<CefListValue> l = m->GetArgumentList();
-    l->SetInt(0, g.smooth ? 1 : 0); l->SetInt(1, g.smoothStep); l->SetInt(2, g.smoothTime);
+    l->SetInt(0, On(Setting::SmoothScroll) ? 1 : 0); l->SetInt(1, settings::Number(Setting::SmoothStep)); l->SetInt(2, settings::Number(Setting::SmoothTime));
     f->SendProcessMessage(PID_RENDERER, m);
 }
 static void BroadcastSmooth() {
@@ -2894,9 +2851,9 @@ static std::wstring WarningPageUrl(const wchar_t* kind, const std::wstring& url,
 }
 
 static std::wstring ErrorPageUrl(const std::wstring& url, int code) {
-    bool light = g.lightMode.load();
+    bool light = On(Setting::LightMode);
     std::wstring h =
-        std::wstring(L"<!doctype html><html lang='") + (g.langId.load() == 1 ? L"id" : L"en") +
+        std::wstring(L"<!doctype html><html lang='") + (Indonesian() ? L"id" : L"en") +
         L"'><head><meta charset='utf-8'><title>SIGNAL LOST</title><style>"
         L"html,body{margin:0;height:100%;background:" + std::wstring(light ? L"#f4f2fa" : L"#12062c") +
         L";color:" + std::wstring(light ? L"#1a1033" : L"#e8d8ff") + L";font:14px 'Cascadia Mono',Consolas,monospace}"
@@ -3051,7 +3008,7 @@ static CefBrowserSettings BrowserSettings(bool webTab = false) {
     // link under the mouse and the zoom level in its status bar, so these would be shown twice.
     s.chrome_status_bubble = STATE_DISABLED;
     s.chrome_zoom_bubble = STATE_DISABLED;
-    if (webTab && g.minFontSize > 0) s.minimum_font_size = g.minFontSize;
+    if (webTab && settings::Number(Setting::MinFontSize) > 0) s.minimum_font_size = settings::Number(Setting::MinFontSize);
     return s;
 }
 
@@ -3411,7 +3368,7 @@ private:
 static void OpenDevTools(Tab* t, CefPoint at) {
     if (!t || !t->browser) return;
     if (!t->dev) {
-        t->devDock = g.devDock;
+        t->devDock = settings::Number(Setting::DevDock);
         // Tell the tools where they are, so their Dock side menu marks the right choice (they would start as "undocked")
         if (CefRefPtr<CefRequestContext> ctx = t->browser->GetHost()->GetRequestContext()) {
             CefRefPtr<CefValue> cur = ctx->GetPreference("devtools.preferences");
@@ -3709,8 +3666,8 @@ static std::wstring ShieldJsonForTab(Tab* a) {
             }
         }
     }
-    std::wstring j = L"{\"adsOn\":" + std::wstring(g.blockAds.load() ? L"true" : L"false") +
-                     L",\"trackersOn\":" + std::wstring(g.blockTrackers.load() ? L"true" : L"false") +
+    std::wstring j = L"{\"adsOn\":" + std::wstring(On(Setting::BlockAds) ? L"true" : L"false") +
+                     L",\"trackersOn\":" + std::wstring(On(Setting::BlockTrackers) ? L"true" : L"false") +
                      L",\"host\":" + JsonStr(Wide(site)) +
                      L",\"siteAdsOff\":" + std::wstring(adsEx ? L"true" : L"false") +
                      L",\"siteTrackersOff\":" + std::wstring(trkEx ? L"true" : L"false") +
@@ -3780,7 +3737,7 @@ static void ApplyCookiePrefs() {
     auto apply = [](CefRefPtr<CefRequestContext> ctx) {
         if (!ctx) return;
         CefRefPtr<CefValue> v = CefValue::Create();
-        v->SetInt(g.block3pCookies.load() ? 1 : 0);
+        v->SetInt(On(Setting::Block3pCookies) ? 1 : 0);
         CefString err;
         ctx->SetPreference("profile.cookie_controls_mode", v, err);
     };
@@ -4037,8 +3994,8 @@ public:
 
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
         g_all.push_back(browser);
-        if (g.a11yTree) ApplyAccessibility(browser);
-        if (g.reducedMotion.load()) ApplyReducedMotion(browser);
+        if (On(Setting::A11yTree)) ApplyAccessibility(browser);
+        if (On(Setting::ReducedMotion)) ApplyReducedMotion(browser);
         DarkenBrowserWindow(browser->GetHost()->GetWindowHandle());
         if (g.creatingChrome) { g.chrome = browser; g.chromeId = browser->GetIdentifier(); return; }
         if (g.creatingPanel) {
@@ -4059,7 +4016,7 @@ public:
         Tab* t = nullptr;
         if (g.creatingTab) t = FindTab(g.creatingTab);
         else if (!g.pendingPopups.empty()) { t = FindTab(g.pendingPopups.front()); g.pendingPopups.pop_front(); }
-        if (t) { t->browser = browser; t->netEnabled = false; t->netLimitKB = -1; if (t->muted) browser->GetHost()->SetAudioMuted(true); ApplyNetworkLimit(); if (g.forceDark) ApplyForceDark(browser); }
+        if (t) { t->browser = browser; t->netEnabled = false; t->netLimitKB = -1; if (t->muted) browser->GetHost()->SetAudioMuted(true); ApplyNetworkLimit(); if (On(Setting::ForceDark)) ApplyForceDark(browser); }
         else browser->GetHost()->CloseBrowser(true);   // unknown window: refuse it
         Layout();
         SendState();
@@ -4123,7 +4080,7 @@ public:
             std::wstring w = u.ToWString();
             if (w.size() < 2000 && (w.rfind(L"https://", 0) == 0 || w.rfind(L"http://", 0) == 0)) { icon = w; break; }
         }
-        if (icon != t->icon) { t->icon = icon; if (g.favicons) SendState(); }
+        if (icon != t->icon) { t->icon = icon; if (On(Setting::Favicons)) SendState(); }
     }
     void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString& url) override {
         if (!frame->IsMain()) return;
@@ -4186,7 +4143,7 @@ public:
         }   // a new page: nothing typed yet
     }
 static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
-    if (!frame || !g.blockAds.load()) return;
+    if (!frame || !On(Setting::BlockAds)) return;
     std::wstring url = frame->GetURL().ToWString();
     if (url.rfind(L"https://www.youtube.com/", 0) != 0 && url.rfind(L"https://m.youtube.com/", 0) != 0) return;
     {
@@ -4270,9 +4227,9 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
         for (auto& c : reqHost) c = (char)tolower((unsigned char)c);
         if (reqHost.empty()) return nullptr;
 
-        if ((g.blockAds.load() || g.blockTrackers.load()) && !is_navigation && g_blocklistReady.load() && IsBlockedHost(reqHost)) {
+        if ((On(Setting::BlockAds) || On(Setting::BlockTrackers)) && !is_navigation && g_blocklistReady.load() && IsBlockedHost(reqHost)) {
             bool isTrk = IsTrackerHost(reqHost);
-            if (isTrk ? g.blockTrackers.load() : g.blockAds.load()) {
+            if (isTrk ? On(Setting::BlockTrackers) : On(Setting::BlockAds)) {
                 std::string page = browser->GetMainFrame() ? browser->GetMainFrame()->GetURL().ToString() : "";
                 if (page.compare(0, 18, "https://neonnet.ui") != 0) {
                     std::string pSite;
@@ -4297,7 +4254,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
             }
         }
 
-        if (g.strictReferrer.load()) {
+        if (On(Setting::StrictReferrer)) {
             std::string ref = request->GetReferrerURL().ToString();
             size_t rs = 0;
             if (ref.compare(0, 8, "https://") == 0) rs = 8;
@@ -4321,7 +4278,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
         if (!frame->IsMain() || IsUiBrowser(browser)) return false;
         Tab* t = TabOf(browser);
         std::wstring url = request->GetURL().ToWString();
-        if (g.stripTracking.load() && t && request->GetMethod() == "GET" &&
+        if (On(Setting::StripTracking) && t && request->GetMethod() == "GET" &&
             (url.rfind(L"http://", 0) == 0 || url.rfind(L"https://", 0) == 0)) {
             std::wstring host = HostOnly(url);
             if (!IsTrackerExemptHost(host)) {
@@ -4335,7 +4292,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
             }
         }
         if (t && !t->upgradedTo.empty() && url != t->upgradedTo) { t->upgradedFrom.clear(); t->upgradedTo.clear(); }   // another page
-        if (!g.httpsOnly || !t || url.rfind(L"http://", 0) != 0 || request->GetMethod() != "GET") return false;
+        if (!On(Setting::HttpsOnly) || !t || url.rfind(L"http://", 0) != 0 || request->GetMethod() != "GET") return false;
         std::wstring host = HostOnly(url);
         if (HttpsExempt(host) || g.httpAllow.count(host)) return false;
         // upgrade: try the same address over https, and keep the original for the warning page
@@ -4541,7 +4498,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
             frame->SendProcessMessage(PID_RENDERER, m);
             SecureZeroMemory(&pass[0], pass.size() * sizeof(wchar_t));
         } else if (kind == "submit") {
-            if (!g.savePasswords || PwNeverHas(origin)) return;
+            if (!On(Setting::SavePasswords) || PwNeverHas(origin)) return;
             CefRefPtr<CefValue> v = CefParseJSON(a->GetString(1), JSON_PARSER_RFC);
             if (!v || v->GetType() != VTYPE_DICTIONARY) return;
             CefRefPtr<CefDictionaryValue> d = v->GetDictionary();
@@ -4882,7 +4839,7 @@ static bool ProxyDelete(int id) {
     return true;
 }
 
-// Settings for the settings page. Runs on the IO thread: only atomics and the registry.
+// Settings, and what else the settings page shows. Runs on the IO thread.
 static std::string SettingsJson() {
     auto b = [](bool v) { return v ? "true" : "false"; };
     std::wstring eid, ename, eurl;
@@ -4899,39 +4856,20 @@ static std::string SettingsJson() {
     else if (us.state == U_DOWNLOADING) updState = "downloading";
     else if (us.state == U_AVAILABLE) updState = "available";
     else if (us.state == U_READY) updState = "ready";
-    o += std::string(",\"incognito\":") + b(g.incognito) + ",\"scan\":" + b(g.scan) + ",\"autoUpdate\":" + b(AutoUpdateEnabled()) + ",\"installed\":" + b(IsInstalledCopy()) +
-         ",\"updState\":\"" + updState + "\",\"updPercent\":" + std::to_string(us.percent) + ",\"updVersion\":" + JsonUtf8(us.version) + ",\"updResult\":" + JsonUtf8(us.result) + ",\"updError\":" + JsonUtf8(us.error) +
-         ",\"home\":" + JsonUtf8(RegGetString(L"HomePage")) + ",\"askDownload\":" + b(RegGetDword(L"AskDownload", 0) != 0) +
-         ",\"fastDownload\":" + b(RegGetDword(L"FastDownload", 1) != 0) +
-         ",\"fastConnections\":" + std::to_string(RegGetDword(L"FastConnections", 8)) +
-         ",\"dlSubfolder\":" + b(RegGetDword(L"DlSubfolder", 1) != 0) +
-         ",\"dlCategories\":" + b(RegGetDword(L"DlCategories", 1) != 0) +
-         ",\"defaultBrowser\":" + b(browserreg::IsDefault()) + ",\"blockAds\":" + b(g.blockAds.load()) + ",\"blockTrackers\":" + b(g.blockTrackers.load()) + ",\"stripTracking\":" + b(g.stripTracking.load()) + ",\"strippedCount\":" + std::to_string(g.strippedCount.load()) + ",\"block3pCookies\":" + b(g.block3pCookies.load()) + ",\"strictReferrer\":" + b(g.strictReferrer.load()) + ",\"savePasswords\":" + b(RegGetDword(L"SavePasswords", 1) != 0) + ",\"a11yTree\":" + b(g.a11yTree) + ",\"reducedMotion\":" + b(g.reducedMotion.load()) + ",\"highContrast\":" + b(g.highContrast.load()) + ",\"minFontSize\":" + std::to_string(g.minFontSize) + ",\"smoothScroll\":" + b(RegGetDword(L"SmoothScroll", 1) != 0) + ",\"smoothStep\":" + std::to_string(RegGetDword(L"SmoothStep", 120)) + ",\"smoothTime\":" + std::to_string(RegGetDword(L"SmoothTime", 400)) + ",\"devDock\":" + std::to_string(RegGetDword(L"DevToolsDock", 0)) + ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) + ",\"favicons\":" + b(RegGetDword(L"ShowFavicons", 1) != 0) + ",\"restoreSession\":" + b(RegGetDword(L"RestoreSession", 0) != 0) +
-         ",\"ramLimitMB\":" + std::to_string(RegGetDword(L"RamLimitMB", 0)) +
-         ",\"bgLimit\":" + b(RegGetDword(L"BgLimit", 0) != 0) +
-         ",\"batterySaver\":" + b(RegGetDword(L"BatterySaver", 0) != 0) +
-         ",\"batteryAuto\":" + b(RegGetDword(L"BatteryAuto", 0) != 0) +
-         ",\"netLimitKB\":" + std::to_string(RegGetDword(L"NetLimitKB", 0)) +
-         ",\"netLimitAll\":" + b(RegGetDword(L"NetLimitAll", 0) != 0) +
-         ",\"dockDefault\":" + std::to_string(RegGetDword(L"DockDefault", 0)) +
-         ",\"dockWidth\":" + std::to_string(RegGetDword(L"DockWidth", 500)) +
-         ",\"readerTheme\":" + JsonUtf8(RegGetString(L"ReaderTheme").empty() ? L"neon" : RegGetString(L"ReaderTheme")) +
-         ",\"readerFont\":" + JsonUtf8(RegGetString(L"ReaderFont").empty() ? L"sans" : RegGetString(L"ReaderFont")) +
-         ",\"readerSize\":" + std::to_string(RegGetDword(L"ReaderSize", 18)) +
+    o += std::string(",\"incognito\":") + b(g.incognito) + ",\"installed\":" + b(IsInstalledCopy()) +
+         ",\"updState\":\"" + updState + "\",\"updPercent\":" + std::to_string(us.percent) + ",\"updVersion\":" + JsonUtf8(us.version) +
+         ",\"updResult\":" + JsonUtf8(us.result) + ",\"updError\":" + JsonUtf8(us.error) +
+         ",\"defaultBrowser\":" + b(browserreg::IsDefault()) + ",\"strippedCount\":" + std::to_string(g.strippedCount.load()) +
+         ",\"passwordCount\":" + std::to_string(PwCount()) + ",\"blocked\":" + std::to_string(g.blockedCount.load()) +
          ",\"scriptTotal\":" + std::to_string(scriptTotal) + ",\"scriptEnabled\":" + std::to_string(scriptEnabled) +
-         ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) +
-         ",\"netSpeed\":" + b(RegGetDword(L"NetSpeed", 1) != 0) +
-         ",\"downloadDir\":" + JsonUtf8(DownloadBaseDir(false)) + ",\"bookmarksBar\":" + b(RegGetDword(L"BookmarksBar", 1) != 0) + ",\"forceDark\":" + b(RegGetDword(L"ForceDark", 0) != 0) + ",\"lightMode\":" + b(g.lightMode.load()) + ",\"lang\":" + JsonUtf8(g.langId.load() == 1 ? L"id" : L"en") + ",\"welcomeDismissed\":" + b(g.welcomeDismissed.load()) +
-         ",\"dohMode\":" + JsonUtf8(RegGetString(L"DohMode").empty() ? L"automatic" : RegGetString(L"DohMode")) +
-         ",\"dohProvider\":" + JsonUtf8(RegGetString(L"DohProvider").empty() ? L"cloudflare" : RegGetString(L"DohProvider")) +
-         ",\"dohCustom\":" + JsonUtf8(RegGetString(L"DohCustom")) + ",\"dohProviders\":[";
+         ",\"downloadDir\":" + JsonUtf8(DownloadBaseDir(false)) + ",";
+    settings::AppendJson(o);
+    o += ",\"dohProviders\":[";
     for (int i = 0; i < DOH_PROVIDER_COUNT; i++) {
         if (i) o += ",";
         o += "{\"id\":" + JsonUtf8(DOH_PROVIDERS[i].id) + ",\"name\":" + JsonUtf8(DOH_PROVIDERS[i].name) + ",\"tmpl\":" + JsonUtf8(DOH_PROVIDERS[i].tmpl) + "}";
     }
-    std::wstring tp, tpk, tcy;
-    { std::lock_guard<std::mutex> lk(g_themeMu); tp = g_themePreset; tpk = g_themePink; tcy = g_themeCyan; }
-    o += "],\"accentPreset\":" + JsonUtf8(tp) + ",\"accentPink\":" + JsonUtf8(tpk) + ",\"accentCyan\":" + JsonUtf8(tcy) + ",\"accentPresets\":[";
+    o += "],\"accentPresets\":[";
     for (int i = 0; i < THEME_PRESET_COUNT; i++) {
         if (i) o += ",";
         o += "{\"id\":" + JsonUtf8(THEME_PRESETS[i].id) + ",\"name\":" + JsonUtf8(THEME_PRESETS[i].name) +
@@ -5325,7 +5263,7 @@ static bool IsInstalledCopy() {
 }
 static bool IsMachineInstall() { return SameDir(SelfDir(), RegisteredInstallDir(HKEY_LOCAL_MACHINE)); }
 
-static bool AutoUpdateEnabled() { return RegGetDword(L"AutoUpdate", 1) != 0; }
+static bool AutoUpdateEnabled() { return On(Setting::AutoUpdate); }
 
 static ULONGLONG NowMs() {
     FILETIME ft; GetSystemTimeAsFileTime(&ft);
@@ -5346,7 +5284,7 @@ static std::wstring RegGetString(const wchar_t* name) {
 
 // Home button and start-up page: the page chosen in the settings, else the new tab page.
 static std::wstring HomeUrl() {
-    std::wstring h = RegGetString(L"HomePage");
+    std::wstring h = settings::Text(Setting::HomePage);
     return h.empty() ? std::wstring(NEWTAB) : h;
 }
 
@@ -5453,7 +5391,7 @@ static void OpenStartTabs() {
     bool all = false;
     if (!g.incognito) {
         saved = LoadSession();
-        all = RegGetDword(L"RestoreSession", 0) != 0;
+        all = On(Setting::RestoreSession);
         // A lone empty new tab is not worth bringing back: the home page is better.
         if (all && saved.size() == 1 && !saved[0].pinned && saved[0].url.rfind(NEWTAB, 0) == 0) saved.clear();
         if (!all) saved.erase(std::remove_if(saved.begin(), saved.end(), [](const SavedTab& s) { return !s.pinned; }), saved.end());
@@ -5722,8 +5660,8 @@ static void LaunchIncognito(const std::wstring& url) {
 // and the background limiter runs the processes of background tabs at low priority.
 
 static bool IsBatterySaverActive() {
-    if (g.batterySaver) return true;
-    if (!g.batteryAuto) return false;
+    if (On(Setting::BatterySaver)) return true;
+    if (!On(Setting::BatteryAuto)) return false;
     SYSTEM_POWER_STATUS sps{};
     if (GetSystemPowerStatus(&sps) && sps.ACLineStatus == 0 && sps.BatteryLifePercent <= 100 && (sps.BatteryFlag & 128) == 0) {
         return sps.BatteryLifePercent <= 25;
@@ -5733,7 +5671,7 @@ static bool IsBatterySaverActive() {
 
 static void UpdatePerfTimer() {
     if (!g.hwnd) return;
-    if (g.panelOpen || g.ramLimitMB || g.bgLimit || g.batterySaver || g.batteryAuto) {
+    if (g.panelOpen || settings::Number(Setting::RamLimitMB) || On(Setting::BgLimit) || On(Setting::BatterySaver) || On(Setting::BatteryAuto)) {
         SetTimer(g.hwnd, TIMER_PERF, g.panelOpen ? 2000 : 10000, nullptr);
     } else {
         KillTimer(g.hwnd, TIMER_PERF);
@@ -5779,14 +5717,14 @@ static void PushPerf() {
     }
     bool batOn = IsBatterySaverActive();
     std::wstring j = L"{\"total\":" + mb(g.perfTotal) + L",\"browser\":" + mb(appBytes) + L",\"engine\":" + mb(engine) +
-                     L",\"cpu\":" + cpu + L",\"limit\":" + std::to_wstring(g.ramLimitMB) +
-                     L",\"bg\":" + (g.bgLimit ? L"true" : L"false") +
+                     L",\"cpu\":" + cpu + L",\"limit\":" + std::to_wstring(settings::Number(Setting::RamLimitMB)) +
+                     L",\"bg\":" + (On(Setting::BgLimit) ? L"true" : L"false") +
                      L",\"bat\":" + (batOn ? L"true" : L"false") +
-                     L",\"batManual\":" + (g.batterySaver ? L"true" : L"false") +
-                     L",\"batAuto\":" + (g.batteryAuto ? L"true" : L"false") +
+                     L",\"batManual\":" + (On(Setting::BatterySaver) ? L"true" : L"false") +
+                     L",\"batAuto\":" + (On(Setting::BatteryAuto) ? L"true" : L"false") +
                      L",\"batPct\":" + std::to_wstring(batPct) +
                      L",\"batAc\":" + (batAc ? L"true" : L"false") +
-                     L",\"net\":" + std::to_wstring(g.netLimitKB) + L",\"netAll\":" + (g.netLimitAll ? L"true" : L"false") +
+                     L",\"net\":" + std::to_wstring(settings::Number(Setting::NetLimitKB)) + L",\"netAll\":" + (On(Setting::NetLimitAll) ? L"true" : L"false") +
                      L",\"auto\":" + std::to_wstring(g.autoUnloaded) +
                      L",\"trimmed\":" + std::to_wstring(g.lastTrimCount) + L",\"tabs\":[";
     for (size_t i = 0; i < g.tabs.size(); i++) {
@@ -5823,7 +5761,7 @@ static void ApplyBackgroundLimit() {
     for (auto& t : g.tabs) {
         if (!t->pid) continue;
         live.insert(t->pid);
-        bool low = (g.bgLimit || IsBatterySaverActive()) && !inUse.count(t->pid);
+        bool low = (On(Setting::BgLimit) || IsBatterySaverActive()) && !inUse.count(t->pid);
         auto it = applied.find(t->pid);
         if ((it == applied.end() && !low) || (it != applied.end() && it->second == low)) continue;
         if (perf::SetBackground(t->pid, low)) applied[t->pid] = low;
@@ -5845,8 +5783,8 @@ static void ApplyNetworkLimit() {
     if (g.closing) return;
     for (auto& t : g.tabs) {
         if (!t->browser || t->discarded) continue;
-        bool cap = g.netLimitKB > 0 && (g.netLimitAll || !IsVisibleTab(t->id));
-        int want = cap ? (int)g.netLimitKB : -1;
+        bool cap = settings::Number(Setting::NetLimitKB) > 0 && (On(Setting::NetLimitAll) || !IsVisibleTab(t->id));
+        int want = cap ? (int)settings::Number(Setting::NetLimitKB) : -1;
         if (t->netLimitKB == want) continue;
         if (!t->netEnabled) {
             if (want < 0) continue;
@@ -6001,9 +5939,9 @@ static void ApplyRamLimit() {
             }
         }
     }
-    if (!g.ramLimitMB) return;
+    if (!settings::Number(Setting::RamLimitMB)) return;
     g.sleepBlocked = 0;
-    if (g.perfTotal <= (unsigned long long)g.ramLimitMB * 1024 * 1024) return;
+    if (g.perfTotal <= (unsigned long long)settings::Number(Setting::RamLimitMB) * 1024 * 1024) return;
     if (GetTickCount64() - g.lastLimitAct < 5000) return;   // give the last unload time to show in the figures
     Tab* oldest = nullptr;
     for (auto& t : g.tabs) {
@@ -6381,9 +6319,8 @@ static void ToggleReaderMode() {
   window.addEventListener('keydown', window.__nnReaderEsc, true);
 })();
 )NNREADER2";
-    std::wstring rTheme = RegGetString(L"ReaderTheme"); if (rTheme.empty()) rTheme = L"neon";
-    std::wstring rFont = RegGetString(L"ReaderFont"); if (rFont.empty()) rFont = L"sans";
-    DWORD rSize = RegGetDword(L"ReaderSize", 18); if (rSize < 14 || rSize > 28) rSize = 18;
+    std::wstring rTheme = settings::Text(Setting::ReaderTheme), rFont = settings::Text(Setting::ReaderFont);
+    int rSize = settings::Number(Setting::ReaderSize);
     std::wstring readerJs = L"window.__nnReaderDef={theme:" + JsonStr(rTheme) + L",font:" + JsonStr(rFont) + L",size:" + std::to_wstring(rSize) + L"};" +
                             std::wstring(READER_JS_1) + READER_JS_1B + READER_JS_2;
     a->browser->GetMainFrame()->ExecuteJavaScript(readerJs, u, 0);
@@ -6429,14 +6366,14 @@ static void OpenPalette() {
          L",\"canReopen\":" + std::wstring(!g.closed.empty() ? L"true" : L"false") +
          L",\"canStar\":" + std::wstring(canStar ? L"true" : L"false") +
          L",\"starred\":" + std::wstring(starred ? L"true" : L"false") +
-         L",\"forceDark\":" + std::wstring(g.forceDark ? L"true" : L"false") +
+         L",\"forceDark\":" + std::wstring(On(Setting::ForceDark) ? L"true" : L"false") +
          L",\"darkHost\":" + JsonStr(DarkHostOf(curUrl)) +
          L",\"darkExempt\":" + std::wstring(IsDarkExempt(curUrl) ? L"true" : L"false") +
-         L",\"blockAds\":" + std::wstring(g.blockAds.load() ? L"true" : L"false") +
+         L",\"blockAds\":" + std::wstring(On(Setting::BlockAds) ? L"true" : L"false") +
          L",\"proxyOn\":" + std::wstring(proxyOn ? L"true" : L"false") +
          L",\"proxyName\":" + JsonStr(proxyName) +
-         L",\"scan\":" + std::wstring(g.scan.load() ? L"true" : L"false") +
-         L",\"bookmarksBar\":" + std::wstring(g.bookmarksBar ? L"true" : L"false") +
+         L",\"scan\":" + std::wstring(On(Setting::Scanlines) ? L"true" : L"false") +
+         L",\"bookmarksBar\":" + std::wstring(On(Setting::BookmarksBar) ? L"true" : L"false") +
          L",\"perf\":" + std::wstring(g.panelOpen ? L"true" : L"false") +
          L",\"waOpen\":" + std::wstring(g.waOpen ? L"true" : L"false") +
          L",\"waUnread\":" + std::to_wstring(TotalDockUnread()) +
@@ -6636,7 +6573,7 @@ static int MenuHit(const MenuState& st, POINT p) {
 
 // Thin dark lines over the window, like the CRT effect of the rest of the UI.
 static void PaintScanlines(HDC mem, int w, int h) {
-    if (g.scan && !g.reducedMotion.load() && !g.highContrast.load()) {
+    if (On(Setting::Scanlines) && !On(Setting::ReducedMotion) && !On(Setting::HighContrast)) {
         BITMAPINFO bi{}; bi.bmiHeader = { sizeof(BITMAPINFOHEADER), 1, 1, 1, 32, BI_RGB };
         void* bits = nullptr;
         HBITMAP dot = CreateDIBSection(mem, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
@@ -6998,7 +6935,7 @@ static LRESULT CALLBACK ToastProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 KillTimer(hwnd, 1);
                 g.toastAlpha = 0;
                 ShowWindow(hwnd, SW_HIDE);
-            } else if (elapsed >= 1700 && !g.reducedMotion.load()) {
+            } else if (elapsed >= 1700 && !On(Setting::ReducedMotion)) {
                 BYTE next = (BYTE)std::max(0, std::min(242, (int)(242 * (2000 - elapsed) / 300)));
                 if (next != g.toastAlpha) {
                     g.toastAlpha = next;
@@ -7429,7 +7366,7 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
         add(CMD_READER_MODE, L"Reader mode", KeybindDisplay(CMD_READER_MODE), !canR, act && act->readerMode);
     }
     add(CMD_PRINT, L"Print", KeybindDisplay(CMD_PRINT));
-    add(CMD_SCAN, L"Scanlines", KeybindDisplay(CMD_SCAN), false, g.scan);
+    add(CMD_SCAN, L"Scanlines", KeybindDisplay(CMD_SCAN), false, On(Setting::Scanlines));
     add(CMD_FULLSCREEN, L"Fullscreen", KeybindDisplay(CMD_FULLSCREEN), false, g.fullscreen);
     add(CMD_DEVTOOLS, L"Developer tools", KeybindDisplay(CMD_DEVTOOLS));
     sep();
@@ -8291,13 +8228,12 @@ static void NetSample() {
 }
 
 static void OnNetTimer() {
-    if (!g.netSpeed || IsIconic(g.hwnd) || g.fullscreen) return;
+    if (!On(Setting::NetSpeed) || IsIconic(g.hwnd) || g.fullscreen) return;
     NetSample();
     InvalidateStatus();
 }
 
 static void SetNetSpeed(bool on) {
-    g.netSpeed = on;
     if (!g.hwnd) return;
     g.netPrev.clear(); g.netTick = 0; g.netDown = g.netUp = 0;
     if (on) { NetSample(); SetTimer(g.hwnd, TIMER_NET, 1000, nullptr); }
@@ -8589,12 +8525,12 @@ static void Paint(HDC hdc) {
         wchar_t right[96];
         swprintf_s(right, L"%s%s%02d:%02d",
                    zp != 100 ? (L"ZOOM " + std::to_wstring(zp) + L"%   ").c_str() : L"",
-                   g.scan ? L"SCAN ON   " : L"", t.wHour, t.wMinute);
+                   On(Setting::Scanlines) ? L"SCAN ON   " : L"", t.wHour, t.wMinute);
         SIZE rs; GetTextExtentPoint32W(mem, right, (int)wcslen(right), &rs);
         SetTextColor(mem, SecondaryAccent());
         DrawTextW(mem, right, -1, &tr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         RECT lr = tr; lr.right -= rs.cx + S(16);
-        if (g.netSpeed) {
+        if (On(Setting::NetSpeed)) {
             // download and upload speed, at the far left; a fixed width keeps the status text from jumping
             std::wstring dn = L"\x25BC " + Rate(g.netDown), up = L"\x25B2 " + Rate(g.netUp);
             SIZE col; GetTextExtentPoint32W(mem, L"\x25BC 999.99 MB/s", 16, &col);
@@ -8630,12 +8566,12 @@ static void BroadcastThemeAccent() {
     if (g.toastHwnd && IsWindowVisible(g.toastHwnd)) InvalidateRect(g.toastHwnd, nullptr, FALSE);
     SendState();
     std::wstring js = L"(()=>{document.documentElement.classList.toggle('light'," +
-                      std::wstring(g.lightMode.load() ? L"true" : L"false") +
+                      std::wstring(On(Setting::LightMode) ? L"true" : L"false") +
                       L");document.documentElement.classList.toggle('hc'," +
-                      std::wstring(g.highContrast.load() ? L"true" : L"false") +
+                      std::wstring(On(Setting::HighContrast) ? L"true" : L"false") +
                       L");let s=document.getElementById('nn-accent');if(!s){s=document.createElement('style');s.id='nn-accent';document.head.appendChild(s);}s.textContent=" +
                       JsonStr(Wide(ThemeRuleCss())) +
-                      L";window.__nnSetLang&&window.__nnSetLang(" + JsonStr(g.langId.load() == 1 ? L"id" : L"en") + L");})();";
+                      L";window.__nnSetLang&&window.__nnSetLang(" + JsonStr(Indonesian() ? L"id" : L"en") + L");})();";
     auto push = [&](CefRefPtr<CefBrowser> b) {
         if (b && b->GetMainFrame()) b->GetMainFrame()->ExecuteJavaScript(js, "", 0);
     };
@@ -8647,53 +8583,9 @@ static void BroadcastThemeAccent() {
 }
 
 // A change made on the settings page (already validated on the IO thread). Runs on the UI thread.
-// The old fields, until everything reads the settings module itself.
-static void MirrorSetting(Setting id) {
-    const bool on = settings::Flag(id);
-    const int n = settings::Number(id);
-    switch (id) {
-    case Setting::Scanlines: g.scan = on; break;
-    case Setting::Favicons: g.favicons = on; break;
-    case Setting::BookmarksBar: g.bookmarksBar = on; break;
-    case Setting::HttpsOnly: g.httpsOnly = on; break;
-    case Setting::BlockAds: g.blockAds = on; break;
-    case Setting::BlockTrackers: g.blockTrackers = on; break;
-    case Setting::StripTracking: g.stripTracking = on; break;
-    case Setting::Block3pCookies: g.block3pCookies = on; break;
-    case Setting::StrictReferrer: g.strictReferrer = on; break;
-    case Setting::SavePasswords: g.savePasswords = on; break;
-    case Setting::A11yTree: g.a11yTree = on; break;
-    case Setting::ReducedMotion: g.reducedMotion = on; break;
-    case Setting::HighContrast: g.highContrast = on; break;
-    case Setting::WelcomeDismissed: g.welcomeDismissed = on; break;
-    case Setting::SmoothScroll: g.smooth = on; break;
-    case Setting::NetSpeed: g.netSpeed = on; break;
-    case Setting::ForceDark: g.forceDark = on; break;
-    case Setting::LightMode: g.lightMode = on; break;
-    case Setting::BgLimit: g.bgLimit = on; break;
-    case Setting::BatterySaver: g.batterySaver = on; break;
-    case Setting::BatteryAuto: g.batteryAuto = on; break;
-    case Setting::NetLimitAll: g.netLimitAll = on; break;
-    case Setting::MinFontSize: g.minFontSize = n; break;
-    case Setting::RamLimitMB: g.ramLimitMB = (DWORD)n; break;
-    case Setting::NetLimitKB: g.netLimitKB = (DWORD)n; break;
-    case Setting::DockWidth: g.dockWidthDip = n; break;
-    case Setting::SmoothStep: g.smoothStep = n; break;
-    case Setting::SmoothTime: g.smoothTime = n; break;
-    case Setting::DevDock: g.devDock = n; break;
-    case Setting::Lang: g.langId = settings::Text(id) == L"id" ? 1 : 0; break;
-    case Setting::DohMode: g.dohMode = settings::Text(id); break;
-    case Setting::DohProvider: g.dohProvider = settings::Text(id); break;
-    case Setting::DohCustom: g.dohCustom = settings::Text(id); break;
-    case Setting::AccentPreset: case Setting::AccentPink: case Setting::AccentCyan: ThemeRefresh(); break;
-    default: break;
-    }
-}
-
 // What follows from a changed setting, whoever changed it (settings page, menu, shortcut,
 // toolbar, performance panel or developer tools). Called by the settings module on the UI thread.
 static void OnSettingChanged(Setting id) {
-    MirrorSetting(id);
     const bool on = settings::Flag(id);
     auto eachPage = [](auto fn) { for (auto& t : g.tabs) if (t->browser && !t->discarded) fn(t->browser); };
     switch (id) {
@@ -8763,13 +8655,19 @@ static void OnSettingChanged(Setting id) {
         break;
     }
     case Setting::DockDefault: SelectDockApp(settings::Number(id)); break;
-    case Setting::DockWidth: Layout(); break;
+    case Setting::DockWidth:
+        g.dockWidthDip = settings::Number(id);
+        Layout();
+        break;
     case Setting::Lang:
         BroadcastThemeAccent();
         ShowNotice(settings::Text(id) == L"id" ? L"BAHASA: INDONESIA" : L"LANGUAGE: ENGLISH");
         break;
     case Setting::DohMode: case Setting::DohProvider: case Setting::DohCustom: ApplyDohPrefs(); break;
-    case Setting::AccentPreset: case Setting::AccentPink: case Setting::AccentCyan: BroadcastThemeAccent(); break;
+    case Setting::AccentPreset: case Setting::AccentPink: case Setting::AccentCyan:
+        ThemeRefresh();
+        BroadcastThemeAccent();
+        break;
     default: break;   // read when it is needed
     }
 }
@@ -8787,7 +8685,8 @@ static void LoadSettings() {
     setup.systemHighContrast = SystemHighContrast();
     setup.onChange = OnSettingChanged;
     settings::Load(storage, setup);
-    for (int i = 0; i < (int)Setting::Count; i++) MirrorSetting((Setting)i);
+    ThemeRefresh();
+    g.dockWidthDip = settings::Number(Setting::DockWidth);   // dragging changes it before it is saved
     g.dockActive = settings::Number(Setting::DockDefault);   // which dock app is shown can change afterwards
 }
 
@@ -8870,11 +8769,11 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
 static std::wstring DownloadBaseDir(bool create) {
     std::wstring dir = KnownFolder(FOLDERID_Downloads);
     if (dir.empty()) return {};
-    if (RegGetDword(L"DlSubfolder", 1) != 0) {
+    if (On(Setting::DlSubfolder)) {
         dir += L"\\NeonNet Download";
         if (create) {
             CreateDirectoryW(dir.c_str(), nullptr);
-            if (RegGetDword(L"DlCategories", 1) != 0) {
+            if (On(Setting::DlCategories)) {
                 static const wchar_t* cats[] = {
                     L"Compressed", L"Documents", L"General", L"Images", L"Music", L"Programs", L"Video"
                 };
@@ -8888,7 +8787,7 @@ static std::wstring DownloadBaseDir(bool create) {
 static std::wstring DownloadCategoryDir(const std::wstring& name, const std::wstring& mime, bool create) {
     std::wstring base = DownloadBaseDir(create);
     if (base.empty()) return {};
-    if (RegGetDword(L"DlCategories", 1) != 0) {
+    if (On(Setting::DlCategories)) {
         std::wstring cat = store::ClassifyCategory(name, mime);
         std::wstring dir = base + L"\\" + cat;
         if (create) CreateDirectoryW(dir.c_str(), nullptr);
@@ -9494,9 +9393,8 @@ static void StartFastOrCefDownload(std::shared_ptr<FastDlJob> job) {
     SendState();
     InvalidateStatus();
 
-    bool fastEnabled = RegGetDword(L"FastDownload", 1) != 0;
-    int conns = (int)RegGetDword(L"FastConnections", 8);
-    if (conns != 4 && conns != 8 && conns != 16) conns = 8;
+    bool fastEnabled = On(Setting::FastDownload);
+    int conns = settings::Number(Setting::FastConnections);
     job->maxConns = conns;
 
     std::wstring lowUrl = job->url;
@@ -9547,7 +9445,7 @@ static void StartDownloadWithFastDl(unsigned cefId, const std::wstring& url, con
     }
     g_fastDlJobs[cefId] = job;
 
-    if (RegGetDword(L"AskDownload", 0) != 0) {
+    if (On(Setting::AskDownload)) {
         auto* heapJob = new std::shared_ptr<FastDlJob>(job);
         if (!g.hwnd || !PostMessageW(g.hwnd, WM_APP_FASTDL, 2, (LPARAM)heapJob)) {
             delete heapJob;
@@ -10157,7 +10055,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     ProxyLoad();
     SpLoad();
     LoadShieldExempt();
-    if (g.blockAds || g.blockTrackers) LoadBlocklistAsync();
+    if (On(Setting::BlockAds) || On(Setting::BlockTrackers)) LoadBlocklistAsync();
 
     WNDCLASSEXW wc{ sizeof(wc) };
     wc.lpfnWndProc = WndProc;
@@ -10234,7 +10132,7 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     LoadKeepHosts();
     LoadDarkExempt();
     SetTimer(g.hwnd, TIMER_AUDIO, 1000, nullptr);
-    if (g.netSpeed) { NetSample(); SetTimer(g.hwnd, TIMER_NET, 1000, nullptr); }
+    if (On(Setting::NetSpeed)) { NetSample(); SetTimer(g.hwnd, TIMER_NET, 1000, nullptr); }
 
     CefRunMessageLoop();
     g_client = nullptr;

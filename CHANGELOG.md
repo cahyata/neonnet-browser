@@ -15,6 +15,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 - Typing a `neonnet://` address in the new tab box opens it.
 - Two downloads with the same name that start together get separate files.
 
+### Changed
+- Changing light mode, Force Dark or automatic updates on the Settings page shows the same status notice as the menu.
+- A value in the registry that no setting offers (for example a hand-edited scroll step) now falls back to the default.
+
+### Under the hood
+- All settings live in one module (`src/settings.cpp`) with the project's first automated tests (`build.ps1 -Test`).
+
 ### Accessibility & UI
 - **Light theme contrast:** the neon accents, `ON` green, danger red and yellow now reach 4.5:1 on every light surface. The accent is darkened until it passes instead of to a fixed brightness, and the Extensions page, the bookmarks drop-down and the VPN panel no longer use dark-theme-only colours in light mode.
 - **Visible keyboard focus:** the address bar, search fields, selects, tabs, the `GO` button and the Settings index drew their focus ring outside a cut corner, where it was clipped away. The ring is now drawn inside the shape. The command palette and the workspace dialog show focus too.
