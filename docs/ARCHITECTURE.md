@@ -35,7 +35,7 @@ Since CEF 138, the Chromium sandbox on Windows can only be used through CEF's pr
 
 NeonNet uses `CefRunMessageLoop()`: one UI thread runs both Windows messages and CEF work. This means:
 - `WndProc` and all CEF UI-thread callbacks run on the same thread, so no locking is needed.
-- The only code on another thread is `UiSchemeFactory::Create` (IO thread). It touches no state; it forwards commands to the UI thread with `PostMessageW(g.hwnd, WM_APP_CMD, ...)`.
+- Code on other threads: request handlers and `UiSchemeFactory::Create` (IO thread), and a few background workers (update check, block list loading, download disk writes, proxy test). The IO thread reads only atomics and data behind a mutex; commands and changes go to the UI thread with `PostMessageW` or `SendMessageTimeout`.
 
 ## Main window
 
@@ -293,8 +293,6 @@ NeonNet's pages are really `https://neonnet.ui/<name>.html`. `chrome.html` shows
 The toolbar fetches `/suggest?q=` from its own host (`chrome.neonnet.ui`); the factory answers only the toolbar browser (403 for any other frame), and the text never leaves the process. `store::SuggestJson()` returns up to 8 entries: bookmarks and history entries that contain every word of the query (case-insensitive, in the address or title), merged by address, scored by: address starts with the typed text (+60), else host starts with the first word (+45) or contains it (+25); a title word starts with a typed word (+8); bookmark (+25); visits (1.2 each, up to 25); recency (up to +20, decaying over about 10 days). `chrome.html` debounces input by 40 ms, drops answers that arrive out of order, and builds the list with `textContent`.
 
 The list needs room over the page, so the toolbar browser grows: `chrome.html` measures the list and sends `dropdown <height in CSS px>` (0 when closed). `ChromeHostRect()` makes the toolbar window that tall and `Place()` raises it above the page windows. `ContentRect()` does not change, so the page below is not re-laid out. The window width does not change; a width change closes the list (a height change is expected, because the host causes it). Arrow keys, Enter and Esc are handled in the page itself.
-
-## Find in page
 
 ## Find in page
 

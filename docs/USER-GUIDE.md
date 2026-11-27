@@ -30,7 +30,7 @@ The installer adds NeonNet to the list too, so the button is only needed for a c
 
 | Part | What it does |
 |---|---|
-| Top row | Logo, workspace switcher (`MAIN`, `+`), tab list (numbered 01, 02, ...), `+` button, and the minimize, maximize and close buttons |
+| Top row | Logo, workspace switcher (`MAIN`, `+`), tab list (numbered 01, 02, ...), `+` button, and the minimize, maximize and close buttons. A workspace is a group of tabs; Alt+1 … Alt+9 switch between them |
 | Navigation row | `DOCK` (Social Dock), `[◀]` back, `[▶]` forward, `[⟳]` reload (`[✕]` stop while loading), `[⌂]` home, `PROXY` tunnel, address bar (lock icon, search engine selector, `DARK` exception toggle, `READ` Reader Mode, clickable zoom badge when not `100%`, `☆` bookmark star), `GO`, `>_` Command Palette, `PERF`, `⬇` Downloads popover, Shield (Ad & Tracker Blocker), and `≡` menu |
 | Find bar | Shown under the navigation row while you search the page (see [Find in page](#find-in-page)) |
 | Thin line under the address bar | Animated pink-cyan bar while a page is loading |
@@ -114,7 +114,7 @@ Sound is detected from audio and video elements on the page that are playing, no
 | Ctrl+L, F6 | Focus the address bar |
 | F5, Ctrl+R | Reload |
 | Alt+Left / Alt+Right | Back / forward |
-| Alt+Home | New tab page |
+| Alt+Home | Home page (the new tab page unless you set another) |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Zoom in / zoom out / reset zoom |
 | Ctrl+P | Print |
 | F1 | User guide (opens online documentation) |
@@ -124,7 +124,7 @@ Sound is detected from audio and video elements on the page that are playing, no
 
 ## The `≡` menu
 
-New tab, close tab, reopen closed tab, bookmark this page, bookmarks, history, downloads, **Extensions (Userscripts)**, find in page, zoom, print, scanlines on/off, fullscreen, developer tools, settings, the update options (see [Updates](#updates)), and **About NeonNet** (Chromium version and the shortcut list).
+New tab, new incognito window, reopen closed tab, command palette, bookmarks, history, downloads, **Extensions**, find in page, split view, reader mode, print, scanlines on/off, fullscreen, developer tools, settings, **Restart to update** or **Download** when a newer version is ready, the user guide, and **About NeonNet** (Chromium version and the shortcut list).
 
 Use the mouse, or the arrow keys and Enter. Esc, a click outside the menu, or another click on `≡` closes it.
 
@@ -134,6 +134,7 @@ The menu is drawn in the NeonNet theme, like the `≡` menu: arrows and Enter, o
 - **Open link in new tab** and **Open link in incognito window:** shown when you right-click a link.
 - **Open image in new tab:** shown when you right-click an image.
 - **Search <engine> for "...":** shown when text is selected. It uses the search engine from Settings.
+- **Copy clean link:** shown on a link. Copies its address without tracking parameters.
 - **View page source:** shown when you right-click empty page space; opens in a new tab.
 - **Open in system player:** shown when you right-click a video or audio player on a page. See [Videos NeonNet cannot play](#videos-neonnet-cannot-play).
 - **Inspect:** opens the developer tools at the clicked element.
@@ -153,7 +154,8 @@ NeonNet does not include the H.264 and AAC codecs, because they need patent lice
 Ctrl+Shift+N, or **New incognito window** in the `≡` menu, opens a second NeonNet window with a green frame and an INCOGNITO badge.
 
 - **Not saved:** cookies, cache, local storage and sign-ins live in memory only, so you are signed out of everything and nothing is left when the window closes. No browsing history is recorded.
-- **Kept:** files you download stay on disk (the downloads page lists them until the window closes). Settings you change, such as the search engine, are shared with the normal window.
+- **Kept:** files you download stay on disk (the downloads page lists them until the window closes). Most settings you change there, such as HTTPS-only mode or the ad blocker, are saved and shared with the normal window. The search engine, interface language, light or dark theme, accent colours, the quick start tips and the proxy switch apply to the incognito window only. Search engines, keyboard shortcuts and proxy profiles cannot be edited there.
+- **Site exceptions** (Shield, keep awake, Force Dark, third-party cookies) made in an incognito window apply to it only and are never saved.
 - **Bookmarks** are shown, so the address bar and new tab page still suggest them, but they cannot be added, changed or removed from an incognito window. The history menu entry is turned off.
 - **Several incognito tabs share one session.** Pressing Ctrl+Shift+N again, or starting NeonNet with the incognito option while it is open, adds a tab to the open incognito window. The normal window and its cookies are never touched, and the two do not see each other's sign-ins.
 - **Updates** are checked by the normal window only.
@@ -173,7 +175,7 @@ The find bar belongs to the tab it was opened in and closes when you switch to a
 
 The mouse wheel and the keyboard scroll with an animation instead of jumping: each wheel step glides to its place, and fast turning adds up. It works for arrow keys, space and Shift+space, page up and down, home and end as well. **Settings > SCROLLING** has the switch, the **scroll distance** (short, normal or long: how far one wheel step moves the page) and the **smoothness** (snappy, smooth or very smooth: how long the glide takes). A change applies to the pages that are open, no reload needed.
 
-It stays out of the way where it would do harm: a touchpad (already smooth), a page that handles the wheel itself (maps, editors), text fields, video and audio controls, and scrolling with Ctrl, Shift or Alt held (zoom and sideways scrolling). Only normal web pages are smoothed; NeonNet's own pages scroll as usual.
+It stays out of the way where it would do harm: a touchpad (smooth already, with its own momentum), a page that handles the wheel itself (maps, editors), text fields, video and audio controls, and scrolling with Ctrl, Shift or Alt held (zoom and sideways scrolling). Only normal web pages are smoothed; NeonNet's own pages scroll as usual.
 
 ## Site information and permissions
 
@@ -193,7 +195,42 @@ When a site shows a certificate NeonNet cannot trust (expired, made for another 
 
 ## Blocking trackers and ads (Shield)
 
-Click the **Shield** icon on the toolbar (or configure it in **Settings > SECURITY**) to toggle **Block Ads** (including built-in YouTube ad skipping) and **Block Trackers** independently. Both use the EasyList, EasyPrivacy, and Peter Lowe lists (~82,000 domains) while keeping first-party requests intact. You can disable either blocker per site directly from the Shield popup, and inspect the **List of blocked trackers** on the current page.
+Click the **Shield** icon on the toolbar (or configure it in **Settings > SECURITY**) to toggle **Block Ads** (including built-in YouTube ad skipping) and **Block Trackers** independently. Both are on by default and use the EasyList, EasyPrivacy, and Peter Lowe lists (~82,000 domains) while keeping first-party requests intact. You can disable either blocker per site directly from the Shield popup, and inspect the **List of blocked trackers** on the current page. An exception covers the whole site, subdomains included; an IP address counts as a site of its own. **Settings > SECURITY** lists the exceptions and removes them.
+
+## Tracking protection
+
+In **Settings > SECURITY**:
+
+- **Strip tracking parameters from URLs** (on by default): parameters such as `utm_*`, `fbclid`, `gclid` and `igshid` are removed when you open an address. A site where you turned the tracker blocker off keeps them. **Copy clean link** (right-click a link) and **Copy clean page URL** (command palette) copy an address without them.
+- **Block third-party cookies** (off by default): cookies from other sites than the one you are on are blocked, while signing in to that site keeps working. For embedded sign-in or payment frames, add a host under **Third-party cookie site exceptions**. It covers exactly the host you type.
+- **Strict cross-site Referrer** (off by default): another site is told only the address of the site you came from (`https://example.com/`), not the page or its query.
+
+## DNS-over-HTTPS
+
+**Settings > SECURITY > DNS-over-HTTPS** encrypts the lookup of host names. **Automatic** (default) uses it when your DNS server offers it, **Secure** always uses the provider you choose (Cloudflare, Google, Quad9, AdGuard, OpenDNS or your own `https://` template), and **Off** uses plain DNS.
+
+## Proxy tunnel
+
+The `PROXY` button routes NeonNet's own traffic through a SOCKS5, HTTPS or HTTP proxy; other programs are not affected. Add server profiles in **Settings > PROXY TUNNEL** (proxy passwords are encrypted with Windows DPAPI). NeonNet first checks that the server can be reached, so a dead proxy does not cut your connection. **Prevent WebRTC IP leaks** stops WebRTC from going around the tunnel while it is on.
+
+## Theme and language
+
+- **Light or dark:** **Settings > LANGUAGE, THEME & ACCENT > UI theme mode**, or **Toggle NeonNet UI** in the command palette, switches between Dark Synthwave and Light Cyber Paper.
+- **Accent:** pick a neon preset or your own two colours in the same section.
+- **Interface language:** English or Bahasa Indonesia, also switchable from the quick start tips on the new tab page.
+
+## Accessibility
+
+In **Settings > ACCESSIBILITY**:
+
+- **Screen reader / UI Automation support:** makes web pages and the toolbar readable by NVDA and Windows Narrator. Off by default.
+- **Reduced motion:** turns off scanlines, animations, fades and smooth scrolling motion. It follows the Windows animation setting until you choose yourself.
+- **High contrast:** stronger text and border contrast, no scanlines or shadows, and easily told apart accents. It follows Windows' high contrast setting until you choose yourself.
+- **Minimum font size:** 12 to 20 px for web pages opened afterwards.
+
+## Quick start tips
+
+A card on the new tab page shows the main shortcuts. Dismiss it with **DISMISS**; **Settings > START > Show Quick Start Tips on New Tab** brings it back.
 
 ## Split View, Reader Mode & Social Dock
 
@@ -259,11 +296,16 @@ Ctrl+, , the `≡` menu (**Settings**), or **SETTINGS** on the new tab page open
 
 | Setting | What it does |
 |---|---|
-| **Search engine** | Google, DuckDuckGo, Bing, Brave or Ecosia. Used for text that is not an address, in the address bar and on the new tab page. |
+| **Search engine** | Google, DuckDuckGo, Bing, Brave, Ecosia, or your own engine (a search address with `%s` or `{query}`). Used for text that is not an address, in the address bar and on the new tab page. |
 | **Home page** | Opened at start-up (when NeonNet is started without an address) and by the home button. Empty means the NeonNet new tab page. Only `http://`, `https://` and `file:///` addresses are accepted. New tabs always show the new tab page. |
 | **Site icons on tabs** | On (default): each tab shows the site's own icon between its number and its title (a pinned tab shows it in place of the pin). The icon is fetched from the site by the toolbar page, like an image on a web page. Off: no icons, nothing is fetched. |
 | **Show bookmarks bar** | On (default): shows the bookmarks bar under the address bar (`Ctrl+Shift+B`). |
-| **HTTPS-only mode**, **Block trackers and ads** | See [Certificate warnings and HTTPS-only mode](#certificate-warnings-and-https-only-mode) and [Blocking trackers and ads](#blocking-trackers-and-ads). Both are off by default. |
+| **HTTPS-only mode** | Off by default. See [Certificate warnings and HTTPS-only mode](#certificate-warnings-and-https-only-mode). |
+| **Block ads**, **Block trackers** | On by default. See [Blocking trackers and ads](#blocking-trackers-and-ads-shield). |
+| **Tracking parameters**, **third-party cookies**, **strict Referrer** | See [Tracking protection](#tracking-protection). |
+| **DNS-over-HTTPS**, **Proxy tunnel** | See [DNS-over-HTTPS](#dns-over-https) and [Proxy tunnel](#proxy-tunnel). |
+| **Theme, accent, language** | See [Theme and language](#theme-and-language). |
+| **Accessibility** | See [Accessibility](#accessibility). |
 | **Offer to save passwords** | On (default): NeonNet asks to save a password after a login. See [Saved passwords](#saved-passwords). |
 | **Smooth scrolling**, **Scroll distance**, **Smoothness** | See [Smooth scrolling](#smooth-scrolling). On by default. |
 | **Network speed in the status bar** | On (default). See [Network speed](#network-speed). |
@@ -331,7 +373,7 @@ Automatic updates only work for the copy installed for this user (in the folder 
 | Crash log (written if NeonNet or a tab renderer crashes) | `%LOCALAPPDATA%\NeonNet\crash.log` (and `crash.prev.log` when rotated) |
 | Userscripts (Extensions) | `%LOCALAPPDATA%\NeonNet\userscripts\` (`index.txt` and `<id>.user.js`) |
 | Downloaded updates (deleted after installing) | `%LOCALAPPDATA%\NeonNet\Updates` |
-| Settings (scanlines, search engine, home page, download behaviour, window position, automatic updates) | Registry `HKEY_CURRENT_USER\Software\NeonNet` |
+| Settings, site exceptions and window position | Registry `HKEY_CURRENT_USER\Software\NeonNet` |
 | Shortcuts | Start menu `NeonNet`, and the desktop if chosen (an install for all users: the shared Start menu and desktop) |
 
 Session cookies (cookies without an expiry date) are cleared when NeonNet closes, as in Chrome's default setup. Normal sign-in cookies are kept.

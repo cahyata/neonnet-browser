@@ -428,7 +428,7 @@ footer{
 
 <header class="topbar">
   <div class="top-row">
-    <div class="brand">&#9632; <b>NEON</b>NET <span class="badge">v1.10.0</span></div>
+    <div class="brand">&#9632; <b>NEON</b>NET <span class="badge">v1.11.0</span></div>
     <div class="addr">
       <span>&gt;&gt;</span>
       <input id="filter" spellcheck="false" placeholder="filter docs, shortcuts, pages, or commands (Ctrl+K)">
@@ -509,6 +509,14 @@ footer{
           <b>Workspaces, Audio &amp; Scanlines</b>
           <span>Organize tabs into colored workspaces, mute noisy tabs from the tab strip, and toggle CRT scanlines from <code>&equiv; &rarr; Scanlines</code>.</span>
         </div>
+        <div class="mini-card">
+          <b>Theme &amp; Language</b>
+          <span>Switch between Dark Synthwave and Light Cyber Paper, pick a neon accent, and choose English or Bahasa Indonesia in <code>neonnet://settings</code>.</span>
+        </div>
+        <div class="mini-card">
+          <b>Accessibility</b>
+          <span>Screen reader support, reduced motion, a high contrast theme and a minimum font size for web pages, under <b>Settings &rarr; Accessibility</b>.</span>
+        </div>
       </div>
     </section>
 
@@ -568,7 +576,7 @@ footer{
       <ul>
         <li><strong>Metadata headers:</strong> Supports <code>@name</code>, <code>@version</code>, <code>@description</code>, <code>@match</code>, <code>@include</code>, <code>@exclude</code>, and <code>@run-at</code> (<code>document-start</code>, <code>document-end</code>, <code>document-idle</code>).</li>
         <li><strong>GM APIs included:</strong> <code>GM_getValue</code>, <code>GM_setValue</code>, <code>GM_deleteValue</code>, <code>GM_listValues</code>, <code>GM_addStyle</code>, and <code>GM_info</code>.</li>
-        <li><strong>Easy import:</strong> Drag and drop any <code>.user.js</code> file onto <code>neonnet://extensions</code>, click <b>+ NEW SCRIPT</b>, or edit files in <code>%LOCALAPPDATA%\NeonNet\UserData\userscripts\</code>.</li>
+        <li><strong>Easy import:</strong> Drag and drop any <code>.user.js</code> file onto <code>neonnet://extensions</code>, click <b>+ NEW SCRIPT</b>, or edit files in <code>%LOCALAPPDATA%\NeonNet\userscripts\</code>.</li>
       </ul>
     </section>
 
@@ -587,10 +595,11 @@ footer{
       <h2>06 // PRIVACY, SHIELD, PROXY &amp; FORCE DARK <span class="tag">LOCAL FIRST</span></h2>
       <div class="info ghost">
         <div class="info-title">&gt; GHOST MODE (INCOGNITO &bull; CTRL+SHIFT+N)</div>
-        Opens a green-accented window backed by a temporary profile folder. History, cookies, and site storage from that session are deleted automatically after the window closes. Bookmarks and downloaded files remain saved.
+        Opens a green-accented window whose cookies and site storage live in memory only. No history is recorded, site exceptions are never saved, and the session is gone when the window closes. Bookmarks and downloaded files remain.
       </div>
       <ul>
-        <li><strong>Ad &amp; Tracker Shield:</strong> Click the Shield icon on the toolbar to toggle <b>Block Ads</b> (including built-in YouTube ad skipping) and <b>Block Trackers</b> independently, configure per-site exceptions, and inspect the list of blocked trackers on the current page.</li>
+        <li><strong>Ad &amp; Tracker Shield:</strong> Click the Shield icon on the toolbar to toggle <b>Block Ads</b> (including built-in YouTube ad skipping) and <b>Block Trackers</b> independently, configure per-site exceptions, and inspect the list of blocked trackers on the current page. Both are on by default.</li>
+        <li><strong>Tracking Protection:</strong> Removes tracking parameters (<code>utm_*</code>, <code>fbclid</code>, <code>gclid</code>) from addresses, with <b>Copy clean link</b> on right-click; can block third-party cookies (with exceptions per host) and trim cross-site referrers.</li>
         <li><strong>Force Dark Mode &amp; Exceptions:</strong> Automatically turns light websites dark while letting you exclude specific sites in one click via the <code>DARK</code> button in the address bar or the lock panel.</li>
         <li><strong>DNS-over-HTTPS (DoH) &amp; Proxy Tunnel:</strong> Encrypt DNS lookups (Cloudflare, Google, Quad9, AdGuard, or custom) and route browser traffic through SOCKS5/HTTPS proxy profiles with WebRTC leak protection.</li>
         <li><strong>Local Data Directory:</strong> Bookmarks, history, settings, and userscripts live locally under <code>%LOCALAPPDATA%\NeonNet\</code>. Clear browsing data anytime in <code>neonnet://settings</code>.</li>
@@ -601,7 +610,7 @@ footer{
       <h2>07 // AUTO-UPDATE &amp; CRASH LOGS <span class="tag">MAINTENANCE</span></h2>
       <div class="info warn">
         <div class="info-title">DIAGNOSTIC CRASH LOGS</div>
-        If NeonNet exits unexpectedly, it writes a stack trace, exception code, and timestamp to <code>%LOCALAPPDATA%\NeonNet\UserData\crash.log</code> (without needing a debugger or extra runtime DLLs). Attach this file when opening an issue on GitHub.
+        If NeonNet exits unexpectedly, it writes a stack trace, exception code, and timestamp to <code>%LOCALAPPDATA%\NeonNet\crash.log</code> (without needing a debugger or extra runtime DLLs). Attach this file when opening an issue on GitHub.
       </div>
       <ul>
         <li><strong>Verified Updates:</strong> Installed builds check GitHub Releases at most once per day (or manually via <code>&equiv; &rarr; Check for updates</code>) and verify the installer SHA-256 checksum before applying.</li>

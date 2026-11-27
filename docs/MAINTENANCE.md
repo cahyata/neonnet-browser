@@ -43,6 +43,7 @@ Suggested scheme:
 
 ## Release checklist
 
+- [ ] `build.ps1 -Test` passes
 - [ ] `build.ps1 -Clean` finishes without errors
 - [ ] `build/app/NeonNet.exe` opens and the new tab page looks right
 - [ ] Heavy sites (YouTube, GitHub, Google Maps) work smoothly
@@ -64,7 +65,7 @@ The repository is `neonnet-browser`. The app itself is still called NeonNet.
 
 ### What goes into the repository
 
-Everything not listed in `.gitignore`: `src/`, `ui/`, `installer/`, `tools/`, `docs/`, `build.ps1`, `cef_version.txt`, `README.md`, `CHANGELOG.md`, `SECURITY.md`, `THIRD_PARTY_NOTICES.md`, `LICENSE` and `.gitignore`.
+Everything not listed in `.gitignore`: `src/`, `tests/`, `ui/`, `design/`, `installer/`, `tools/`, `docs/`, `build.ps1`, `cef_version.txt`, `README.md`, `CHANGELOG.md`, `GLOSSARY.md`, `SECURITY.md`, `THIRD_PARTY_NOTICES.md`, `LICENSE` and `.gitignore`.
 
 Keep out of the repository:
 

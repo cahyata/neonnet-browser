@@ -38,6 +38,7 @@ NeonNet is a native Win32 browser built on the [Chromium Embedded Framework](htt
 
 - **Shield** with separate ad and tracker blockers, per-site exceptions and a built-in YouTube ad skipper.
 - **Incognito windows**, HTTPS-only mode, certificate warnings and per-site permissions.
+- **Tracking protection:** tracking parameters are removed from addresses, third-party cookies can be blocked and cross-site referrers trimmed.
 - **DNS-over-HTTPS** and a browser-only **proxy tunnel** (SOCKS5, HTTPS or HTTP profiles).
 - **Saved passwords** encrypted with your Windows account (DPAPI).
 - The Chromium sandbox stays enabled.
@@ -53,14 +54,12 @@ NeonNet is a native Win32 browser built on the [Chromium Embedded Framework](htt
 - Neon accent presets or your own colors, scanlines, and **Force Dark Mode** with per-site exceptions.
 - **Userscripts** (`.user.js`) with `GM_*` APIs, a built-in editor and drag-and-drop import.
 - Remappable keyboard shortcuts, smooth scrolling and docked developer tools.
+- Interface in **English** or **Bahasa Indonesia**.
 
-### Coming in the next release
+### Accessibility
 
-These are in the source code but not in version 1.10.0:
-
-- High contrast theme, reduced motion, minimum font size and screen reader support.
-- Tracking parameter removal, third-party cookie blocking and a strict cross-site referrer.
-- Bahasa Indonesia as an interface language.
+- High contrast theme, reduced motion, a minimum font size for web pages and screen reader support.
+- Visible keyboard focus, skip links and headings on NeonNet's own pages.
 
 ## Screenshots
 
@@ -115,7 +114,7 @@ The first build downloads the pinned CEF version (about 175 MB) and takes a few 
 | `dist/NeonNet-Setup.exe` | Installer, with its `.sha256` checksum |
 
 > [!TIP]
-> Use `build.ps1 -NoInstaller` for faster test builds, and `-Clean` to rebuild from scratch.
+> Use `build.ps1 -NoInstaller` for faster test builds, `-Test` to run the tests, and `-Clean` to rebuild from scratch.
 
 > [!IMPORTANT]
 > A test build in `build/app` uses the same profile as an installed copy (`%LOCALAPPDATA%\NeonNet\Profile`).
@@ -123,7 +122,8 @@ The first build downloads the pinned CEF version (about 175 MB) and takes a few 
 ### Project structure
 
 ```
-src/         browser source (C++): window, tabs, storage, updater, userscripts
+src/         browser source (C++): window, tabs, settings, site rules, storage, updater, userscripts
+tests/       tests of the modules that need neither CEF nor a window
 ui/          interface and built-in pages (HTML), embedded into NeonNet.dll
 installer/   the setup program
 design/      design tokens and component catalog
@@ -147,4 +147,6 @@ docs/        documentation
 | [Architecture](docs/ARCHITECTURE.md) | Processes, window, tabs and UI messaging |
 | [Installer](docs/INSTALLER.md) | Installer format, install and uninstall flow |
 | [Maintenance](docs/MAINTENANCE.md) | Updating Chromium and publishing releases |
+| [Changelog](CHANGELOG.md) | What changed in each version |
+| [Glossary](GLOSSARY.md) | The words the code uses for its domain |
 | [Third-party notices](THIRD_PARTY_NOTICES.md) | Components used by NeonNet and their licenses |

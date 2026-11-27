@@ -4,6 +4,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-11-28
+
+### Features
+- **Light theme (Light Cyber Paper):** switch the toolbar, menus, dialogs and NeonNet's pages between dark and light in **Settings > UI theme mode** or from the command palette.
+- **Bahasa Indonesia:** choose English or Indonesian for the interface in **Settings > Interface language** or on the new tab page.
+- **Accessibility:** screen reader / UI Automation support, **Reduced motion** (follows Windows until you choose), a **High contrast** theme and a **minimum font size** for web pages.
+- **Privacy:** tracking parameters (`utm_*`, `fbclid`, `gclid` and others) are removed during navigation, **Copy clean link** (right-click) and **Copy clean page URL** (command palette) copy an address without them, third-party cookies can be blocked with exceptions per site, and cross-site referrers can be trimmed to the origin.
+- **Quick start tips:** a card on the new tab page, which you can dismiss and bring back in **Settings**.
+
 ### Fixes
 - **Settings:** **HTTPS-only mode** and **network speed** showed OFF and could not be switched off.
 - **Incognito:** per-site exceptions (shield, keep awake, Force Dark) are no longer written to the registry.

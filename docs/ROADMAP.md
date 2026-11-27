@@ -25,6 +25,9 @@ Done without being planned here first (the planned ones are ticked in the lists 
 - [x] Smooth scrolling for the mouse wheel and the keyboard, with a setting (1.6.0)
 - [x] Network speed (download and upload) at the bottom left of the status bar, with a setting (1.6.0)
 - [x] Tab right-click menu: pin, duplicate, mute, close other tabs (1.6.0)
+- [x] Light theme, Bahasa Indonesia interface and quick start tips (1.11.0)
+- [x] Accessibility: screen reader support, reduced motion, high contrast, minimum font size (1.11.0)
+- [x] Tracking parameter removal, third-party cookie blocking, strict referrer (1.11.0)
 
 ## Next: everyday use
 
@@ -59,7 +62,7 @@ Done without being planned here first (the planned ones are ticked in the lists 
 
 - [x] **Certificate error page** (S, 1.6.0). A NeonNet warning with GO BACK as the default; the site can be opened anyway under ADVANCED, for the rest of the run.
 - [x] **HTTPS-only mode** (S, 1.6.0). Off by default; asks before falling back to http.
-- [x] **Tracker and ad blocking** (L, 1.6.0). About 82 000 domains from EasyList, EasyPrivacy and Peter Lowe, off by default, switch in settings and the menu. Not done: per-site exceptions, cosmetic (page element) filtering and rules with paths or scripts, which a full filter engine would add.
+- [x] **Tracker and ad blocking** (L, 1.6.0). About 82 000 domains from EasyList, EasyPrivacy and Peter Lowe. On by default since the Shield got per-site exceptions (1.10.0). Not done: cosmetic (page element) filtering and rules with paths or scripts, which a full filter engine would add.
 - [x] **Saved passwords** (L, 1.6.0). DPAPI, ask-to-save, fill only after a click, manager page. Not done: showing a password, import and export, a password check against leaked lists, and HTTP sign-in pop-ups (see the HTTP sign-in item under Next: everyday use).
 
 ## Platform
@@ -73,6 +76,7 @@ Done without being planned here first (the planned ones are ticked in the lists 
 ## Quality and maintenance
 
 - [ ] **Look into the speed gap with Chrome** (M). Speedometer 3.1 scored about 18 in NeonNet 1.1.2 against about 24 in Chrome 157. Field trials, GPU and build type are ruled out; the engine is one major version older. Updating Chromium is the first thing to try (see "Updating Chromium" in [MAINTENANCE.md](MAINTENANCE.md)).
+- [x] **Tests for the settings and site rules** (S, 1.11.0). `build.ps1 -Test`; further modules can follow.
 - [ ] **Automated smoke test** (M). Start the app, load a page, close it and check the exit code is 0; this would have caught the crash on close earlier.
 - [ ] **Update Chromium regularly** (S each time). Follow "Updating Chromium" in [MAINTENANCE.md](MAINTENANCE.md).
 - [x] **Crash log** (S, 1.7.0). Write a short report when the app dies, so problems can be found without a debugger.
