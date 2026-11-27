@@ -7968,11 +7968,17 @@ function tick(now){raf=0;if(!anim)return;if(!anim.t0)anim.t0=now;var p=Math.max(
 anim.el.scrollTo({top:anim.from+(anim.to-anim.from)*e,behavior:'instant'});
 if(p<1)raf=requestAnimationFrame(tick);else anim=null;}
 // mouse wheel: the page's own handlers run first (this one is on the window, in the bubbling phase), and a page that
-// already handled the wheel is left alone. A precision touchpad sends small fractional steps and is already smooth.
+// already handled the wheel is left alone. A precision touchpad is already smooth and keeps rolling by itself, so its
+// whole gesture is left to the browser: animating any part of it makes the page move on after the gesture. Its steps
+// are small or fractional, or, in a fast swipe, big ones that are not the 120 a wheel notch has in wheelDeltaY. A step
+// of exactly 120 right after such a step belongs to the gesture too.
+var pad=-1e9;
 addEventListener('wheel',function(e){
 if(!on||e.defaultPrevented||e.ctrlKey||e.shiftKey||e.altKey||e.metaKey||e.deltaMode===2)return;
-var dy=e.deltaY;if(!dy||Math.abs(e.deltaX)>Math.abs(dy))return;
-if(e.deltaMode===0&&(Math.abs(dy)<40||dy%1!==0))return;
+var dy=e.deltaY;if(!dy)return;
+if(e.deltaMode===0){if(Math.abs(dy)<40||dy%1!==0||e.wheelDeltaY%120!==0){pad=e.timeStamp;anim=null;return;}
+if(e.timeStamp-pad<500)return;}
+if(Math.abs(e.deltaX)>Math.abs(dy))return;
 var el=targetFor(e.target,dy);if(!el)return;
 e.preventDefault();run(el,(e.deltaMode===1?dy*40:dy)*step/100);},{passive:false});
 // keyboard: arrows, space, page up and down, home and end, but never in a text field or on a control that uses the key

@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 - Testing a proxy no longer stalls other NeonNet pages while it waits.
 - Typing a `neonnet://` address in the new tab box opens it.
 - Two downloads with the same name that start together get separate files.
+- **Smooth scrolling:** after a fast touchpad swipe the page no longer moves on by itself once the scrolling has stopped.
 
 ### Changed
 - Changing light mode, Force Dark or automatic updates on the Settings page shows the same status notice as the menu.
