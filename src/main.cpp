@@ -22,6 +22,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <deque>
+#include <functional>
 #include <map>
 #include <memory>
 #include <set>
@@ -107,7 +108,7 @@ static const UINT WM_APP_UPDATE = WM_APP + 3;   // lParam = new UpdateMsg (from 
 static const UINT WM_APP_STORE = WM_APP + 4;    // history/bookmarks changed by a neonnet.ui page
 static const UINT WM_APP_FINISH = WM_APP + 5;   // all browsers closed: destroy the window (posted, not called from OnBeforeClose)
 static const UINT WM_APP_DOWNLOAD = WM_APP + 6; // wParam = DlAction, lParam = download id (from the downloads page)
-static const UINT WM_APP_SETTING = WM_APP + 7;  // lParam = const std::pair<std::wstring, std::wstring>* (key, value; from the settings page)
+static const UINT WM_APP_SETTING = WM_APP + 7;  // lParam = new std::pair<std::wstring, std::wstring> (key, value; from the settings page)
 static const UINT WM_APP_MEDIA = WM_APP + 8;    // lParam = new MediaAsk (a video NeonNet cannot play was opened)
 static const UINT WM_APP_CTXMENU = WM_APP + 9;  // lParam = new CtxMenu (a right-click menu to show in the NeonNet theme)
 static const UINT WM_APP_CLEARDATA = WM_APP + 10;   // lParam = new ClearReq (from the settings page)
@@ -241,7 +242,7 @@ struct App {
     DWORD netLimitKB = 0;          // 0 = off: cap download speed in KB/s via DevTools network conditions
     bool netLimitAll = false;      // false = background tabs only, true = all tabs
     std::set<std::wstring> keepHosts;   // sites whose tabs never go to sleep on their own (registry KeepAwakeHosts)
-    std::set<std::wstring> darkExempt;  // hosts excluded from Force Dark Mode (registry ForceDarkExempt)
+    std::set<std::wstring> darkExempt;  // hosts excluded from Force Dark Mode (registry ForceDarkExempt); the UI thread writes it under g_blockMu, because the IO thread lists it
     int sleepBlocked = 0;          // background tabs the RAM limiter would have slept but must not (audio, typing, kept awake)
     int autoUnloaded = 0;          // tabs unloaded by the RAM limiter since NeonNet started
     ULONGLONG lastLimitAct = 0;
@@ -264,7 +265,8 @@ struct App {
     WINDOWPLACEMENT fsPrev{ sizeof(WINDOWPLACEMENT) };
     std::wstring hoverText, download;
     bool dlActive = false;
-    int dlPct = 0, dlSeq = 0;
+    int dlPct = 0;
+    std::atomic<int> dlSeq{ 0 };   // bumped by the IO thread too, when the downloads page removes entries
     std::wstring alert;   // urgent status bar message (unsupported video / DRM), shown above everything else
     std::wstring startUrl;
     bool favicons = true;             // show site icons on tabs (registry ShowFavicons)
@@ -323,9 +325,6 @@ struct App {
     // find in page
     bool findOpen = false, findCase = false;
     std::wstring findText;
-    // search engine used for text typed in the address bar (index into SEARCH_ENGINES;
-    // atomic because the IO thread answers /api/settings)
-    std::atomic<int> engine{ 0 };
     // "Clear browsing data": 0 idle, 1 running, 2 done, with what the last run removed (read by the IO thread)
     std::atomic<int> clearState{ 0 }, clearCookies{ 0 }, clearSites{ 0 }, clearHistory{ 0 };
     // running downloads (UI thread only): CEF id -> handle used to cancel them
@@ -443,11 +442,6 @@ static const SearchEngine SEARCH_ENGINES[] = {
     { L"ecosia",     L"Ecosia",     L"https://www.ecosia.org/search?q=" },
 };
 static const int SEARCH_ENGINE_COUNT = (int)(sizeof(SEARCH_ENGINES) / sizeof(SEARCH_ENGINES[0]));
-static const SearchEngine& CurrentEngine() {
-    int i = g.engine.load();
-    return SEARCH_ENGINES[i >= 0 && i < SEARCH_ENGINE_COUNT ? i : 0];
-}
-
 // DNS-over-HTTPS (DoH) preset providers. `id` is saved in the registry.
 struct DohProvider { const wchar_t* id; const wchar_t* name; const wchar_t* tmpl; };
 static const DohProvider DOH_PROVIDERS[] = {
@@ -1036,6 +1030,8 @@ static std::wstring ProxyStateJson();
 static std::wstring ThemeStateJson();
 static std::wstring KeybindsMapJson();
 static void CurrentEngineInfo(std::wstring& idOut, std::wstring& nameOut, std::wstring& urlOut);
+static std::wstring CurrentEngineName();
+static std::wstring SearchUrlFor(const std::wstring& query);
 static std::string EnginesJsonArray(bool includeUrl);
 static void SendState() {
     EnsureDefaultWorkspaces();
@@ -1115,7 +1111,7 @@ static void SendState() {
     }
     j += L",\"dlActive\":" + std::wstring(g.dlActive ? L"true" : L"false");
     j += L",\"dlPct\":" + std::to_wstring(g.dlPct);
-    j += L",\"dlSeq\":" + std::to_wstring(g.dlSeq);
+    j += L",\"dlSeq\":" + std::to_wstring(g.dlSeq.load());
     j += L",\"shield\":" + ShieldJsonForTab(a);
     j += L",\"proxy\":" + ProxyStateJson();
     j += L",\"theme\":" + ThemeStateJson();
@@ -2638,6 +2634,27 @@ static void CurrentEngineInfo(std::wstring& idOut, std::wstring& nameOut, std::w
     idOut = SEARCH_ENGINES[0].id; nameOut = SEARCH_ENGINES[0].name; urlOut = SEARCH_ENGINES[0].url;
 }
 
+static std::wstring CurrentEngineName() {
+    std::wstring id, name, url;
+    CurrentEngineInfo(id, name, url);
+    return name;
+}
+
+// The chosen engine's results page for `query`. A custom engine marks the place with %s or
+// {query}, otherwise the query goes at the end (as buildSearchUrl() in chrome.html does).
+static std::wstring SearchUrlFor(const std::wstring& query) {
+    std::wstring id, name, url;
+    CurrentEngineInfo(id, name, url);
+    std::wstring enc = CefURIEncode(query, false).ToWString();
+    for (const wchar_t* mark : { L"%s", L"{query}" }) {
+        size_t p = url.find(mark);
+        if (p == std::wstring::npos) continue;
+        for (; p != std::wstring::npos; p = url.find(mark, p + enc.size())) url.replace(p, wcslen(mark), enc);
+        return url;
+    }
+    return url + enc;
+}
+
 static std::string EnginesJsonArray(bool includeUrl) {
     std::lock_guard<std::mutex> lk(g_engMu);
     std::string o = "[";
@@ -3706,6 +3723,7 @@ static bool IsTrackerHost(std::string_view h) {
 }
 
 static void SaveShieldExempt() {
+    if (g.incognito) return;   // an incognito window keeps its exceptions in memory: they name the sites visited
     auto save = [](const wchar_t* name, const std::set<std::string>& st) {
         std::wstring s;
         for (const auto& h : st) { if (!s.empty()) s += L';'; s += Wide(h); }
@@ -3931,8 +3949,9 @@ static std::wstring StripTrackingParams(const std::wstring& url, int* removedOut
 static bool IsTrackerExemptHost(const std::wstring& host) {
     std::string h = Utf8(host);
     for (auto& c : h) c = (char)tolower((unsigned char)c);
+    std::string site(SiteOf(h));   // exceptions are stored by site, so they cover its subdomains too
     std::lock_guard<std::mutex> lk(g_blockMu);
-    return g_trackersExempt.count(h) > 0;
+    return g_trackersExempt.count(site) > 0;
 }
 
 static void CopyTextToClipboard(const std::wstring& text) {
@@ -4542,7 +4561,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
             // one line, shortened, for the menu text
             for (auto& c : sel) if (c == L'\r' || c == L'\n' || c == L'\t') c = L' ';
             if (sel.size() > 28) { sel.resize(27); sel += L"\x2026"; }
-            model->InsertItemAt(0, MENU_SEARCH_SELECTION, L"Search " + std::wstring(CurrentEngine().name) + L" for \"" + sel + L"\"");
+            model->InsertItemAt(0, MENU_SEARCH_SELECTION, L"Search " + CurrentEngineName() + L" for \"" + sel + L"\"");
             model->InsertSeparatorAt(1);
         }
         if (model->GetCount() > 0) model->AddSeparator();
@@ -4696,7 +4715,7 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
         }
         if (command_id == MENU_SEARCH_SELECTION) {
             std::wstring q = params->GetSelectionText().ToWString();
-            if (!q.empty() && q.size() < 2000) CreateTab(std::wstring(CurrentEngine().url) + CefURIEncode(q, false).ToWString(), false);
+            if (!q.empty() && q.size() < 2000) CreateTab(SearchUrlFor(q), false);
             return true;
         }
         if (command_id == MENU_OPEN_PLAYER) {
@@ -4747,11 +4766,39 @@ public:
         return true;
     }
     void Cancel() override {}
+protected:
+    std::string data_;
 private:
-    std::string data_, mime_;
+    std::string mime_;
     int status_;
     size_t pos_ = 0;
     IMPLEMENT_REFCOUNTING(StringResource);
+};
+
+// A JSON answer that has to wait for something slow (a network connect). The work runs on a
+// CEF thread that may block, so the IO thread stays free for every other request.
+class SlowJsonResource : public StringResource {
+public:
+    explicit SlowJsonResource(std::function<std::string()> work) : StringResource("", "application/json", 200), work_(std::move(work)) {}
+    bool Open(CefRefPtr<CefRequest>, bool& handle_request, CefRefPtr<CefCallback> callback) override {
+        handle_request = false;
+        CefPostTask(TID_FILE_USER_BLOCKING, new Work(this, callback));
+        return true;
+    }
+private:
+    class Work : public CefTask {
+    public:
+        Work(CefRefPtr<SlowJsonResource> res, CefRefPtr<CefCallback> cb) : res_(res), cb_(cb) {}
+        void Execute() override {
+            res_->data_ = res_->work_();
+            cb_->Continue();
+        }
+    private:
+        CefRefPtr<SlowJsonResource> res_;
+        CefRefPtr<CefCallback> cb_;
+        IMPLEMENT_REFCOUNTING(Work);
+    };
+    std::function<std::string()> work_;
 };
 
 static std::wstring QueryParam(const std::wstring& query, const wchar_t* name) {
@@ -4963,6 +5010,8 @@ static std::string SettingsJson() {
          ",\"readerFont\":" + JsonUtf8(RegGetString(L"ReaderFont").empty() ? L"sans" : RegGetString(L"ReaderFont")) +
          ",\"readerSize\":" + std::to_string(RegGetDword(L"ReaderSize", 18)) +
          ",\"scriptTotal\":" + std::to_string(scriptTotal) + ",\"scriptEnabled\":" + std::to_string(scriptEnabled) +
+         ",\"httpsOnly\":" + b(RegGetDword(L"HttpsOnly", 0) != 0) +
+         ",\"netSpeed\":" + b(RegGetDword(L"NetSpeed", 1) != 0) +
          ",\"downloadDir\":" + JsonUtf8(DownloadBaseDir(false)) + ",\"bookmarksBar\":" + b(RegGetDword(L"BookmarksBar", 1) != 0) + ",\"forceDark\":" + b(RegGetDword(L"ForceDark", 0) != 0) + ",\"lightMode\":" + b(g.lightMode.load()) + ",\"lang\":" + JsonUtf8(g.langId.load() == 1 ? L"id" : L"en") + ",\"welcomeDismissed\":" + b(g.welcomeDismissed.load()) +
          ",\"dohMode\":" + JsonUtf8(RegGetString(L"DohMode").empty() ? L"automatic" : RegGetString(L"DohMode")) +
          ",\"dohProvider\":" + JsonUtf8(RegGetString(L"DohProvider").empty() ? L"cloudflare" : RegGetString(L"DohProvider")) +
@@ -4993,14 +5042,10 @@ static std::string SettingsJson() {
     }
     o += "],\"darkExempt\":[";
     {
-        std::wstring ds = RegGetString(L"ForceDarkExempt");
+        // the list in memory, not the registry: an incognito window changes it without saving
+        std::lock_guard<std::mutex> lk(g_blockMu);
         bool first = true;
-        for (size_t i = 0; i < ds.size();) {
-            size_t e = ds.find(L';', i); if (e == std::wstring::npos) e = ds.size();
-            std::wstring h = ds.substr(i, e - i);
-            if (!h.empty()) { if (!first) o += ","; first = false; o += JsonUtf8(h); }
-            i = e + 1;
-        }
+        for (const auto& h : g.darkExempt) { if (!first) o += ","; first = false; o += JsonUtf8(h); }
     }
     o += "],\"version\":" + JsonUtf8(APP_VERSION) +
          ",\"chromium\":" + JsonUtf8(chromium) + "}";
@@ -5137,14 +5182,14 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
             for (const auto& p : g_proxyList) if (p.id == (int)id) { host = p.host; port = p.port; found = true; break; }
         }
         if (!found) return new StringResource("{\"ok\":false,\"error\":\"Profile not found\"}", "application/json", 404);
-        ULONGLONG t0 = GetTickCount64();
-        bool ok = ProxyTcpReachable(host, port, 1200);
-        ULONGLONG dt = GetTickCount64() - t0;
-        if (ok) out = "{\"ok\":true,\"ms\":" + std::to_string(dt) + "}";
-        else {
+        return new SlowJsonResource([host, port]() -> std::string {
+            ULONGLONG t0 = GetTickCount64();
+            bool ok = ProxyTcpReachable(host, port, 1200);
+            ULONGLONG dt = GetTickCount64() - t0;
+            if (ok) return "{\"ok\":true,\"ms\":" + std::to_string(dt) + "}";
             std::wstring msg = L"Cannot reach " + host + L":" + std::to_wstring(port);
-            out = "{\"ok\":false,\"error\":" + JsonUtf8(msg) + "}";
-        }
+            return "{\"ok\":false,\"error\":" + JsonUtf8(msg) + "}";
+        });
     }
     else if (path == L"api/proxy/webrtc") {
         ProxySetWebRtc(QueryParam(query, L"on") == L"1");
@@ -5204,9 +5249,11 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         }
         if (!ok) return new StringResource("{\"error\":\"invalid value\"}", "application/json", 400);
         // Applied on the UI thread, and waited for, so that the page can read the result back.
-        std::pair<std::wstring, std::wstring> msg(key, val);
+        // The receiver frees the message: after a timeout it may still be reading it. This side never
+        // does, so a message that is not delivered at all (NeonNet is closing) is left to the exit.
+        auto* msg = new std::pair<std::wstring, std::wstring>(key, val);
         DWORD_PTR res = 0;
-        SendMessageTimeoutW(g.hwnd, WM_APP_SETTING, 0, (LPARAM)&msg, SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &res);
+        SendMessageTimeoutW(g.hwnd, WM_APP_SETTING, 0, (LPARAM)msg, SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &res);
         out = "{\"ok\":true}";
     }
     else if (path == L"api/keybindings") out = KeybindsJson();
@@ -5967,6 +6014,7 @@ static const wchar_t* SleepProtection(Tab* t) {
 }
 
 static void SaveKeepHosts() {
+    if (g.incognito) return;
     std::wstring s;
     for (const auto& h : g.keepHosts) { if (!s.empty()) s += L';'; s += h; }
     if (s.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, L"KeepAwakeHosts");
@@ -6008,14 +6056,16 @@ static bool IsDarkExempt(const std::wstring& url) {
     return !h.empty() && g.darkExempt.count(h) > 0;
 }
 static void SaveDarkExempt() {
+    if (g.incognito) return;
     std::wstring s;
     for (const auto& h : g.darkExempt) { if (!s.empty()) s += L';'; s += h; }
     if (s.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, REG_KEY, L"ForceDarkExempt");
     else RegSetBin(L"ForceDarkExempt", REG_SZ, s.c_str(), (DWORD)((s.size() + 1) * sizeof(wchar_t)));
 }
 static void LoadDarkExempt() {
-    g.darkExempt.clear();
     std::wstring s = RegGetString(L"ForceDarkExempt");
+    std::lock_guard<std::mutex> lk(g_blockMu);
+    g.darkExempt.clear();
     size_t i = 0;
     while (i < s.size()) {
         size_t e = s.find(L';', i); if (e == std::wstring::npos) e = s.size();
@@ -6030,7 +6080,10 @@ static void ToggleDarkExemptForActive() {
     std::wstring h = DarkHostOf(DisplayUrl(a));
     if (h.empty()) { ShowNotice(L"FORCE DARK EXCEPTION IS FOR WEB SITES ONLY"); return; }
     bool added = false;
-    if (!g.darkExempt.erase(h)) { g.darkExempt.insert(h); added = true; }
+    {
+        std::lock_guard<std::mutex> lk(g_blockMu);
+        if (!g.darkExempt.erase(h)) { g.darkExempt.insert(h); added = true; }
+    }
     SaveDarkExempt();
     for (auto& t : g.tabs) {
         if (t->browser && !t->discarded && DarkHostOf(DisplayUrl(t.get())) == h) {
@@ -6552,7 +6605,9 @@ static void OpenPalette() {
          L",\"splitActive\":" + std::wstring(IsSplitActive() ? L"true" : L"false") +
          L",\"canReader\":" + std::wstring(a && CanReaderUrl(curUrl) ? L"true" : L"false") +
          L",\"readerMode\":" + std::wstring(a && a->readerMode ? L"true" : L"false") +
-         L",\"incognito\":" + std::wstring(g.incognito ? L"true" : L"false") + L"}}";
+         L",\"incognito\":" + std::wstring(g.incognito ? L"true" : L"false") +
+         L",\"keys\":" + KeybindsMapJson() +      // the badges show the user's own shortcuts
+         L",\"theme\":" + ThemeStateJson() + L"}}";
 
     FocusChrome();
     RunInChrome(L"window.__nn&&window.__nn(" + j + L")");
@@ -6716,6 +6771,8 @@ static bool IsNoRepeatCmd(int cmd) {
     case CMD_BOOKMARKS: case CMD_EXTENSIONS: case CMD_PALETTE: case CMD_PRINT:
     case CMD_PIN_TAB: case CMD_MUTE_TAB: case CMD_PROXY_TOGGLE: case CMD_FORCEDARK: case CMD_LIGHTMODE:
     case CMD_SCAN: case CMD_BLOCKADS: case CMD_HELP: case CMD_CARET: case CMD_FULLSCREEN: case CMD_DEVTOOLS:
+    case CMD_BLOCKTRACKERS: case CMD_SPLIT_VIEW: case CMD_SPLIT_SWAP: case CMD_READER_MODE: case CMD_WHATSAPP:
+    case CMD_DARK_EXEMPT:
         return true;
     default: return false;
     }
@@ -8965,7 +9022,10 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
         g.lastStateJson.clear();
         SendState();
     } else if (key == L"darkExemptDel") {
-        if (val == L"*") g.darkExempt.clear(); else g.darkExempt.erase(val);
+        {
+            std::lock_guard<std::mutex> lk(g_blockMu);
+            if (val == L"*") g.darkExempt.clear(); else g.darkExempt.erase(val);
+        }
         SaveDarkExempt();
         for (auto& t : g.tabs) if (t->browser && !t->discarded) ApplyForceDark(t->browser);
         SendState();
@@ -9129,7 +9189,8 @@ static std::wstring DownloadCategoryDir(const std::wstring& name, const std::wst
 }
 
 // Where a download goes: the categorized NeonNet Download subfolder (or Downloads folder),
-// with " (1)", " (2)" ... added to the name when a file of that name exists.
+// with " (1)", " (2)" ... added to the name when a file of that name exists, or a download that
+// is still running is going to write it (its file may not be there yet).
 static std::wstring DownloadTarget(std::wstring name, const std::wstring& mime) {
     for (auto& c : name) if (wcschr(L"\\/:*?\"<>|", c) || c < 0x20) c = L'_';
     if (name.empty() || name == L"." || name == L"..") name = L"download";
@@ -9140,7 +9201,8 @@ static std::wstring DownloadTarget(std::wstring name, const std::wstring& mime) 
     std::wstring ext = dot == std::wstring::npos || dot == 0 ? L"" : name.substr(dot);
     std::wstring path = dir + L"\\" + name;
     for (int i = 1; i < 1000 && (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES ||
-                                 GetFileAttributesW((path + L".nnpart").c_str()) != INVALID_FILE_ATTRIBUTES); i++)
+                                 GetFileAttributesW((path + L".nnpart").c_str()) != INVALID_FILE_ATTRIBUTES ||
+                                 store::DownloadPathActive(path)); i++)
         path = dir + L"\\" + stem + L" (" + std::to_wstring(i) + L")" + ext;
     return path;
 }
@@ -10167,7 +10229,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else SendState();
         return 0;
     case WM_APP_SETTING: {
-        auto* m = (const std::pair<std::wstring, std::wstring>*)lp;   // owned by the sender, which waits for us
+        std::unique_ptr<std::pair<std::wstring, std::wstring>> m((std::pair<std::wstring, std::wstring>*)lp);
         if (m) ApplySetting(m->first, m->second);
         return 0;
     }

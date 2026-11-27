@@ -1037,6 +1037,13 @@ bool DownloadGet(long long id, std::wstring& path, int& state, unsigned& cefId, 
     return false;
 }
 
+bool DownloadPathActive(const std::wstring& path) {
+    Shared s;
+    for (const Download& d : downloads)
+        if (d.state == DL_ACTIVE && _wcsicmp(d.path.c_str(), path.c_str()) == 0) return true;
+    return false;
+}
+
 // Programs, scripts and shortcuts are never opened from the downloads page; the user can
 // still show them in the folder and decide there.
 bool DownloadOpenable(const std::wstring& path) {

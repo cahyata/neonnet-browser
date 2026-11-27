@@ -61,6 +61,7 @@ bool DownloadUpdate(unsigned cefId, const std::wstring& url, const std::wstring&
                     const std::vector<int>* segs = nullptr);
 bool DownloadGet(long long id, std::wstring& path, int& state, unsigned& cefId, std::wstring* urlOut = nullptr);
 bool DownloadOpenable(const std::wstring& path);         // false for programs and scripts
+bool DownloadPathActive(const std::wstring& path);       // a running download is going to write this file
 std::string DownloadsJson();                              // newest first
 bool DownloadRemove(long long id);                        // not while it is running
 void DownloadsClear();                                    // removes everything that is not running

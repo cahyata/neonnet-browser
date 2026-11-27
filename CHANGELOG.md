@@ -4,6 +4,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 
 ## [Unreleased]
 
+### Fixes
+- **Settings:** **HTTPS-only mode** and **network speed** showed OFF and could not be switched off.
+- **Incognito:** per-site exceptions (shield, keep awake, Force Dark) are no longer written to the registry.
+- **Search for selection** in the right-click menu uses the chosen search engine, not always Google.
+- **Command palette** shows your own shortcuts, and offers the theme you are not already using.
+- A tracker blocker exception now also keeps tracking parameters on the site's subdomains.
+- Holding a shortcut no longer flips Split View, Reader Mode, Social Dock, the tracker blocker or the Force Dark exception back and forth.
+- Testing a proxy no longer stalls other NeonNet pages while it waits.
+- Typing a `neonnet://` address in the new tab box opens it.
+- Two downloads with the same name that start together get separate files.
+
 ### Accessibility & UI
 - **Light theme contrast:** the neon accents, `ON` green, danger red and yellow now reach 4.5:1 on every light surface. The accent is darkened until it passes instead of to a fixed brightness, and the Extensions page, the bookmarks drop-down and the VPN panel no longer use dark-theme-only colours in light mode.
 - **Visible keyboard focus:** the address bar, search fields, selects, tabs, the `GO` button and the Settings index drew their focus ring outside a cut corner, where it was clipped away. The ring is now drawn inside the shape. The command palette and the workspace dialog show focus too.
