@@ -177,10 +177,13 @@ bool RegistryStorage::ReadNumber(const wchar_t* name, unsigned long& value) {
     return true;
 }
 bool RegistryStorage::ReadText(const wchar_t* name, std::wstring& value) {
-    wchar_t buf[512] = {};
-    DWORD size = sizeof(buf);
-    if (RegGetValueW(HKEY_CURRENT_USER, key_.c_str(), name, RRF_RT_REG_SZ, nullptr, buf, &size) != ERROR_SUCCESS) return false;
-    value = buf;
+    // of any length: the lists of site exceptions grow with every site added
+    DWORD size = 0;
+    if (RegGetValueW(HKEY_CURRENT_USER, key_.c_str(), name, RRF_RT_REG_SZ, nullptr, nullptr, &size) != ERROR_SUCCESS || !size || size > 4 * 1024 * 1024) return false;
+    std::wstring s(size / sizeof(wchar_t), L'\0');
+    if (RegGetValueW(HKEY_CURRENT_USER, key_.c_str(), name, RRF_RT_REG_SZ, nullptr, s.data(), &size) != ERROR_SUCCESS) return false;
+    s.resize(wcsnlen(s.c_str(), s.size()));
+    value = std::move(s);
     return true;
 }
 void RegistryStorage::WriteNumber(const wchar_t* name, unsigned long value) {

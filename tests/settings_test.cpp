@@ -2,34 +2,10 @@
 // computer is read or changed. Run with: build.ps1 -Test
 #include "settings.h"
 #include "json.h"
-#include <cstdio>
-#include <map>
+#include "test.h"
 #include <set>
-#include <vector>
 
 using settings::Id;
-
-static int checks = 0, failed = 0;
-#define CHECK(cond) do { checks++; if (!(cond)) { failed++; printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond); } } while (0)
-
-struct Memory : settings::Storage {
-    std::map<std::wstring, unsigned long> numbers;
-    std::map<std::wstring, std::wstring> texts;
-    int writes = 0;
-    bool ReadNumber(const wchar_t* n, unsigned long& v) override {
-        auto it = numbers.find(n);
-        if (it == numbers.end()) return false;
-        v = it->second; return true;
-    }
-    bool ReadText(const wchar_t* n, std::wstring& v) override {
-        auto it = texts.find(n);
-        if (it == texts.end()) return false;
-        v = it->second; return true;
-    }
-    void WriteNumber(const wchar_t* n, unsigned long v) override { numbers[n] = v; writes++; }
-    void WriteText(const wchar_t* n, const std::wstring& v) override { texts[n] = v; writes++; }
-    void Erase(const wchar_t* n) override { numbers.erase(n); texts.erase(n); writes++; }
-};
 
 // For every setting: a value that is allowed and differs from the default. A new setting needs a line here.
 struct Sample { const wchar_t* name; const wchar_t* other; bool incognitoSaves; };
@@ -242,6 +218,8 @@ static void SettingsPageUsesRealNames() {
     CHECK(toggles >= 20);
 }
 
+void SitesTests();   // sites_test.cpp
+
 int main() {
     EverySettingHasASample();
     EverySettingRoundTrips(false);
@@ -255,6 +233,7 @@ int main() {
     AccentRules();
     JsonShape();
     SettingsPageUsesRealNames();
+    SitesTests();
     printf("%d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }

@@ -27,8 +27,9 @@ function Run($exe, [string[]]$a) { & $exe @a; if ($LASTEXITCODE -ne 0) { throw "
 if ($Test) {
     New-Item -ItemType Directory -Force build\test | Out-Null
     Run cl @('/nologo','/EHsc','/utf-8','/W3','/wd4244','/wd4996','/std:c++20','/MT','/DUNICODE','/D_UNICODE','/DNOMINMAX','/DWIN32_LEAN_AND_MEAN',
-             '/Isrc','/Fobuild\test\','/Febuild\test\settings_test.exe','tests\settings_test.cpp','src\settings.cpp','/link','advapi32.lib')
-    Run build\test\settings_test.exe @()
+             '/Isrc','/Fobuild\test\','/Febuild\test\tests.exe','tests\settings_test.cpp','tests\sites_test.cpp','src\settings.cpp','src\sites.cpp',
+             '/link','advapi32.lib')
+    Run build\test\tests.exe @()
     return
 }
 
