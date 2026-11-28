@@ -40,7 +40,7 @@ The first build takes about 3–5 minutes: it downloads CEF, compiles `libcef_dl
 ## What `build.ps1` does
 
 1. **Finds Visual Studio.** It uses `vswhere` to find an install whose default MSVC toolset actually contains `cl.exe`. This skips broken or half-installed Visual Studio setups.
-2. **Downloads CEF.** It runs `tools/fetch_cef.ps1`, which downloads the version in `cef_version.txt`, verifies its SHA-1 and extracts it to `third_party/cef`. Skipped when that version is already there.
+2. **Downloads CEF.** It runs `tools/fetch_cef.ps1`, which downloads the version in `cef_version.txt`, verifies its SHA-1 and extracts it to `third_party/cef`. Skipped when that version is already there. Where Windows' `tar.exe` cannot read bzip2 (Windows Server 2022), 7-Zip does that part if it is installed.
 3. **Builds `libcef_dll_wrapper.lib`.** This is CEF's C++ layer over its C API. Built once per CEF version.
 4. **Builds `NeonNet.dll`.** Compiled from the sources in `src/`, with `ui/*.html` and the icon embedded as resources.
 5. **Assembles the app folder `build/app`:**

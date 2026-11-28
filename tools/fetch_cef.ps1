@@ -34,8 +34,21 @@ Write-Host 'Extracting ...'
 $tmp = "$root\third_party\cef-extract"
 Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $tmp | Out-Null
-tar -xjf $archive -C $tmp
-if ($LASTEXITCODE -ne 0) { throw 'Extract failed.' }
+$tar = "$env:SystemRoot\System32\tar.exe"
+# Some versions of Windows' tar.exe cannot read bzip2 by themselves (Windows Server 2022, as on GitHub
+# Actions): they hand it to another program and can stall. There 7-Zip, when present, does that layer.
+$sevenZip = Get-Command 7z.exe -ErrorAction SilentlyContinue
+if ($sevenZip -and -not ((& $tar --version) -match 'bz2lib')) {
+    & $sevenZip.Source x $archive "-o$tmp" -y | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Decompress failed.' }
+    $plain = (Get-ChildItem $tmp -Filter *.tar | Select-Object -First 1).FullName
+    & $tar -xf $plain -C $tmp
+    if ($LASTEXITCODE -ne 0) { throw 'Extract failed.' }
+    Remove-Item $plain
+} else {
+    & $tar -xjf $archive -C $tmp
+    if ($LASTEXITCODE -ne 0) { throw 'Extract failed.' }
+}
 Remove-Item -Recurse -Force $dest -ErrorAction SilentlyContinue
 Move-Item (Get-ChildItem $tmp -Directory | Select-Object -First 1).FullName $dest
 Remove-Item -Recurse -Force $tmp, $archive
