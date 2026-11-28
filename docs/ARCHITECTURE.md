@@ -251,7 +251,7 @@ Chromium's command ids in this build are large numbers, not below `MENU_ID_USER_
 
 ## Incognito window
 
-An incognito window is a second NeonNet process started with `--neonnet-incognito` (`LaunchIncognito()`, run by `CMD_INCOGNITO`, Ctrl+Shift+N). `g` is a single global, so a process-per-window design avoids turning every function into one that takes a window.
+An incognito window is a second NeonNet process started with `--neonnet-incognito` (`LaunchIncognito()`, run by the `Incognito` command, Ctrl+Shift+N). `g` is a single global, so a process-per-window design avoids turning every function into one that takes a window.
 
 Isolation has two layers. First, the process has its own `root_cache_path` (`%LOCALAPPDATA%\NeonNet\Incognito`), so it does not hold the normal profile's single-instance lock, and the engine's own files for it can be deleted. Second, and this is what keeps site data off the disk, `OnContextInitialized` creates a `CefRequestContext` with default settings (an empty `cache_path`, which Chromium treats as incognito: cookies, cache, local storage and the rest stay in memory) and `g.reqCtx` is passed to every `CreateBrowserSync` for tabs. Scheme handler factories and preferences are per request context, so `neonnet.ui`, `chrome.neonnet.ui` and the download bubble preference are registered on it as well. The toolbar itself stays on the global context; it stores nothing.
 
@@ -280,9 +280,19 @@ A copy for the player goes to `%LOCALAPPDATA%\NeonNet\Temp\media` (`TempMediaPat
 
 **Adding a setting:** an `Id` and a table row in the settings module, a sample value in `tests/settings_test.cpp`, a case in `OnSettingChanged()` if it has an effect, and the control in `ui/settings.html`.
 
-Not settings, and kept elsewhere: **actions** the page asks for (`checkUpdate`, `defaultBrowser`, `proceed`, removing per-site exceptions), the search engine and other lists (`SearchEngine`, proxy profiles, keybindings, site permissions), and internal notes such as the window placement and the update check time.
+Not settings, and kept elsewhere: **actions** the page asks for (`checkUpdate`, `defaultBrowser`, `proceed`, removing per-site exceptions), the search engine and other lists (`SearchEngine`, proxy profiles, site permissions), keyboard shortcuts (see below), and internal notes such as the window placement and the update check time.
 
-`ServeApi()` runs on the IO thread. `api/settings/set` checks the value there (`Allowed()` for a setting), then sends `WM_APP_SETTING` to the UI thread with `SendMessageTimeout` and waits (at most 2 seconds), so the page can read the new value straight back; `ApplySetting()` calls `Set()` or runs the action. A changed search engine goes to the toolbar in the state message (`search`, the URL prefix that `chrome.html` appends the encoded query to). `newtab.html` reads `searchUrl` from `api/settings`. `HomeUrl()` is used by the home button (`CMD_HOME`) and for the first tab. With `AskDownload` off (the default), `OnBeforeDownload` calls `Continue(path, false)` with a path from `DownloadTarget()` in the Downloads folder (name sanitised, `" (n)"` added until the file is new).
+`ServeApi()` runs on the IO thread. `api/settings/set` checks the value there (`Allowed()` for a setting), then sends `WM_APP_SETTING` to the UI thread with `SendMessageTimeout` and waits (at most 2 seconds), so the page can read the new value straight back; `ApplySetting()` calls `Set()` or runs the action. A changed search engine goes to the toolbar in the state message (`search`, the URL prefix that `chrome.html` appends the encoded query to). `newtab.html` reads `searchUrl` from `api/settings`. `HomeUrl()` is used by the `Home` command and for the first tab. With `AskDownload` off (the default), `OnBeforeDownload` calls `Continue(path, false)` with a path from `DownloadTarget()` in the Downloads folder (name sanitised, `" (n)"` added until the file is new).
+
+## Commands and shortcuts
+
+`src/commands.h` / `commands.cpp` own the list of **commands** and their **shortcuts** (see [GLOSSARY](../GLOSSARY.md)). One table row per command says its name (what the toolbar sends), its label and group on the settings page, its default shortcut, whether holding the keys repeats it and whether it also runs while the developer tools have the focus. The module has no CEF and no window code.
+
+- **Pressed keys:** `OnKey()` says what a key means: run a command, go to a tab or workspace, leave fullscreen, move the focus, swallow a held key, or leave it to the page. The user's shortcuts come before the fixed keys (F5, Ctrl+F4, Ctrl+G, Ctrl+Shift+K, Ctrl+1-9, Alt+1-9, Esc, F6). `HandleShortcutKey()` and `DevToolsClient::OnPreKeyEvent()` in `main.cpp` carry that out; `ExecCmd()` does what each command does, whether a key, the menu or the toolbar asked.
+- **Changed shortcuts:** `Rebind()` and `Reset()` refuse keys another command holds, and `Rebind()` also refuses the keys web pages need to copy, cut, paste, select all, undo and redo. They are saved in `%LOCALAPPDATA%\NeonNet\keybindings.dat` through a small `Storage` interface, so the tests use memory instead. An incognito window saves nothing.
+- **Showing them:** the toolbar gets `KeysJson()` with every state and palette message and builds its tooltips from it; the menu and **About NeonNet** ask `Shortcut()`.
+
+**Adding a command:** an `Id` and a table row in the commands module, its case in `ExecCmd()`, and where it should show: `ShowMenu()` or `buildPalCommands()` in `ui/chrome.html`. A command with a default shortcut or held-key rule also goes in `tests/commands_test.cpp`.
 
 ## Short addresses
 
@@ -321,7 +331,7 @@ The HTML files are embedded as `RCDATA` in `NeonNet.dll`, so there are no loose 
 
 - **Scanlines:** `ScanScript()` inserts one `position:fixed` `div` with `pointer-events:none` and a line gradient. It runs on `OnLoadStart` and when loading finishes. The script is idempotent: it never stacks overlays, and removes the overlay when scanlines are off.
 - **`≡` menu:** a native menu cannot be recolored, so `RunMenu()` shows a `WS_POPUP` window (class `NeonNetMenu`) painted with GDI: clipped-corner region, pink outline, cyan highlight and scanlines drawn with `GdiAlphaBlend`. It runs its own message loop until an item is chosen, Esc is pressed or the popup loses activation, and returns the command like `TrackPopupMenu` does. A `menu` request that arrives within 250 ms of the menu closing is ignored, so a second click on `≡` closes the menu instead of reopening it.
-- **Shortcuts:** `OnPreKeyEvent` catches keys before the page does, for every browser (chrome and tabs).
+- **Shortcuts:** `OnPreKeyEvent` catches keys before the page does, for every browser (chrome and tabs); see [Commands and shortcuts](#commands-and-shortcuts).
 - **Fullscreen:** combines two sources: `fsUser` from F11, and `fsElement` from the page (for example a video) through `OnFullscreenModeChange`. In fullscreen the window covers the whole monitor and the chrome and status bar are hidden.
 - **Downloads:** `OnBeforeDownload` opens a save dialog. `OnDownloadUpdated` shows progress in the status bar.
 - **Extensions (Userscripts):** `src/userscripts.cpp` stores `.user.js` scripts and `index.txt` in `%LOCALAPPDATA%\NeonNet\userscripts\` (read-only in incognito windows). `OnLoadStart` injects `@run-at document-start` scripts and `OnLoadEnd` injects `document-end` / `document-idle` scripts into matching `http://` / `https://` main frames with `GM_addStyle`, `localStorage`-scoped `GM_getValue`/`GM_setValue`/`GM_deleteValue`/`GM_listValues`, `GM_openInTab`, `GM_info`, and `GM.*` wrappers, while keeping `neonnet.ui` pages excluded.

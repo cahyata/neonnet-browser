@@ -12,6 +12,14 @@ _Avoid_: option, preference, config key
 Something the user asks for from a NeonNet page that happens once and leaves no value to remember, such as checking for an update. An action is not a **Setting**.
 _Avoid_: command setting
 
+**Command**:
+Something NeonNet does when the user asks for it with a **Shortcut**, the menu, the command palette or a toolbar button, such as opening a new tab.
+_Avoid_: action (see **Action**)
+
+**Shortcut**:
+The keys that run one **Command**. The user can change them, and one combination belongs to one command only. A few fixed keys, such as F5, run a command and cannot be changed.
+_Avoid_: keybinding, hotkey, accelerator
+
 **Incognito window**:
 A window whose browsing leaves nothing behind once it is closed.
 _Avoid_: private mode, ghost mode

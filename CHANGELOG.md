@@ -10,6 +10,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 - The command palette shows whether the tracker blocker is on.
 - Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+A, Ctrl+Z and Ctrl+Y can no longer be given to a command, which stopped them from working on web pages.
 
+### Under the hood
+- Commands and their keyboard shortcuts live in one module (`src/commands.cpp`), tested like the settings and sites modules.
+
 ## [1.11.0] - 2026-11-28
 
 ### Features

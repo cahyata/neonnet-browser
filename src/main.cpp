@@ -53,6 +53,7 @@
 #include "presets.h"
 #include "settings.h"
 #include "sites.h"
+#include "commands.h"
 #include "updater.h"
 #include "store.h"
 #include "perf.h"
@@ -128,16 +129,6 @@ static const UINT_PTR TIMER_CLOCK = 1, TIMER_ZOOM = 2, TIMER_UPDATE = 3, TIMER_N
                       TIMER_SESSION = 11, TIMER_NET = 12;
 static const ULONGLONG UPDATE_INTERVAL_MS = 24ull * 60 * 60 * 1000;   // check at most once a day
 
-enum Cmd {
-    CMD_NEWTAB = 1, CMD_CLOSETAB, CMD_ZOOMIN, CMD_ZOOMOUT, CMD_ZOOMRESET, CMD_SCAN,
-    CMD_FULLSCREEN, CMD_DEVTOOLS, CMD_ABOUT, CMD_RELOAD, CMD_STOP, CMD_BACK, CMD_FWD,
-    CMD_FOCUSURL, CMD_NEXTTAB, CMD_PREVTAB, CMD_HOME, CMD_PRINT,
-    CMD_UPDATE_CHECK, CMD_UPDATE_AUTO, CMD_UPDATE_RESTART, CMD_UPDATE_PAGE,
-    CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REOPEN, CMD_BOOKMARK, CMD_BOOKMARKS, CMD_BOOKMARKS_BAR, CMD_HISTORY,
-    CMD_DOWNLOADS, CMD_SETTINGS, CMD_INCOGNITO, CMD_PERFORMANCE, CMD_BLOCKADS, CMD_BLOCKTRACKERS, CMD_EXTENSIONS, CMD_HELP, CMD_CARET,
-    CMD_PALETTE, CMD_PIN_TAB, CMD_MUTE_TAB, CMD_FORCEDARK, CMD_DARK_EXEMPT, CMD_PROXY_TOGGLE,
-    CMD_SPLIT_VIEW, CMD_SPLIT_SWAP, CMD_READER_MODE, CMD_WHATSAPP, CMD_LIGHTMODE, CMD_COPY_CLEAN
-};
 enum DlAction { DLA_CANCEL = 1, DLA_OPEN, DLA_SHOW, DLA_RETRY, DLA_ROOT_FOLDER };
 
 // Updater states (see "Auto update" below)
@@ -315,6 +306,7 @@ struct App {
 };
 static App g;
 using Setting = settings::Id;
+using Cmd = commands::Id;
 using sites::HostFromAuthority;
 using sites::OriginOf;
 using sites::SiteOf;
@@ -984,7 +976,6 @@ static void LoadWorkspaces() {
 static std::wstring ProxyStateJson();
 
 static std::wstring ThemeStateJson();
-static std::wstring KeybindsMapJson();
 static void CurrentEngineInfo(std::wstring& idOut, std::wstring& nameOut, std::wstring& urlOut);
 static std::wstring CurrentEngineName();
 static std::wstring SearchUrlFor(const std::wstring& query);
@@ -1071,7 +1062,7 @@ static void SendState() {
     j += L",\"shield\":" + ShieldJsonForTab(a);
     j += L",\"proxy\":" + ProxyStateJson();
     j += L",\"theme\":" + ThemeStateJson();
-    j += L",\"keys\":" + KeybindsMapJson();
+    j += L",\"keys\":" + commands::KeysJson();
     j += L"}";
     if (j == g.lastStateJson) return;
     g.lastStateJson = j;
@@ -1903,369 +1894,15 @@ static std::wstring ThemeStateJson() {
 static void BroadcastThemeAccent();
 
 // ---------------------------------------------------------------------------
-// Custom Keybindings (per-command customizable keyboard shortcuts)
-
-struct KeyBindDef {
-    const char* id;
-    const wchar_t* label;
-    const wchar_t* group;
-    int cmd;
-    const wchar_t* defCombo;
-};
-static const KeyBindDef KEY_DEFS[] = {
-    { "newtab",        L"New tab",                 L"Tabs",       CMD_NEWTAB,        L"Ctrl+T" },
-    { "closetab",      L"Close tab",               L"Tabs",       CMD_CLOSETAB,      L"Ctrl+W" },
-    { "reopen",        L"Reopen closed tab",       L"Tabs",       CMD_REOPEN,        L"Ctrl+Shift+T" },
-    { "nexttab",       L"Next tab",                L"Tabs",       CMD_NEXTTAB,       L"Ctrl+Tab" },
-    { "prevtab",       L"Previous tab",            L"Tabs",       CMD_PREVTAB,       L"Ctrl+Shift+Tab" },
-    { "pin",           L"Pin / Unpin tab",         L"Tabs",       CMD_PIN_TAB,       L"" },
-    { "mute",          L"Mute / Unmute tab",       L"Tabs",       CMD_MUTE_TAB,      L"" },
-    { "split",         L"Toggle Split View",       L"Tabs",       CMD_SPLIT_VIEW,    L"Ctrl+Alt+S" },
-    { "splitswap",     L"Swap Split View Panes",   L"Tabs",       CMD_SPLIT_SWAP,    L"" },
-    { "palette",       L"Command palette",         L"Navigation", CMD_PALETTE,       L"Ctrl+Shift+P" },
-    { "focusurl",      L"Focus address bar",       L"Navigation", CMD_FOCUSURL,      L"Ctrl+L" },
-    { "reload",        L"Reload page",             L"Navigation", CMD_RELOAD,        L"Ctrl+R" },
-    { "back",          L"Back",                    L"Navigation", CMD_BACK,          L"Alt+Left" },
-    { "fwd",           L"Forward",                 L"Navigation", CMD_FWD,           L"Alt+Right" },
-    { "home",          L"Home",                    L"Navigation", CMD_HOME,          L"Alt+Home" },
-    { "find",          L"Find in page",            L"Navigation", CMD_FIND,          L"Ctrl+F" },
-    { "findnext",      L"Find next",               L"Navigation", CMD_FINDNEXT,      L"F3" },
-    { "findprev",      L"Find previous",           L"Navigation", CMD_FINDPREV,      L"Shift+F3" },
-    { "bookmark",      L"Bookmark this page",      L"Pages",      CMD_BOOKMARK,      L"Ctrl+D" },
-    { "bookmarks",     L"Bookmarks manager",       L"Pages",      CMD_BOOKMARKS,     L"Ctrl+Shift+O" },
-    { "bookmarks_bar", L"Toggle bookmarks bar",    L"Pages",      CMD_BOOKMARKS_BAR, L"Ctrl+Shift+B" },
-    { "history",       L"History",                 L"Pages",      CMD_HISTORY,       L"Ctrl+H" },
-    { "downloads",     L"Downloads",               L"Pages",      CMD_DOWNLOADS,     L"Ctrl+J" },
-    { "extensions",    L"Extensions (Userscripts)",L"Pages",      CMD_EXTENSIONS,    L"Ctrl+Shift+E" },
-    { "settings",      L"Settings",                L"Pages",      CMD_SETTINGS,      L"Ctrl+," },
-    { "incognito",     L"New incognito window",    L"Windows",    CMD_INCOGNITO,     L"Ctrl+Shift+N" },
-    { "proxy",         L"Toggle Proxy Tunnel",     L"Features",   CMD_PROXY_TOGGLE,  L"" },
-    { "reader",        L"Toggle Reader Mode",      L"Features",   CMD_READER_MODE,   L"Ctrl+Alt+R" },
-    { "wa",            L"Toggle Social Dock",      L"Features",   CMD_WHATSAPP,      L"Ctrl+Alt+W" },
-    { "forcedark",     L"Toggle Force Dark Mode",  L"Features",   CMD_FORCEDARK,     L"" },
-    { "lightmode",     L"Toggle Light / Dark UI",  L"Features",   CMD_LIGHTMODE,     L"" },
-    { "darkexempt",    L"Exclude Site from Force Dark", L"Features", CMD_DARK_EXEMPT, L"" },
-    { "blockads",      L"Toggle Ad Blocker",       L"Features",   CMD_BLOCKADS,      L"" },
-    { "blocktrackers", L"Toggle Tracker Blocker",  L"Features",   CMD_BLOCKTRACKERS, L"" },
-    { "copyclean",     L"Copy clean page URL",     L"Features",   CMD_COPY_CLEAN,    L"" },
-    { "scan",          L"Toggle Scanlines",        L"Features",   CMD_SCAN,          L"" },
-    { "perf",          L"Performance panel",       L"Tools",      CMD_PERFORMANCE,   L"Ctrl+Shift+M" },
-    { "devtools",      L"Developer tools",         L"Tools",      CMD_DEVTOOLS,      L"F12" },
-    { "print",         L"Print page",              L"Tools",      CMD_PRINT,         L"Ctrl+P" },
-    { "caret",         L"Caret browsing",          L"Tools",      CMD_CARET,         L"F7" },
-    { "fullscreen",    L"Toggle fullscreen",       L"Window",     CMD_FULLSCREEN,    L"F11" },
-    { "zoomin",        L"Zoom in",                 L"Zoom",       CMD_ZOOMIN,        L"Ctrl++" },
-    { "zoomout",       L"Zoom out",                L"Zoom",       CMD_ZOOMOUT,       L"Ctrl+-" },
-    { "zoomreset",     L"Reset zoom",              L"Zoom",       CMD_ZOOMRESET,     L"Ctrl+0" },
-    { "help",          L"User guide",              L"Tools",      CMD_HELP,          L"F1" },
-};
-static const int KEY_DEF_COUNT = (int)(sizeof(KEY_DEFS) / sizeof(KEY_DEFS[0]));
-
-struct ParsedKey {
-    bool valid = false;
-    bool ctrl = false;
-    bool shift = false;
-    bool alt = false;
-    int vk = 0;
-    std::wstring norm;
-};
-
-static int CanonicalVk(int vk) {
-    if (vk == VK_ADD) return VK_OEM_PLUS;
-    if (vk == VK_SUBTRACT) return VK_OEM_MINUS;
-    if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) return '0' + (vk - VK_NUMPAD0);
-    return vk;
-}
-
-static std::wstring VkName(int vk) {
-    vk = CanonicalVk(vk);
-    if (vk >= 'A' && vk <= 'Z') return std::wstring(1, (wchar_t)vk);
-    if (vk >= '0' && vk <= '9') return std::wstring(1, (wchar_t)vk);
-    if (vk >= VK_F1 && vk <= VK_F12) return L"F" + std::to_wstring(vk - VK_F1 + 1);
-    switch (vk) {
-    case VK_TAB: return L"Tab";
-    case VK_LEFT: return L"Left";
-    case VK_RIGHT: return L"Right";
-    case VK_UP: return L"Up";
-    case VK_DOWN: return L"Down";
-    case VK_HOME: return L"Home";
-    case VK_END: return L"End";
-    case VK_PRIOR: return L"PageUp";
-    case VK_NEXT: return L"PageDown";
-    case VK_INSERT: return L"Insert";
-    case VK_DELETE: return L"Delete";
-    case VK_SPACE: return L"Space";
-    case VK_RETURN: return L"Enter";
-    case VK_BACK: return L"Backspace";
-    case VK_OEM_COMMA: return L",";
-    case VK_OEM_PERIOD: return L".";
-    case VK_OEM_PLUS: return L"+";
-    case VK_OEM_MINUS: return L"-";
-    case VK_OEM_2: return L"/";
-    case VK_OEM_1: return L";";
-    case VK_OEM_7: return L"'";
-    case VK_OEM_4: return L"[";
-    case VK_OEM_6: return L"]";
-    case VK_OEM_5: return L"\\";
-    case VK_OEM_3: return L"`";
-    }
-    return L"";
-}
-
-static ParsedKey ParseKeyCombo(const std::wstring& raw) {
-    ParsedKey out;
-    std::wstring s = raw;
-    while (!s.empty() && iswspace(s.front())) s.erase(s.begin());
-    while (!s.empty() && iswspace(s.back())) s.pop_back();
-    if (s.empty()) { out.valid = true; return out; }
-
-    std::vector<std::wstring> toks;
-    size_t pos = 0;
-    while (pos < s.size()) {
-        size_t p = s.find(L'+', pos);
-        if (p == std::wstring::npos) {
-            toks.push_back(s.substr(pos));
-            break;
-        }
-        if (p == pos && p + 1 == s.size()) {
-            toks.push_back(L"+");
-            break;
-        }
-        std::wstring part = s.substr(pos, p - pos);
-        toks.push_back(part);
-        pos = p + 1;
-        if (pos == s.size()) { toks.push_back(L"+"); break; }
-    }
-    if (toks.empty()) return out;
-
-    for (size_t i = 0; i + 1 < toks.size(); i++) {
-        std::wstring m = toks[i];
-        for (auto& ch : m) ch = (wchar_t)towlower(ch);
-        while (!m.empty() && iswspace(m.front())) m.erase(m.begin());
-        while (!m.empty() && iswspace(m.back())) m.pop_back();
-        if (m == L"ctrl" || m == L"control") out.ctrl = true;
-        else if (m == L"alt") out.alt = true;
-        else if (m == L"shift") out.shift = true;
-        else return ParsedKey{};
-    }
-
-    std::wstring k = toks.back();
-    while (!k.empty() && iswspace(k.front())) k.erase(k.begin());
-    while (!k.empty() && iswspace(k.back())) k.pop_back();
-    std::wstring kl = k;
-    for (auto& ch : kl) ch = (wchar_t)towlower(ch);
-
-    int vk = 0;
-    if (kl.size() == 1) {
-        wchar_t ch = kl[0];
-        if (ch >= L'a' && ch <= L'z') vk = 'A' + (ch - L'a');
-        else if (ch >= L'0' && ch <= L'9') vk = '0' + (ch - L'0');
-        else if (ch == L',') vk = VK_OEM_COMMA;
-        else if (ch == L'.') vk = VK_OEM_PERIOD;
-        else if (ch == L'+' || ch == L'=') vk = VK_OEM_PLUS;
-        else if (ch == L'-') vk = VK_OEM_MINUS;
-        else if (ch == L'/') vk = VK_OEM_2;
-        else if (ch == L';') vk = VK_OEM_1;
-        else if (ch == L'\'') vk = VK_OEM_7;
-        else if (ch == L'[') vk = VK_OEM_4;
-        else if (ch == L']') vk = VK_OEM_6;
-        else if (ch == L'\\') vk = VK_OEM_5;
-        else if (ch == L'`') vk = VK_OEM_3;
-    } else if (kl.size() >= 2 && kl[0] == L'f') {
-        int fn = _wtoi(kl.c_str() + 1);
-        if (fn >= 1 && fn <= 12 && std::to_wstring(fn) == kl.substr(1)) vk = VK_F1 + fn - 1;
-    } else if (kl == L"tab") vk = VK_TAB;
-    else if (kl == L"left" || kl == L"arrowleft") vk = VK_LEFT;
-    else if (kl == L"right" || kl == L"arrowright") vk = VK_RIGHT;
-    else if (kl == L"up" || kl == L"arrowup") vk = VK_UP;
-    else if (kl == L"down" || kl == L"arrowdown") vk = VK_DOWN;
-    else if (kl == L"home") vk = VK_HOME;
-    else if (kl == L"end") vk = VK_END;
-    else if (kl == L"pageup") vk = VK_PRIOR;
-    else if (kl == L"pagedown") vk = VK_NEXT;
-    else if (kl == L"insert") vk = VK_INSERT;
-    else if (kl == L"delete") vk = VK_DELETE;
-    else if (kl == L"space") vk = VK_SPACE;
-    else if (kl == L"enter") vk = VK_RETURN;
-    else if (kl == L"backspace") vk = VK_BACK;
-    else if (kl == L"plus" || kl == L"equal") vk = VK_OEM_PLUS;
-    else if (kl == L"minus") vk = VK_OEM_MINUS;
-    else if (kl == L"comma") vk = VK_OEM_COMMA;
-    else if (kl == L"period") vk = VK_OEM_PERIOD;
-
-    if (!vk) return ParsedKey{};
-    bool isFunc = (vk >= VK_F1 && vk <= VK_F12);
-    if (!out.ctrl && !out.alt && !isFunc) return ParsedKey{};
-
-    out.vk = vk;
-    out.valid = true;
-    if (out.ctrl) out.norm += L"Ctrl+";
-    if (out.alt) out.norm += L"Alt+";
-    if (out.shift) out.norm += L"Shift+";
-    out.norm += VkName(vk);
-    return out;
-}
-
-static std::mutex g_kbMu;
-static std::vector<ParsedKey> g_kbList;
+// Keyboard shortcuts (commands.h keeps them): where they are saved, and the settings page's changes
 
 static std::wstring KeybindsPath() { return KnownFolder(FOLDERID_LocalAppData) + L"\\" + APP_DIR_NAME + L"\\keybindings.dat"; }
-
-static void KeybindsSeedDefaultsLocked() {
-    g_kbList.resize(KEY_DEF_COUNT);
-    for (int i = 0; i < KEY_DEF_COUNT; i++) g_kbList[i] = ParseKeyCombo(KEY_DEFS[i].defCombo);
-}
-
-static void KeybindsSaveLocked() {
-    if (g.incognito) return;
-    std::string out = "NEONNET-KEYS 1\n";
-    for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
-        out += std::string(KEY_DEFS[i].id) + "\t" + Utf8(g_kbList[i].norm) + "\n";
-    }
-    std::wstring path = KeybindsPath(), tmp = path + L".tmp";
-    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return;
-    DWORD wr = 0;
-    BOOL ok = WriteFile(h, out.data(), (DWORD)out.size(), &wr, nullptr) && wr == out.size();
-    CloseHandle(h);
-    if (!ok || !MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str());
-}
-
-static void KeybindsLoad() {
-    std::lock_guard<std::mutex> lk(g_kbMu);
-    KeybindsSeedDefaultsLocked();
-    HANDLE h = CreateFileW(KeybindsPath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return;
-    DWORD size = GetFileSize(h, nullptr), got = 0;
-    std::string data;
-    if (size > 0 && size < 256 * 1024) {
-        data.resize(size);
-        if (!ReadFile(h, &data[0], size, &got, nullptr) || got != size) data.clear();
-    }
-    CloseHandle(h);
-    size_t pos = data.find('\n');
-    if (pos == std::string::npos || data.compare(0, pos, "NEONNET-KEYS 1") != 0) return;
-    for (++pos; pos < data.size();) {
-        size_t e = data.find('\n', pos);
-        if (e == std::string::npos) e = data.size();
-        std::string line = data.substr(pos, e - pos);
-        pos = e + 1;
-        size_t t = line.find('\t');
-        if (t == std::string::npos) continue;
-        std::string id = line.substr(0, t);
-        std::wstring combo = Wide(line.substr(t + 1));
-        for (int i = 0; i < KEY_DEF_COUNT; i++) {
-            if (id == KEY_DEFS[i].id) {
-                ParsedKey pk = ParseKeyCombo(combo);
-                if (pk.valid) g_kbList[i] = std::move(pk);
-                break;
-            }
-        }
-    }
-}
-
-static std::wstring KeybindDisplay(int cmd) {
-    std::lock_guard<std::mutex> lk(g_kbMu);
-    for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
-        if (KEY_DEFS[i].cmd == cmd) return g_kbList[i].norm;
-    }
-    return L"";
-}
-
-static std::wstring KeybindsMapJson() {
-    std::lock_guard<std::mutex> lk(g_kbMu);
-    std::wstring o = L"{";
-    for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
-        if (i) o += L",";
-        o += L"\"" + Wide(KEY_DEFS[i].id) + L"\":" + JsonStr(g_kbList[i].norm);
-    }
-    return o + L"}";
-}
-
-static int MatchUserKeybind(bool ctrl, bool shift, bool alt, int vk) {
-    int cvk = CanonicalVk(vk);
-    std::lock_guard<std::mutex> lk(g_kbMu);
-    for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
-        const auto& pk = g_kbList[i];
-        if (pk.vk && pk.ctrl == ctrl && pk.shift == shift && pk.alt == alt && pk.vk == cvk) {
-            return KEY_DEFS[i].cmd;
-        }
-    }
-    return 0;
-}
-
-static std::string KeybindsJson() {
-    std::lock_guard<std::mutex> lk(g_kbMu);
-    std::string o = "{\"incognito\":";
-    o += (g.incognito ? "true" : "false");
-    o += ",\"items\":[";
-    for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
-        if (i) o += ",";
-        o += "{\"id\":" + JsonUtf8(Wide(KEY_DEFS[i].id)) +
-             ",\"label\":" + JsonUtf8(KEY_DEFS[i].label) +
-             ",\"group\":" + JsonUtf8(KEY_DEFS[i].group) +
-             ",\"combo\":" + JsonUtf8(g_kbList[i].norm) +
-             ",\"def\":" + JsonUtf8(KEY_DEFS[i].defCombo) + "}";
-    }
-    return o + "]}";
-}
-
-// Whether another command already holds this combination, with the reason to show if so. A combination
-// has one owner: of two commands on the same keys, only the first would ever run.
-static bool KeybindTakenLocked(const ParsedKey& pk, int target, std::string& errOut) {
-    if (!pk.vk) return false;
-    for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
-        if (i != target && g_kbList[i].vk == pk.vk && g_kbList[i].ctrl == pk.ctrl &&
-            g_kbList[i].shift == pk.shift && g_kbList[i].alt == pk.alt) {
-            errOut = "Shortcut " + Utf8(pk.norm) + " is already assigned to " + Utf8(KEY_DEFS[i].label) + ".";
-            return true;
-        }
-    }
-    return false;
-}
 
 static bool KeybindSetFromJson(const std::string& body, std::string& errOut) {
     CefRefPtr<CefValue> v = CefParseJSON(body, JSON_PARSER_RFC);
     if (!v || v->GetType() != VTYPE_DICTIONARY) { errOut = "Invalid JSON payload."; return false; }
     CefRefPtr<CefDictionaryValue> d = v->GetDictionary();
-    std::string id = d->GetString("id").ToString();
-    std::wstring combo = d->GetString("combo").ToWString();
-    int target = -1;
-    for (int i = 0; i < KEY_DEF_COUNT; i++) if (id == KEY_DEFS[i].id) { target = i; break; }
-    if (target < 0) { errOut = "Unknown command."; return false; }
-    ParsedKey pk = ParseKeyCombo(combo);
-    if (!pk.valid) { errOut = "Use Ctrl/Alt + key or F1-F12."; return false; }
-    // a command on these would take copy, cut, paste, select all, undo or redo away from every page
-    if (pk.ctrl && !pk.alt && !pk.shift && std::wstring_view(L"CXVAZY").find((wchar_t)pk.vk) != std::wstring_view::npos) {
-        errOut = Utf8(pk.norm) + " is kept for web pages (copy, cut, paste, select all, undo, redo).";
-        return false;
-    }
-
-    std::lock_guard<std::mutex> lk(g_kbMu);
-    if (KeybindTakenLocked(pk, target, errOut)) return false;
-    if ((int)g_kbList.size() < KEY_DEF_COUNT) KeybindsSeedDefaultsLocked();
-    g_kbList[target] = std::move(pk);
-    KeybindsSaveLocked();
-    return true;
-}
-
-// Gives one command (or, with an empty id, every command) its default shortcut back.
-static bool KeybindReset(const std::string& id, std::string& errOut) {
-    std::lock_guard<std::mutex> lk(g_kbMu);
-    if ((int)g_kbList.size() < KEY_DEF_COUNT) KeybindsSeedDefaultsLocked();
-    if (id.empty()) {
-        KeybindsSeedDefaultsLocked();
-    } else {
-        for (int i = 0; i < KEY_DEF_COUNT; i++) {
-            if (id != KEY_DEFS[i].id) continue;
-            ParsedKey pk = ParseKeyCombo(KEY_DEFS[i].defCombo);
-            if (KeybindTakenLocked(pk, i, errOut)) return false;
-            g_kbList[i] = std::move(pk);
-            break;
-        }
-    }
-    KeybindsSaveLocked();
-    return true;
+    return commands::Rebind(d->GetString("id").ToString(), d->GetString("combo").ToWString(), errOut);
 }
 
 // ---------------------------------------------------------------------------
@@ -2895,7 +2532,7 @@ static void UpdateFullscreen() { SetFullscreen(g.fsUser || g.fsElement); }
 // ---------------------------------------------------------------------------
 // Tabs
 
-static void ExecCmd(int cmd);
+static void ExecCmd(Cmd cmd);
 static void CreateTab(const std::wstring& url, bool activate, int at = -1);
 static void CloseTab(int id);
 static CefRefPtr<CefClient> MainClient();
@@ -3318,20 +2955,9 @@ public:
         if (e.type != KEYEVENT_RAWKEYDOWN) return false;
         bool ctrl = (e.modifiers & EVENTFLAG_CONTROL_DOWN) != 0, shift = (e.modifiers & EVENTFLAG_SHIFT_DOWN) != 0;
         bool alt = (e.modifiers & EVENTFLAG_ALT_DOWN) != 0, repeat = (e.modifiers & EVENTFLAG_IS_REPEAT) != 0;
-        int vk = e.windows_key_code, cmd = 0;
-        if (repeat) return false;
-        int userCmd = MatchUserKeybind(ctrl, shift, alt, vk);
-        switch (userCmd) {
-        case CMD_INCOGNITO: case CMD_PALETTE: case CMD_NEWTAB: case CMD_REOPEN:
-        case CMD_HISTORY: case CMD_DOWNLOADS: case CMD_EXTENSIONS: case CMD_SETTINGS:
-        case CMD_PREVTAB: case CMD_NEXTTAB: case CMD_HELP: case CMD_CARET:
-        case CMD_FULLSCREEN: case CMD_DEVTOOLS:
-            cmd = userCmd;
-            break;
-        }
-        if (!cmd && !userCmd && ctrl && shift && !alt && vk == 'K') cmd = CMD_PALETTE;
-        if (!cmd) return false;
-        ExecCmd(cmd);
+        const commands::Action a = commands::OnKey(commands::Where::DevTools, ctrl, shift, alt, repeat, e.windows_key_code);
+        if (a.kind != commands::Action::Run) return false;
+        ExecCmd(a.id);
         return true;
     }
     void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
@@ -4975,7 +4601,7 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
         SendMessageTimeoutW(g.hwnd, WM_APP_SETTING, 0, (LPARAM)msg, SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &res);
         out = "{\"ok\":true}";
     }
-    else if (path == L"api/keybindings") out = KeybindsJson();
+    else if (path == L"api/keybindings") out = commands::SettingsJson();
     else if (path == L"api/keybindings/capture") {
         g_kbCapturing = (QueryParam(query, L"on") == L"1");
     }
@@ -4986,16 +4612,16 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
             return new StringResource("{\"error\":" + JsonUtf8(Wide(err)) + "}", "application/json", 400);
         }
         PostMessageW(g.hwnd, WM_APP_THEME, 1, 0);
-        out = KeybindsJson();
+        out = commands::SettingsJson();
     }
     else if (path == L"api/keybindings/reset") {
         if (g.incognito) return new StringResource("{\"error\":\"incognito cannot modify keybindings\"}", "application/json", 403);
         std::string kid = Utf8(QueryParam(query, L"id")), err;
-        if (!KeybindReset(kid, err)) {
+        if (!commands::Reset(kid, err)) {
             return new StringResource("{\"error\":" + JsonUtf8(Wide(err)) + "}", "application/json", 400);
         }
         PostMessageW(g.hwnd, WM_APP_THEME, 1, 0);
-        out = KeybindsJson();
+        out = commands::SettingsJson();
     }
     else if (path == L"api/newtab") out = NewTabJson();
     else if (path == L"api/newtab/note") {
@@ -5506,31 +5132,31 @@ static void ShowAbout() {
         L" (bundled, via the Chromium Embedded Framework).\nThird-party licenses: CREDITS.html in the install folder.\n\n"
         L"Shortcuts";
     // the user's own shortcuts; what has none is left out. `fixed` is a key that cannot be changed.
-    auto line = [&](std::initializer_list<int> cmds, const wchar_t* what, const wchar_t* fixed = L"") {
+    auto line = [&](std::initializer_list<Cmd> cmds, const wchar_t* what, const wchar_t* fixed = L"") {
         std::wstring keys;
         auto add = [&](const std::wstring& k) { if (!k.empty()) keys += (keys.empty() ? L"" : L" / ") + k; };
-        for (int cmd : cmds) add(KeybindDisplay(cmd));
+        for (Cmd cmd : cmds) add(commands::Shortcut(cmd));
         add(fixed);
         if (!keys.empty()) v += L"\n  " + keys + L"    " + what;
     };
-    line({ CMD_NEWTAB }, L"new tab");
-    line({ CMD_CLOSETAB }, L"close tab");
-    line({ CMD_REOPEN }, L"reopen closed tab");
-    line({ CMD_NEXTTAB }, L"next tab");
-    line({ CMD_FOCUSURL }, L"address bar");
-    line({ CMD_RELOAD }, L"reload", L"F5");
-    line({ CMD_BACK, CMD_FWD }, L"back / forward");
-    line({ CMD_FIND }, L"find in page");
-    line({ CMD_FINDNEXT }, L"find next");
-    line({ CMD_BOOKMARK }, L"bookmark page");
-    line({ CMD_BOOKMARKS }, L"bookmarks");
-    line({ CMD_HISTORY }, L"history");
-    line({ CMD_EXTENSIONS }, L"extensions");
-    line({ CMD_ZOOMIN, CMD_ZOOMOUT, CMD_ZOOMRESET }, L"zoom in / out / reset");
-    line({ CMD_PRINT }, L"print");
-    line({ CMD_FULLSCREEN }, L"fullscreen");
-    line({ CMD_DEVTOOLS }, L"developer tools");
-    line({ CMD_HELP }, L"user guide");
+    line({ Cmd::NewTab }, L"new tab");
+    line({ Cmd::CloseTab }, L"close tab");
+    line({ Cmd::Reopen }, L"reopen closed tab");
+    line({ Cmd::NextTab }, L"next tab");
+    line({ Cmd::FocusAddress }, L"address bar");
+    line({ Cmd::Reload }, L"reload", L"F5");
+    line({ Cmd::Back, Cmd::Forward }, L"back / forward");
+    line({ Cmd::Find }, L"find in page");
+    line({ Cmd::FindNext }, L"find next");
+    line({ Cmd::Bookmark }, L"bookmark page");
+    line({ Cmd::Bookmarks }, L"bookmarks");
+    line({ Cmd::History }, L"history");
+    line({ Cmd::Extensions }, L"extensions");
+    line({ Cmd::ZoomIn, Cmd::ZoomOut, Cmd::ZoomReset }, L"zoom in / out / reset");
+    line({ Cmd::Print }, L"print");
+    line({ Cmd::Fullscreen }, L"fullscreen");
+    line({ Cmd::DevTools }, L"developer tools");
+    line({ Cmd::Help }, L"user guide");
     MessageBoxW(g.hwnd, v.c_str(), L"About NeonNet", MB_OK | MB_ICONINFORMATION);
 }
 
@@ -6222,7 +5848,7 @@ static void OpenPalette() {
          L",\"canReader\":" + std::wstring(a && CanReaderUrl(curUrl) ? L"true" : L"false") +
          L",\"readerMode\":" + std::wstring(a && a->readerMode ? L"true" : L"false") +
          L",\"incognito\":" + std::wstring(g.incognito ? L"true" : L"false") +
-         L",\"keys\":" + KeybindsMapJson() +      // the badges show the user's own shortcuts
+         L",\"keys\":" + commands::KeysJson() +     // the badges show the user's own shortcuts
          L",\"theme\":" + ThemeStateJson() + L"}}";
 
     FocusChrome();
@@ -6233,21 +5859,21 @@ static void ToggleCaretBrowsing();
 
 static void Toggle(Setting id) { settings::SetNumber(id, settings::Flag(id) ? 0 : 1); }
 
-static void ExecCmd(int cmd) {
+static void ExecCmd(Cmd cmd) {
     Tab* a = Active();
     CefRefPtr<CefBrowser> b = a ? a->browser : nullptr;
     switch (cmd) {
-    case CMD_NEWTAB: CreateTab(NEWTAB, true); break;
-    case CMD_PALETTE: OpenPalette(); break;
-    case CMD_PIN_TAB: if (a) SetPinned(a->id, !a->pinned); break;
-    case CMD_MUTE_TAB: if (a) ToggleMute(a->id); break;
-    case CMD_SPLIT_VIEW: ToggleSplitView(); break;
-    case CMD_SPLIT_SWAP: SwapSplitPanes(); break;
-    case CMD_READER_MODE: ToggleReaderMode(); break;
-    case CMD_FORCEDARK: Toggle(Setting::ForceDark); break;
-    case CMD_LIGHTMODE: Toggle(Setting::LightMode); break;
-    case CMD_DARK_EXEMPT: ToggleDarkExemptForActive(); break;
-    case CMD_PROXY_TOGGLE: {
+    case Cmd::NewTab: CreateTab(NEWTAB, true); break;
+    case Cmd::Palette: OpenPalette(); break;
+    case Cmd::PinTab: if (a) SetPinned(a->id, !a->pinned); break;
+    case Cmd::MuteTab: if (a) ToggleMute(a->id); break;
+    case Cmd::SplitView: ToggleSplitView(); break;
+    case Cmd::SplitSwap: SwapSplitPanes(); break;
+    case Cmd::ReaderMode: ToggleReaderMode(); break;
+    case Cmd::ForceDark: Toggle(Setting::ForceDark); break;
+    case Cmd::LightMode: Toggle(Setting::LightMode); break;
+    case Cmd::DarkExempt: ToggleDarkExemptForActive(); break;
+    case Cmd::ProxyToggle: {
         if (!ProxySetEnabled(-1)) {
             ApplyProxyPrefs();
             SendState();
@@ -6255,22 +5881,22 @@ static void ExecCmd(int cmd) {
         }
         break;
     }
-    case CMD_CARET: ToggleCaretBrowsing(); break;
-    case CMD_COPY_CLEAN: if (a) CopyCleanUrlToClipboard(DisplayUrl(a)); break;
-    case CMD_INCOGNITO: if (g.incognito) CreateTab(NEWTAB, true); else LaunchIncognito(L""); break;
-    case CMD_PERFORMANCE: SetPanelOpen(!g.panelOpen); break;
-    case CMD_WHATSAPP: SetWaOpen(!g.waOpen); break;
-    case CMD_CLOSETAB: if (a) CloseTab(a->id); break;
-    case CMD_HOME: if (b) b->GetMainFrame()->LoadURL(HomeUrl()); break;
-    case CMD_RELOAD:
+    case Cmd::Caret: ToggleCaretBrowsing(); break;
+    case Cmd::CopyClean: if (a) CopyCleanUrlToClipboard(DisplayUrl(a)); break;
+    case Cmd::Incognito: if (g.incognito) CreateTab(NEWTAB, true); else LaunchIncognito(L""); break;
+    case Cmd::Performance: SetPanelOpen(!g.panelOpen); break;
+    case Cmd::SocialDock: SetWaOpen(!g.waOpen); break;
+    case Cmd::CloseTab: if (a) CloseTab(a->id); break;
+    case Cmd::Home: if (b) b->GetMainFrame()->LoadURL(HomeUrl()); break;
+    case Cmd::Reload:
         if (b) { if (!a->errorUrl.empty()) b->GetMainFrame()->LoadURL(a->errorUrl); else b->Reload(); }
         break;
-    case CMD_STOP: if (b) b->StopLoad(); break;
-    case CMD_BACK: if (b && b->CanGoBack()) b->GoBack(); break;
-    case CMD_FWD: if (b && b->CanGoForward()) b->GoForward(); break;
-    case CMD_FOCUSURL: FocusUrl(); break;
-    case CMD_PRINT: if (b) b->GetHost()->Print(); break;
-    case CMD_NEXTTAB: case CMD_PREVTAB: {
+    case Cmd::Stop: if (b) b->StopLoad(); break;
+    case Cmd::Back: if (b && b->CanGoBack()) b->GoBack(); break;
+    case Cmd::Forward: if (b && b->CanGoForward()) b->GoForward(); break;
+    case Cmd::FocusAddress: FocusUrl(); break;
+    case Cmd::Print: if (b) b->GetHost()->Print(); break;
+    case Cmd::NextTab: case Cmd::PrevTab: {
         std::vector<int> vis;
         int cur = -1;
         for (auto& t : g.tabs) if (t->wsId == g.activeWs) {
@@ -6278,34 +5904,34 @@ static void ExecCmd(int cmd) {
             vis.push_back(t->id);
         }
         int n = (int)vis.size();
-        if (n > 1 && cur >= 0) SelectTab(vis[(cur + (cmd == CMD_NEXTTAB ? 1 : n - 1)) % n], true);
+        if (n > 1 && cur >= 0) SelectTab(vis[(cur + (cmd == Cmd::NextTab ? 1 : n - 1)) % n], true);
         break;
     }
-    case CMD_ZOOMIN: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_IN); break;
-    case CMD_ZOOMOUT: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_OUT); break;
-    case CMD_ZOOMRESET: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_RESET); break;
-    case CMD_BLOCKADS: Toggle(Setting::BlockAds); break;
-    case CMD_BLOCKTRACKERS: Toggle(Setting::BlockTrackers); break;
-    case CMD_SCAN: Toggle(Setting::Scanlines); break;
-    case CMD_FULLSCREEN: g.fsUser = !g.fullscreen; if (!g.fsUser) g.fsElement = false; UpdateFullscreen(); break;
-    case CMD_DEVTOOLS:
+    case Cmd::ZoomIn: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_IN); break;
+    case Cmd::ZoomOut: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_OUT); break;
+    case Cmd::ZoomReset: if (b) b->GetHost()->Zoom(CEF_ZOOM_COMMAND_RESET); break;
+    case Cmd::BlockAds: Toggle(Setting::BlockAds); break;
+    case Cmd::BlockTrackers: Toggle(Setting::BlockTrackers); break;
+    case Cmd::Scanlines: Toggle(Setting::Scanlines); break;
+    case Cmd::Fullscreen: g.fsUser = !g.fullscreen; if (!g.fsUser) g.fsElement = false; UpdateFullscreen(); break;
+    case Cmd::DevTools:
         if (Tab* t = Active()) {
             if (t->dev) { t->browser->GetHost()->CloseDevTools(); FocusPage(); }   // F12 again closes them
             else OpenDevTools(t, CefPoint());
         }
         break;
-    case CMD_ABOUT: ShowAbout(); break;
-    case CMD_HELP: CreateTab(DOCS_URL, true); break;
-    case CMD_UPDATE_CHECK: StartUpdateCheck(true); break;
-    case CMD_UPDATE_AUTO: Toggle(Setting::AutoUpdate); break;
-    case CMD_UPDATE_RESTART: g.updRelaunch = true; PostMessageW(g.hwnd, WM_CLOSE, 0, 0); break;
-    case CMD_UPDATE_PAGE: if (!g.updPage.empty()) CreateTab(g.updPage, true); break;
-    case CMD_FIND: OpenFind(); break;
-    case CMD_FINDNEXT: case CMD_FINDPREV:
+    case Cmd::About: ShowAbout(); break;
+    case Cmd::Help: CreateTab(DOCS_URL, true); break;
+    case Cmd::UpdateCheck: StartUpdateCheck(true); break;
+    case Cmd::UpdateAuto: Toggle(Setting::AutoUpdate); break;
+    case Cmd::UpdateRestart: g.updRelaunch = true; PostMessageW(g.hwnd, WM_CLOSE, 0, 0); break;
+    case Cmd::UpdatePage: if (!g.updPage.empty()) CreateTab(g.updPage, true); break;
+    case Cmd::Find: OpenFind(); break;
+    case Cmd::FindNext: case Cmd::FindPrev:
         if (!g.findOpen) OpenFind();
-        else DoFind(cmd == CMD_FINDNEXT);
+        else DoFind(cmd == Cmd::FindNext);
         break;
-    case CMD_REOPEN:
+    case Cmd::Reopen:
         if (!g.closed.empty()) {
             ClosedTab c = g.closed.back();
             g.closed.pop_back();
@@ -6314,59 +5940,45 @@ static void ExecCmd(int cmd) {
             if (c.pinned) SetPinned(g.active, true);
         }
         break;
-    case CMD_BOOKMARK: ToggleBookmark(); break;
-    case CMD_BOOKMARKS: OpenPage(BOOKMARKS_PAGE); break;
-    case CMD_BOOKMARKS_BAR: Toggle(Setting::BookmarksBar); break;
-    case CMD_HISTORY: OpenPage(HISTORY_PAGE); break;
-    case CMD_DOWNLOADS: OpenPage(DOWNLOADS_PAGE); break;
-    case CMD_EXTENSIONS: OpenPage(EXTENSIONS_PAGE); break;
-    case CMD_SETTINGS: OpenPage(SETTINGS_PAGE); break;
+    case Cmd::Bookmark: ToggleBookmark(); break;
+    case Cmd::Bookmarks: OpenPage(BOOKMARKS_PAGE); break;
+    case Cmd::BookmarksBar: Toggle(Setting::BookmarksBar); break;
+    case Cmd::History: OpenPage(HISTORY_PAGE); break;
+    case Cmd::Downloads: OpenPage(DOWNLOADS_PAGE); break;
+    case Cmd::Extensions: OpenPage(EXTENSIONS_PAGE); break;
+    case Cmd::Settings: OpenPage(SETTINGS_PAGE); break;
     }
     // zoom changes are async; refresh the status bar shortly after
-    if (cmd == CMD_ZOOMIN || cmd == CMD_ZOOMOUT || cmd == CMD_ZOOMRESET) SetTimer(g.hwnd, TIMER_ZOOM, 150, nullptr);
-}
-
-static bool IsNoRepeatCmd(int cmd) {
-    switch (cmd) {
-    case CMD_NEWTAB: case CMD_CLOSETAB: case CMD_REOPEN: case CMD_BOOKMARK: case CMD_BOOKMARKS_BAR:
-    case CMD_INCOGNITO: case CMD_PERFORMANCE: case CMD_HISTORY: case CMD_DOWNLOADS: case CMD_SETTINGS:
-    case CMD_BOOKMARKS: case CMD_EXTENSIONS: case CMD_PALETTE: case CMD_PRINT:
-    case CMD_PIN_TAB: case CMD_MUTE_TAB: case CMD_PROXY_TOGGLE: case CMD_FORCEDARK: case CMD_LIGHTMODE:
-    case CMD_SCAN: case CMD_BLOCKADS: case CMD_HELP: case CMD_CARET: case CMD_FULLSCREEN: case CMD_DEVTOOLS:
-    case CMD_BLOCKTRACKERS: case CMD_SPLIT_VIEW: case CMD_SPLIT_SWAP: case CMD_READER_MODE: case CMD_WHATSAPP:
-    case CMD_DARK_EXEMPT:
-        return true;
-    default: return false;
-    }
+    if (cmd == Cmd::ZoomIn || cmd == Cmd::ZoomOut || cmd == Cmd::ZoomReset) SetTimer(g.hwnd, TIMER_ZOOM, 150, nullptr);
 }
 
 static bool HandleShortcutKey(bool ctrl, bool shift, bool alt, bool repeat, int vk) {
-    int cmd = MatchUserKeybind(ctrl, shift, alt, vk);
-    if (cmd) {
-        if (repeat && IsNoRepeatCmd(cmd)) return true;   // swallow key repeat without firing twice
-        ExecCmd(cmd);
+    using commands::Action;
+    const Action a = commands::OnKey(commands::Where::Page, ctrl, shift, alt, repeat, vk);
+    switch (a.kind) {
+    case Action::None: break;
+    case Action::Swallow: return true;
+    case Action::Run: ExecCmd(a.id); return true;
+    case Action::LeaveFullscreen:
+        if (!g.fsUser) break;
+        ExecCmd(Cmd::Fullscreen);
+        return true;
+    case Action::GoToTab: {
+        std::vector<int> vis;
+        for (auto& t : g.tabs) if (t->wsId == g.activeWs) vis.push_back(t->id);
+        if (vis.empty()) break;
+        const size_t i = (a.number == 9) ? vis.size() - 1 : (size_t)(a.number - 1);
+        if (i >= vis.size()) break;
+        SelectTab(vis[i], true);
         return true;
     }
-    if (ctrl && !alt) {
-        if (vk == 'G') cmd = shift ? CMD_FINDPREV : CMD_FINDNEXT;
-        else if (vk == VK_F4 && !shift && !repeat) cmd = CMD_CLOSETAB;
-        else if (vk == 'K' && shift && !repeat) cmd = CMD_PALETTE;
-        else if (!shift && vk >= '1' && vk <= '9') {
-            std::vector<int> vis;
-            for (auto& t : g.tabs) if (t->wsId == g.activeWs) vis.push_back(t->id);
-            if (!vis.empty()) {
-                size_t i = (vk == '9') ? vis.size() - 1 : (size_t)(vk - '1');
-                if (i < vis.size()) { SelectTab(vis[i], true); return true; }
-            }
-        }
-    } else if (alt && !ctrl && !shift && vk >= '1' && vk <= '9' && !repeat) {
-        size_t wi = (size_t)(vk - '1');
-        if (wi < g.workspaces.size()) { SwitchWorkspace(g.workspaces[wi].id); return true; }
-    } else if (!ctrl && !alt && !shift) {
-        if (vk == VK_F5) cmd = CMD_RELOAD;
-        else if (vk == VK_ESCAPE && g.fsUser) cmd = CMD_FULLSCREEN;
+    case Action::GoToWorkspace: {
+        const size_t i = (size_t)(a.number - 1);
+        if (i >= g.workspaces.size()) break;
+        SwitchWorkspace(g.workspaces[i].id);
+        return true;
     }
-    if (vk == VK_F6 && !ctrl && !alt && !repeat) {
+    case Action::CycleFocus: {
         HWND f = GetFocus();
         HWND cw = g.chrome ? g.chrome->GetHost()->GetWindowHandle() : nullptr;
         if (cw && (f == cw || IsChild(cw, f))) {
@@ -6376,9 +5988,8 @@ static bool HandleShortcutKey(bool ctrl, bool shift, bool alt, bool repeat, int 
         }
         return true;
     }
-    if (!cmd) return false;
-    ExecCmd(cmd);
-    return true;
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -7184,40 +6795,40 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
     // that same click must not open it again.
     if (GetTickCount64() - g_menuClosedAt < 250) return;
     std::vector<MenuItem> m;
-    auto add = [&](int cmd, std::wstring text, std::wstring keys = L"", bool disabled = false, bool checked = false) {
-        MenuItem it; it.cmd = cmd; it.text = std::move(text); it.keys = std::move(keys); it.disabled = disabled; it.checked = checked;
+    auto add = [&](Cmd cmd, std::wstring text, std::wstring keys = L"", bool disabled = false, bool checked = false) {
+        MenuItem it; it.cmd = (int)cmd; it.text = std::move(text); it.keys = std::move(keys); it.disabled = disabled; it.checked = checked;
         m.push_back(std::move(it));
     };
     auto sep = [&] { m.push_back(MenuItem()); };
-    add(CMD_NEWTAB, L"New tab", KeybindDisplay(CMD_NEWTAB));
-    add(CMD_INCOGNITO, g.incognito ? L"New incognito tab" : L"New incognito window", KeybindDisplay(CMD_INCOGNITO));
-    add(CMD_REOPEN, L"Reopen closed tab", KeybindDisplay(CMD_REOPEN), g.closed.empty());
-    add(CMD_PALETTE, L"Command palette", KeybindDisplay(CMD_PALETTE));
+    add(Cmd::NewTab, L"New tab", commands::Shortcut(Cmd::NewTab));
+    add(Cmd::Incognito, g.incognito ? L"New incognito tab" : L"New incognito window", commands::Shortcut(Cmd::Incognito));
+    add(Cmd::Reopen, L"Reopen closed tab", commands::Shortcut(Cmd::Reopen), g.closed.empty());
+    add(Cmd::Palette, L"Command palette", commands::Shortcut(Cmd::Palette));
     sep();
-    add(CMD_BOOKMARKS, L"Bookmarks", KeybindDisplay(CMD_BOOKMARKS));
-    add(CMD_HISTORY, L"History", KeybindDisplay(CMD_HISTORY), g.incognito);   // nothing is recorded in an incognito window
-    add(CMD_DOWNLOADS, L"Downloads", KeybindDisplay(CMD_DOWNLOADS));
-    add(CMD_EXTENSIONS, L"Extensions", KeybindDisplay(CMD_EXTENSIONS));
+    add(Cmd::Bookmarks, L"Bookmarks", commands::Shortcut(Cmd::Bookmarks));
+    add(Cmd::History, L"History", commands::Shortcut(Cmd::History), g.incognito);   // nothing is recorded in an incognito window
+    add(Cmd::Downloads, L"Downloads", commands::Shortcut(Cmd::Downloads));
+    add(Cmd::Extensions, L"Extensions", commands::Shortcut(Cmd::Extensions));
     sep();
-    add(CMD_FIND, L"Find in page", KeybindDisplay(CMD_FIND));
-    add(CMD_SPLIT_VIEW, IsSplitActive() ? L"Exit split view" : L"Split view", KeybindDisplay(CMD_SPLIT_VIEW), false, IsSplitActive());
+    add(Cmd::Find, L"Find in page", commands::Shortcut(Cmd::Find));
+    add(Cmd::SplitView, IsSplitActive() ? L"Exit split view" : L"Split view", commands::Shortcut(Cmd::SplitView), false, IsSplitActive());
     {
         Tab* act = Active();
         bool canR = act && CanReaderUrl(DisplayUrl(act));
-        add(CMD_READER_MODE, L"Reader mode", KeybindDisplay(CMD_READER_MODE), !canR, act && act->readerMode);
+        add(Cmd::ReaderMode, L"Reader mode", commands::Shortcut(Cmd::ReaderMode), !canR, act && act->readerMode);
     }
-    add(CMD_PRINT, L"Print", KeybindDisplay(CMD_PRINT));
-    add(CMD_SCAN, L"Scanlines", KeybindDisplay(CMD_SCAN), false, On(Setting::Scanlines));
-    add(CMD_FULLSCREEN, L"Fullscreen", KeybindDisplay(CMD_FULLSCREEN), false, g.fullscreen);
-    add(CMD_DEVTOOLS, L"Developer tools", KeybindDisplay(CMD_DEVTOOLS));
+    add(Cmd::Print, L"Print", commands::Shortcut(Cmd::Print));
+    add(Cmd::Scanlines, L"Scanlines", commands::Shortcut(Cmd::Scanlines), false, On(Setting::Scanlines));
+    add(Cmd::Fullscreen, L"Fullscreen", commands::Shortcut(Cmd::Fullscreen), false, g.fullscreen);
+    add(Cmd::DevTools, L"Developer tools", commands::Shortcut(Cmd::DevTools));
     sep();
-    add(CMD_SETTINGS, L"Settings", KeybindDisplay(CMD_SETTINGS));
+    add(Cmd::Settings, L"Settings", commands::Shortcut(Cmd::Settings));
     if (!g.incognito) {   // surface update action only when an update is ready or available
-        if (g.upd == U_READY) add(CMD_UPDATE_RESTART, L"Restart to update to v" + g.updVersion);
-        else if (g.upd == U_AVAILABLE) add(CMD_UPDATE_PAGE, L"Download v" + g.updVersion);
+        if (g.upd == U_READY) add(Cmd::UpdateRestart, L"Restart to update to v" + g.updVersion);
+        else if (g.upd == U_AVAILABLE) add(Cmd::UpdatePage, L"Download v" + g.updVersion);
     }
-    add(CMD_HELP, L"User guide", KeybindDisplay(CMD_HELP));
-    add(CMD_ABOUT, L"About NeonNet");
+    add(Cmd::Help, L"User guide", commands::Shortcut(Cmd::Help));
+    add(Cmd::About, L"About NeonNet");
 
     RECT c = ChromeRect();
     // Right edge of the ≡ button, measured from the right edge of the UI area, which we know
@@ -7228,7 +6839,7 @@ static void ShowMenu(int cssRightGap, int cssY, double ratio) {
     POINT p{ c.right - px(cssRightGap), c.top + px(cssY) + px(2) };
     ClientToScreen(g.hwnd, &p);
     int cmd = RunMenu(std::move(m), p);
-    if (cmd) ExecCmd(cmd);
+    if (cmd) ExecCmd((Cmd)cmd);
 }
 
 // Right-click on a tab in the strip. cssX/cssY: the click inside the toolbar page, in CSS pixels.
@@ -7367,7 +6978,7 @@ static void ShowBookmarkMenu(long long id, bool isFolder, const std::wstring& ur
     case B_NEWTAB: if (store::Recordable(url)) CreateTab(url, true); break;
     case B_DEL: if (!g.incognito && id > 0 && store::DeleteBookmark(id)) { g.bmBarDirty = true; ScheduleSave(); SendState(); } break;
     case B_MGR: OpenPage(BOOKMARKS_PAGE); break;
-    case B_HIDE: ExecCmd(CMD_BOOKMARKS_BAR); break;
+    case B_HIDE: ExecCmd(Cmd::BookmarksBar); break;
     }
 }
 
@@ -7485,13 +7096,13 @@ static void OnChromeCommand(const std::wstring& msg) {
             FocusPage();
         }
     }
-    else if (cmd == L"back") ExecCmd(CMD_BACK);
-    else if (cmd == L"fwd") ExecCmd(CMD_FWD);
-    else if (cmd == L"reload") ExecCmd(CMD_RELOAD);
-    else if (cmd == L"stop") ExecCmd(CMD_STOP);
+    else if (cmd == L"back") ExecCmd(Cmd::Back);
+    else if (cmd == L"fwd") ExecCmd(Cmd::Forward);
+    else if (cmd == L"reload") ExecCmd(Cmd::Reload);
+    else if (cmd == L"stop") ExecCmd(Cmd::Stop);
     else if (cmd == L"newtab") {
         if (!arg.empty() && store::Recordable(arg)) CreateTab(arg, true);
-        else ExecCmd(CMD_NEWTAB);
+        else ExecCmd(Cmd::NewTab);
     }
     else if (cmd == L"mute") ToggleMute(_wtoi(arg.c_str()));
     else if (cmd == L"proxy.toggle") {
@@ -7515,15 +7126,15 @@ static void OnChromeCommand(const std::wstring& msg) {
         if (EngineSelect(arg)) SendState();
     }
     else if (cmd == L"palette") OpenPalette();
-    else if (cmd == L"split") ExecCmd(CMD_SPLIT_VIEW);
-    else if (cmd == L"splitswap") ExecCmd(CMD_SPLIT_SWAP);
+    else if (cmd == L"split") ExecCmd(Cmd::SplitView);
+    else if (cmd == L"splitswap") ExecCmd(Cmd::SplitSwap);
     else if (cmd == L"splitwith") SplitWithTab(_wtoi(arg.c_str()));
-    else if (cmd == L"reader") ExecCmd(CMD_READER_MODE);
+    else if (cmd == L"reader") ExecCmd(Cmd::ReaderMode);
     else if (cmd == L"wa") SetWaOpen(!g.waOpen);
     else if (cmd == L"darkexempt") ToggleDarkExemptForActive();
     else if (cmd == L"shield.refresh") { g.lastStateJson.clear(); SendState(); }
-    else if (cmd == L"shield.ads") ExecCmd(CMD_BLOCKADS);
-    else if (cmd == L"shield.trackers") ExecCmd(CMD_BLOCKTRACKERS);
+    else if (cmd == L"shield.ads") ExecCmd(Cmd::BlockAds);
+    else if (cmd == L"shield.trackers") ExecCmd(Cmd::BlockTrackers);
     else if (cmd == L"shield.siteads" || cmd == L"shield.sitetrackers") {
         std::string site = ActiveShieldSiteUtf8(a);
         if (!site.empty()) {
@@ -7532,24 +7143,11 @@ static void OnChromeCommand(const std::wstring& msg) {
         }
     }
     else if (cmd == L"exec") {
-        static const struct { const wchar_t* name; int id; } kExec[] = {
-            { L"newtab", CMD_NEWTAB }, { L"closetab", CMD_CLOSETAB }, { L"reopen", CMD_REOPEN },
-            { L"incognito", CMD_INCOGNITO }, { L"bookmark", CMD_BOOKMARK }, { L"bookmarks", CMD_BOOKMARKS },
-            { L"bookmarks_bar", CMD_BOOKMARKS_BAR }, { L"history", CMD_HISTORY }, { L"downloads", CMD_DOWNLOADS },
-            { L"extensions", CMD_EXTENSIONS }, { L"settings", CMD_SETTINGS }, { L"perf", CMD_PERFORMANCE },
-            { L"find", CMD_FIND }, { L"zoomin", CMD_ZOOMIN }, { L"zoomout", CMD_ZOOMOUT },
-            { L"zoomreset", CMD_ZOOMRESET }, { L"print", CMD_PRINT }, { L"blockads", CMD_BLOCKADS }, { L"blocktrackers", CMD_BLOCKTRACKERS }, { L"copyclean", CMD_COPY_CLEAN },
-            { L"scan", CMD_SCAN }, { L"forcedark", CMD_FORCEDARK }, { L"lightmode", CMD_LIGHTMODE }, { L"darkexempt", CMD_DARK_EXEMPT }, { L"proxy", CMD_PROXY_TOGGLE }, { L"fullscreen", CMD_FULLSCREEN },
-            { L"devtools", CMD_DEVTOOLS }, { L"caret", CMD_CARET }, { L"pin", CMD_PIN_TAB },
-            { L"mute", CMD_MUTE_TAB }, { L"split", CMD_SPLIT_VIEW }, { L"splitswap", CMD_SPLIT_SWAP },
-            { L"reader", CMD_READER_MODE }, { L"wa", CMD_WHATSAPP }, { L"help", CMD_HELP }, { L"about", CMD_ABOUT },
-            { L"update_check", CMD_UPDATE_CHECK },
-        };
-        for (const auto& it : kExec) if (arg == it.name) { ExecCmd(it.id); break; }
+        if (const Cmd id = commands::FromName(arg); id != Cmd::None) ExecCmd(id);
     }
-    else if (cmd == L"perf") ExecCmd(CMD_PERFORMANCE);
+    else if (cmd == L"perf") ExecCmd(Cmd::Performance);
     else if (cmd.rfind(L"perf.", 0) == 0) OnPerfCommand(cmd, arg);
-    else if (cmd == L"home") ExecCmd(CMD_HOME);
+    else if (cmd == L"home") ExecCmd(Cmd::Home);
     else if (cmd == L"dropdown") {
         // address bar suggestions / palette: the toolbar height they need (CSS px, 0 = closed)
         // arguments: bottom, then optionally x0, x1, y0
@@ -7608,8 +7206,8 @@ static void OnChromeCommand(const std::wstring& msg) {
     else if (cmd == L"wsswitch") SwitchWorkspace(_wtoi(arg.c_str()));
     else if (cmd == L"wsdelete") DeleteWorkspace(_wtoi(arg.c_str()));
     else if (cmd == L"select") SelectTab(_wtoi(arg.c_str()), arg.find(L'\n') == std::wstring::npos);   // "<id>\nnofocus": a press that may become a drag
-    else if (cmd == L"scan") ExecCmd(CMD_SCAN);
-    else if (cmd == L"bookmark") ExecCmd(CMD_BOOKMARK);
+    else if (cmd == L"scan") ExecCmd(Cmd::Scanlines);
+    else if (cmd == L"bookmark") ExecCmd(Cmd::Bookmark);
     else if (cmd == L"find") { g.findText = arg.substr(0, 1000); DoFind(true); }
     else if (cmd == L"findnext") DoFind(true);
     else if (cmd == L"findprev") DoFind(false);
@@ -8547,9 +8145,9 @@ static void ApplySetting(const std::wstring& key, const std::wstring& val) {
     } else if (key == L"search") {
         if (EngineSelect(val)) SendState();
     } else if (key == L"checkUpdate") {
-        if (val == L"restart") ExecCmd(CMD_UPDATE_RESTART);
-        else if (val == L"download") ExecCmd(CMD_UPDATE_PAGE);
-        else ExecCmd(CMD_UPDATE_CHECK);
+        if (val == L"restart") ExecCmd(Cmd::UpdateRestart);
+        else if (val == L"download") ExecCmd(Cmd::UpdatePage);
+        else ExecCmd(Cmd::UpdateCheck);
     } else if (key == L"defaultBrowser") {
         // Windows does not let a program make itself the default browser: make sure NeonNet is in the list
         // (the installer does this too, this also covers a copy that was not installed) and open the page
@@ -9867,7 +9465,8 @@ static int RunMain(HINSTANCE hinst, int nShow, void* sandbox_info) {
     }
     EnableDarkMenus();
     if (!g.incognito) PwLoad();
-    KeybindsLoad();
+    static commands::FileStorage shortcuts(KeybindsPath());
+    commands::Load(shortcuts, g.incognito);
     NewTabLoad();
     EnginesLoad();
     ProxyLoad();

@@ -122,7 +122,7 @@ The first build downloads the pinned CEF version (about 175 MB) and takes a few 
 ### Project structure
 
 ```
-src/         browser source (C++): window, tabs, settings, site rules, storage, updater, userscripts
+src/         browser source (C++): window, tabs, commands, settings, site rules, storage, updater, userscripts
 tests/       tests of the modules that need neither CEF nor a window
 ui/          interface and built-in pages (HTML), embedded into NeonNet.dll
 installer/   the setup program
