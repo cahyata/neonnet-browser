@@ -14,3 +14,7 @@ third_party/cef-extract/
 *.ilk
 *.exp
 *.lib
+
+# local notes for coding agents
+AGENTS.md
+CLAUDE.md
