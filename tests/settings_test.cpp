@@ -218,7 +218,8 @@ static void SettingsPageUsesRealNames() {
     CHECK(toggles >= 20);
 }
 
-void SitesTests();   // sites_test.cpp
+void SitesTests();      // sites_test.cpp
+void CommandsTests();   // commands_test.cpp
 
 int main() {
     EverySettingHasASample();
@@ -234,6 +235,7 @@ int main() {
     JsonShape();
     SettingsPageUsesRealNames();
     SitesTests();
+    CommandsTests();
     printf("%d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }

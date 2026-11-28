@@ -27,7 +27,7 @@ function Run($exe, [string[]]$a) { & $exe @a; if ($LASTEXITCODE -ne 0) { throw "
 if ($Test) {
     New-Item -ItemType Directory -Force build\test | Out-Null
     Run cl @('/nologo','/EHsc','/utf-8','/W3','/wd4244','/wd4996','/std:c++20','/MT','/DUNICODE','/D_UNICODE','/DNOMINMAX','/DWIN32_LEAN_AND_MEAN',
-             '/Isrc','/Fobuild\test\','/Febuild\test\tests.exe','tests\settings_test.cpp','tests\sites_test.cpp','src\settings.cpp','src\sites.cpp',
+             '/Isrc','/Fobuild\test\','/Febuild\test\tests.exe','tests\settings_test.cpp','tests\sites_test.cpp','tests\commands_test.cpp','src\settings.cpp','src\sites.cpp','src\commands.cpp',
              '/link','advapi32.lib')
     Run build\test\tests.exe @()
     return
@@ -78,8 +78,8 @@ Write-Host '== NeonNet.dll'
 & powershell -NoProfile -ExecutionPolicy Bypass -File tools\gen_tokens.ps1
 if ($LASTEXITCODE -ne 0) { throw 'gen_tokens.ps1 failed' }
 Push-Location src; Run rc @('/nologo', '/fo', '..\build\obj\app\app.res', 'app.rc'); Pop-Location
-Run cl ($cflags + @('/Fobuild\obj\app\', 'src\main.cpp', 'src\updater.cpp', 'src\store.cpp', 'src\perf.cpp', 'src\crash.cpp', 'src\userscripts.cpp', 'src\settings.cpp', 'src\sites.cpp'))
-$libs = @('build\obj\app\main.obj', 'build\obj\app\updater.obj', 'build\obj\app\store.obj', 'build\obj\app\perf.obj', 'build\obj\app\crash.obj', 'build\obj\app\userscripts.obj', 'build\obj\app\settings.obj', 'build\obj\app\sites.obj', 'build\obj\app\app.res', $wrapperLib, "$cef\Release\libcef.lib",
+Run cl ($cflags + @('/Fobuild\obj\app\', 'src\main.cpp', 'src\updater.cpp', 'src\store.cpp', 'src\perf.cpp', 'src\crash.cpp', 'src\userscripts.cpp', 'src\settings.cpp', 'src\sites.cpp', 'src\commands.cpp'))
+$libs = @('build\obj\app\main.obj', 'build\obj\app\updater.obj', 'build\obj\app\store.obj', 'build\obj\app\perf.obj', 'build\obj\app\crash.obj', 'build\obj\app\userscripts.obj', 'build\obj\app\settings.obj', 'build\obj\app\sites.obj', 'build\obj\app\commands.obj', 'build\obj\app\app.res', $wrapperLib, "$cef\Release\libcef.lib",
           'comctl32.lib','crypt32.lib','delayimp.lib','gdi32.lib','rpcrt4.lib','shlwapi.lib','wintrust.lib','ws2_32.lib',
           'user32.lib','ole32.lib','shell32.lib','advapi32.lib','dwmapi.lib','uuid.lib','winhttp.lib','bcrypt.lib')
 Remove-Item build\app\NeonNet.lib, build\app\NeonNet.exp -ErrorAction SilentlyContinue
