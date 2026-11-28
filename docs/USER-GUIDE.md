@@ -122,6 +122,8 @@ Sound is detected from audio and video elements on the page that are playing, no
 | F12 | Developer tools (docked in the window, press again to close; choose the position in the tools' three-dot menu > Dock side, or in Settings > DEVELOPER TOOLS) |
 | Middle-click a tab | Close that tab |
 
+**Settings > KEYBINDINGS** changes these shortcuts. Two commands cannot share the same keys, and Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+A, Ctrl+Z and Ctrl+Y are refused, because web pages need them to copy, cut, paste, select all, undo and redo.
+
 ## The `≡` menu
 
 New tab, new incognito window, reopen closed tab, command palette, bookmarks, history, downloads, **Extensions**, find in page, split view, reader mode, print, scanlines on/off, fullscreen, developer tools, settings, **Restart to update** or **Download** when a newer version is ready, the user guide, and **About NeonNet** (Chromium version and the shortcut list).

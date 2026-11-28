@@ -2235,6 +2235,11 @@ static bool KeybindSetFromJson(const std::string& body, std::string& errOut) {
     if (target < 0) { errOut = "Unknown command."; return false; }
     ParsedKey pk = ParseKeyCombo(combo);
     if (!pk.valid) { errOut = "Use Ctrl/Alt + key or F1-F12."; return false; }
+    // a command on these would take copy, cut, paste, select all, undo or redo away from every page
+    if (pk.ctrl && !pk.alt && !pk.shift && std::wstring_view(L"CXVAZY").find((wchar_t)pk.vk) != std::wstring_view::npos) {
+        errOut = Utf8(pk.norm) + " is kept for web pages (copy, cut, paste, select all, undo, redo).";
+        return false;
+    }
 
     std::lock_guard<std::mutex> lk(g_kbMu);
     if (KeybindTakenLocked(pk, target, errOut)) return false;
