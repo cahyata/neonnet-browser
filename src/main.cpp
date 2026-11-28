@@ -30,6 +30,7 @@
 #include <mutex>
 #include <thread>
 #include <wincrypt.h>
+#include <bcrypt.h>
 #pragma comment(lib, "crypt32.lib")
 #include <iphlpapi.h>
 #pragma comment(lib, "iphlpapi.lib")
@@ -153,6 +154,7 @@ struct Tab {
     bool devReopen = false;      // being closed only to open again at another kind of place (window <-> docked)
     RECT devHole{};              // docked tools: where they leave room for the page, in pixels from the page area's corner
     bool devHoleSet = false;     // ... once they have said so
+    bool webOpened = false;      // a window that a web page opened
     std::wstring title = L"NEW TAB";
     std::wstring url;
     std::wstring errorUrl;
@@ -311,6 +313,12 @@ using sites::HostFromAuthority;
 using sites::OriginOf;
 using sites::SiteOf;
 using sites::SplitUrl;
+
+// One of NeonNet's own pages, however the address is written. Web pages may not open them.
+static bool IsOwnPageAddress(const std::wstring& url) {
+    const std::wstring host = sites::HostOf(url);
+    return host == L"neonnet.ui" || host == L"chrome.neonnet.ui";
+}
 static bool On(Setting id) { return settings::Flag(id); }
 static bool Indonesian() { return settings::Text(Setting::Lang) == L"id"; }
 static std::mutex g_updMu;
@@ -3488,11 +3496,13 @@ public:
     }
 
     // --- life span ---
-    bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, int, const CefString& target_url,
+    bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int, const CefString& target_url,
                        const CefString&, CefLifeSpanHandler::WindowOpenDisposition disp, bool, const CefPopupFeatures&,
                        CefWindowInfo& windowInfo, CefRefPtr<CefClient>& client, CefBrowserSettings& settings,
                        CefRefPtr<CefDictionaryValue>&, bool*) override {
         if (IsUiBrowser(browser) || g.closing) return true;   // the chrome UI never opens popups
+        const bool ownOpener = frame && IsOwnPageAddress(frame->GetURL().ToWString());
+        if (!ownOpener && IsOwnPageAddress(target_url.ToWString())) return true;
         if (IsWaPanel(browser)) {
             std::wstring u = target_url.ToWString();
             if (!u.empty() && (u.rfind(L"http://", 0) == 0 || u.rfind(L"https://", 0) == 0)) {
@@ -3518,6 +3528,7 @@ public:
         auto tab = std::make_unique<Tab>();
         int id = tab->id = g.nextId++;
         tab->url = target_url.ToWString();
+        tab->webOpened = !ownOpener;
         int at = IndexOf(g.active);
         if (at < 0) g.tabs.push_back(std::move(tab));
         else g.tabs.insert(g.tabs.begin() + at + 1, std::move(tab));
@@ -3811,6 +3822,13 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
         if (!frame->IsMain() || IsUiBrowser(browser)) return false;
         Tab* t = TabOf(browser);
         std::wstring url = request->GetURL().ToWString();
+        // A web page may not take a window to NeonNet's own pages. What NeonNet loads itself, and
+        // going back or forward, may.
+        if (IsOwnPageAddress(url) && !(request->GetTransitionType() & (TT_DIRECT_LOAD_FLAG | TT_FORWARD_BACK_FLAG))) {
+            const std::wstring from = frame->GetURL().ToWString();
+            const bool blank = from.empty() || from == L"about:blank";
+            if (!IsOwnPageAddress(from) && (!blank || (t && t->webOpened))) return true;
+        }
         if (On(Setting::StripTracking) && t && request->GetMethod() == "GET" &&
             (url.rfind(L"http://", 0) == 0 || url.rfind(L"https://", 0) == 0)) {
             std::wstring host = sites::HostOf(url);
@@ -3835,8 +3853,9 @@ static void MaybeRunYtAdSkip(CefRefPtr<CefFrame> frame) {
         return true;
     }
 
-    bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, const CefString& target_url,
+    bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString& target_url,
                           CefRequestHandler::WindowOpenDisposition target_disposition, bool) override {
+        if (frame && !IsOwnPageAddress(frame->GetURL().ToWString()) && IsOwnPageAddress(target_url.ToWString())) return true;
         return HandleOpenDisposition(target_url, target_disposition, IsUiBrowser(browser));
     }
 
@@ -4423,8 +4442,8 @@ static std::string SettingsJson() {
 }
 
 // https://neonnet.ui/api/* : history, bookmarks, downloads and settings for NeonNet's own
-// pages. Only a main frame that shows a neonnet.ui page may call it, so websites can neither
-// read nor change anything.
+// pages. A request must carry ApiKey() and come from a main frame that shows a neonnet.ui page,
+// so websites can neither read nor change anything.
 static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const std::wstring& query, const std::string& body) {
     std::string out = "{}";
     bool changed = false;
@@ -4657,6 +4676,29 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
     return new StringResource(std::move(out), "application/json", 200);
 }
 
+// A secret of this run that only NeonNet's own pages are given. What a tab shows does not say who
+// sent a request: a website could send one into a window that shows a NeonNet page, or while it was
+// leaving for one. Empty if Windows could not supply random numbers, and then nothing is accepted.
+static const std::string& ApiKey() {
+    static const std::string key = [] {
+        unsigned char bytes[32] = {};
+        if (BCryptGenRandom(nullptr, bytes, sizeof(bytes), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0) return std::string();
+        std::string hex;
+        for (unsigned char b : bytes) { hex += "0123456789abcdef"[b >> 4]; hex += "0123456789abcdef"[b & 15]; }
+        return hex;
+    }();
+    return key;
+}
+
+// Goes first into every NeonNet page: its fetch() calls to the API carry the key.
+static std::string ApiKeyTag() {
+    return "<script>(function(){var f=window.fetch,k='" + ApiKey() + "';window.fetch=function(u,o){"
+           "var a=new URL(u,location.href);"
+           "if(a.origin===location.origin&&a.pathname.indexOf('/api/')===0){"
+           "o=Object.assign({},o);var h=new Headers(o.headers);h.set('X-NeonNet-Key',k);o.headers=h;}"
+           "return f.call(window,u,o);};})();</script>";
+}
+
 class UiSchemeFactory : public CefSchemeHandlerFactory {
 public:
     // Runs on the IO thread.
@@ -4694,7 +4736,8 @@ public:
             bool trusted = browser && frame && frame->IsMain() &&
                            (furl.rfind(UI_HOST, 0) == 0 ||
                             (browser->GetIdentifier() == g.chromeId.load() && furl.rfind(CHROME_UI_HOST, 0) == 0));
-            if (!trusted) return new StringResource("", "text/plain", 403);
+            if (!trusted || ApiKey().empty() || request->GetHeaderByName("X-NeonNet-Key").ToString() != ApiKey())
+                return new StringResource("", "text/plain", 403);
             std::string body;
             if (CefRefPtr<CefPostData> pd = request->GetPostData()) {
                 CefPostData::ElementVector els;
@@ -4729,7 +4772,7 @@ public:
             else body = cssTag + body;
             // The design tokens come first, so a page's own style can still refine a value.
             size_t hopen = body.find("<head>");
-            if (hopen != std::string::npos) body.insert(hopen + 6, TokensStyleTag());
+            if (hopen != std::string::npos) body.insert(hopen + 6, ApiKeyTag() + TokensStyleTag());
             return new StringResource(std::move(body), "text/html", 200);
         }
         // Unknown neonnet:// page: a themed page with a proper title (the tab would otherwise

@@ -4,6 +4,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-11-28
+
+### Security
+- **Please update.** A website could take control of NeonNet's own functions: change settings, give itself site permissions such as the camera, and install a userscript that then runs on other pages, in some cases without a click. Only NeonNet's own pages can use these functions now, and websites can no longer open those pages. After updating, check `neonnet://extensions` and `neonnet://permissions` for scripts or permissions you do not recognise.
+- The certificate and HTTPS-only warning page no longer runs a script placed in its address.
+
 ### Fixes
 - Resetting one keyboard shortcut no longer gives two commands the same keys: the reset is refused and names the command that holds them.
 - Toolbar tooltips and **About NeonNet** show your own shortcuts instead of the default ones.

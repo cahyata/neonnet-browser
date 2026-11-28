@@ -88,7 +88,15 @@ The tab strip and address bar are an ordinary HTML page (`ui/chrome.html`) in a 
 
 **App → UI:** `SendState()` runs `window.__nn({...})` in the chrome browser with the full state: tabs (id, title, loading), active tab, URL, canBack, canFwd, loading, scan, max, canStar, starred, find, findCase, findText, search. The UI re-renders from that state. Two smaller messages exist: `findResult` (match count and selected match) and `focusFind`.
 
-**Channel security:** `https://neonnet.ui/` is served by the app's own scheme handler, so these requests never reach the network. `/cmd` is only accepted from the chrome browser (checked by browser id). Web pages in tabs cannot send commands, even though they may load `https://neonnet.ui/newtab.html`.
+**Channel security:** `https://neonnet.ui/` is served by the app's own scheme handler, so these requests never reach the network. `/cmd` is only accepted from the chrome browser (checked by browser id). Web pages in tabs cannot send commands.
+
+**API security:** `/api/...` changes settings and data, so three things must hold.
+
+- The request carries the **API key** in the `X-NeonNet-Key` header. `ApiKey()` is random for each run, and `ApiKeyTag()` puts it into every NeonNet page ahead of the page's own scripts, where it wraps `fetch()`. Pages therefore call the API with `fetch()` only; a navigation, a form or `XMLHttpRequest` is refused. What a tab shows does not prove who sent a request, which is why the key is needed.
+- The request comes from a main frame that shows a NeonNet page.
+- Web pages cannot open NeonNet's pages in the first place: `OnBeforePopup`, `OnOpenURLFromTab` and `OnBeforeBrowse` refuse it. What NeonNet loads itself (the address bar, menus, the warning page) and going back or forward still work.
+
+A NeonNet page must never run script taken from its own address or from stored data, because that script would hold the key. `warning.html` opens `http` and `https` addresses only.
 
 ## Embedded pages
 

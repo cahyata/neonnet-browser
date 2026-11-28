@@ -44,6 +44,8 @@ const q = new URLSearchParams(location.search);
 const kind = q.get('kind') === 'https' ? 'https' : 'cert';
 const code = parseInt(q.get('code') || '0', 10);
 let target = q.get('url') || '';
+// The address comes from the page's own address, which anyone can write: only a web address may be opened.
+if (!/^https?:\/\//i.test(target)) target = '';
 let host = target;
 try { host = new URL(target).host; } catch (e) {}
 const $ = s => document.querySelector(s);
@@ -78,7 +80,9 @@ if (kind === 'cert') {
 }
 $('#back').onclick = () => { if (history.length > 1) history.back(); else location.href = 'https://neonnet.ui/newtab.html'; };
 $('#adv').onclick = () => { $('#more').classList.toggle('on'); };
+if (!target) $('#adv').hidden = true;
 $('#go').onclick = async () => {
+  if (!target) return;
   try { await fetch('/api/settings/set?key=proceed&value=' + encodeURIComponent((kind === 'cert' ? 'cert|' : 'http|') + target), {cache: 'no-store'}); } catch (e) {}
   location.href = target;
 };
