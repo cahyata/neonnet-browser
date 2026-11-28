@@ -1,0 +1,50 @@
+# Tests every push. Builds the app for main, pull requests and ci/ branches.
+# It publishes nothing: releases are made by hand (docs/MAINTENANCE.md).
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# a newer push to the same branch replaces the run in progress
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: powershell
+
+jobs:
+  test:
+    name: Test
+    runs-on: windows-2022   # Visual Studio 2022, as in docs/BUILD.md
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build and run the tests
+        run: powershell -ExecutionPolicy Bypass -File build.ps1 -Test
+
+  build:
+    name: Build
+    needs: test
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/ci/')
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
+      # about 600 MB unpacked; fetch_cef.ps1 does nothing when the pinned version is already there
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
+        with:
+          path: third_party/cef
+          key: cef-${{ runner.os }}-${{ hashFiles('cef_version.txt', 'tools/fetch_cef.ps1') }}
+      - name: Build the app
+        run: powershell -ExecutionPolicy Bypass -File build.ps1 -NoInstaller

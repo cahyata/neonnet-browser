@@ -61,6 +61,17 @@ The compiler flag `/d1trimfile` strips the local build path from source file nam
 
 For a quick test without installing, run `build/app/NeonNet.exe` directly. It uses the same profile as the installed app (`%LOCALAPPDATA%\NeonNet\Profile`).
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on GitHub Actions with Windows Server 2022 and Visual Studio 2022.
+
+| Job | Runs on | Command |
+|---|---|---|
+| Test | every push and pull request | `build.ps1 -Test` |
+| Build | `main`, pull requests, `ci/` branches and manual runs | `build.ps1 -NoInstaller` |
+
+The downloaded CEF is cached until `cef_version.txt` or `tools/fetch_cef.ps1` changes. The workflow publishes nothing: releases are made by hand (see [Maintenance](MAINTENANCE.md)). It does not start the app, so checks in the running browser are still done by hand.
+
 ## Changing the look
 
 | To change | Edit |
