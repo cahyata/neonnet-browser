@@ -16,7 +16,7 @@
 #define IDR_YT_ADSKIP  213
 #define IDR_TOKENS     214
 
-#define APP_VERSION    L"1.11.0"
+#define APP_VERSION    L"1.11.1"
 #define APP_PUBLISHER  L"NeonNet"
 
 // GitHub repository (owner/name) whose latest release the auto-updater checks.
