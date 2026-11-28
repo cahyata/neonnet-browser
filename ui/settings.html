@@ -1278,7 +1278,10 @@ function renderKeybindings(){
       rstBtn.disabled = kbIncog;
       rstBtn.onclick = async () => {
         stopKbRecord();
-        const j = await (await fetch('/api/keybindings/reset?id=' + encodeURIComponent(it.id), {method:'POST', cache:'no-store'})).json();
+        $('#kbErr').textContent = '';
+        const r = await fetch('/api/keybindings/reset?id=' + encodeURIComponent(it.id), {method:'POST', cache:'no-store'});
+        const j = await r.json();
+        if(!r.ok){ $('#kbErr').textContent = j.error || 'Could not reset shortcut.'; return; }
         kbItems = j.items || kbItems;
         flash(); renderKeybindings();
       };

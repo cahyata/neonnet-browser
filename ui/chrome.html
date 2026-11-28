@@ -474,7 +474,7 @@ body.find #find{display:flex}
     <span class="pal-k">ESC</span>
   </div>
   <div id="palList"></div>
-  <div class="pal-ft"><span>&#8593;&#8595; navigate</span><span>&#9166; run</span><span>&gt; commands</span><span>@ tabs</span><span>Ctrl+Shift+P</span></div>
+  <div class="pal-ft"><span>&#8593;&#8595; navigate</span><span>&#9166; run</span><span>&gt; commands</span><span>@ tabs</span><span id="palKey">Ctrl+Shift+P</span></div>
 </div>
 <script>
 const $ = s => document.querySelector(s);
@@ -509,6 +509,9 @@ function syncDrop(need, x0, x1, y0){
 }
 const NEWTAB = 'https://neonnet.ui/newtab.html';
 let state = {tabs:[], active:0};
+// Tooltips name the user's own shortcut (state.keys); a command without one gets a plain tooltip.
+const keyOf = id => (state.keys && state.keys[id]) || '';
+const withKey = (text, id) => keyOf(id) ? text + ' (' + keyOf(id) + ')' : text;
 let lastActiveTab = 0;
 let editing = false;
 let drag = null, pendingRender = false;   // tab being pressed or dragged: {id, x0, on, el, grab, w}
@@ -652,6 +655,8 @@ function render(){
     if(tEl.textContent !== titleTxt) tEl.textContent = titleTxt;
     d.setAttribute('aria-selected', t.id === state.active ? 'true' : 'false');
     d.setAttribute('aria-label', titleTxt + (t.pinned ? ', pinned' : '') + (t.muted ? ', muted' : t.audible ? ', playing audio' : ''));
+    const x = d.querySelector('.x'), xTip = withKey('Close tab', 'closetab');
+    if(x.title !== xTip) x.title = xTip;
     desired.push(d);
   });
 
@@ -699,7 +704,7 @@ function render(){
   star.disabled = !state.canStar;
   star.classList.toggle('on', !!state.starred);
   star.innerHTML = state.starred ? '&#9733;' : '&#9734;';
-  star.title = state.starred ? 'Remove bookmark (Ctrl+D)' : 'Bookmark this page (Ctrl+D)';
+  star.title = withKey(state.starred ? 'Remove bookmark' : 'Bookmark this page', 'bookmark');
   updateLock();
   document.body.classList.toggle('bmbar', !!state.bookmarksBar);
   renderBmBar();
@@ -713,6 +718,7 @@ function render(){
   updateZoomBtn();
   updateDlBtn();
   if(state.theme && state.theme.lang) applyChromeLang(state.theme.lang);
+  applyKeyTitles();
   if(tabListOpen) renderTabList();
   if(state.active !== lastActiveTab){
     lastActiveTab = state.active;
@@ -830,18 +836,29 @@ function applyChromeLang(l){
   $('#go').textContent = id ? 'BUKA' : 'GO';
   $('#fq').placeholder = id ? 'cari di halaman' : 'find in page';
   $('#bmMgr').textContent = id ? 'KELOLA' : 'MANAGE';
-  $('#plus').title = id ? 'Tab baru (Ctrl+T)' : 'New tab (Ctrl+T)';
   $('#wsAdd').title = id ? 'Workspace baru' : 'New workspace';
-  $('#back').title = id ? 'Kembali (Alt+Left)' : 'Back (Alt+Left)';
-  $('#fwd').title = id ? 'Maju (Alt+Right)' : 'Forward (Alt+Right)';
   $('#home').title = id ? 'Beranda' : 'Home';
-  $('#dockb').title = id ? 'Dock Sosial - WA / IG / Discord (Ctrl+Alt+W)' : 'Social Dock - WA / IG / Discord (Ctrl+Alt+W)';
-  $('#palb').title = id ? 'Palet Perintah (Ctrl+Shift+P)' : 'Command palette (Ctrl+Shift+P)';
-  $('#perfb').title = id ? 'Panel Performa (Ctrl+Shift+M)' : 'Performance panel (Ctrl+Shift+M)';
-  $('#dlb').title = id ? 'Unduhan (Ctrl+J)' : 'Downloads (Ctrl+J)';
   $('#menu').title = id ? 'Menu' : 'Menu';
+  applyKeyTitles();
 }
 window.__nnSetLang = applyChromeLang;
+
+// The tooltips with a shortcut in them: button, command, English, Indonesian.
+const KEY_TITLES = [
+  ['#plus', 'newtab', 'New tab', 'Tab baru'],
+  ['#back', 'back', 'Back', 'Kembali'],
+  ['#fwd', 'fwd', 'Forward', 'Maju'],
+  ['#dockb', 'wa', 'Social Dock - WA / IG / Discord', 'Dock Sosial - WA / IG / Discord'],
+  ['#palb', 'palette', 'Command palette', 'Palet Perintah'],
+  ['#perfb', 'perf', 'Performance panel', 'Panel Performa'],
+  ['#dlb', 'downloads', 'Downloads', 'Unduhan'],
+  ['#bmMgr', 'bookmarks', 'Bookmarks manager', 'Bookmarks manager'],
+];
+function applyKeyTitles(){
+  for(const [sel, cmd, en, id] of KEY_TITLES) $(sel).title = withKey(curChromeLang === 'id' ? id : en, cmd);
+  for(const sel of ['#plus', '#palb']) $(sel).setAttribute('aria-label', $(sel).title);
+  $('#palKey').textContent = keyOf('palette');
+}
 
 // The host pushes state with window.__nn({...}).
 window.__nn = m => {
@@ -1081,14 +1098,14 @@ function layoutBmBar(){
 function renderBmBar(){
   if(!state.bookmarksBar){ closeBmDrop(); return; }
   const bar = state.bar || [];
-  const key = JSON.stringify(bar);
+  const key = JSON.stringify([bar, keyOf('bookmark')]);
   if(key === bmLastKey) return;
   bmLastKey = key;
   closeBmDrop();
   bmItems.textContent = '';
   if(!bar.length){
     const s = document.createElement('span'); s.id = 'bmEmpty';
-    s.textContent = 'Press Ctrl+D to bookmark a page';
+    s.textContent = keyOf('bookmark') ? 'Press ' + keyOf('bookmark') + ' to bookmark a page' : 'Use the star in the address bar to bookmark a page';
     bmItems.appendChild(s);
     bmMore.classList.remove('on');
     return;
@@ -1666,9 +1683,9 @@ function renderZoom(){
   const mk = (tag, cls, txt) => { const e = document.createElement(tag); if(cls) e.className = cls; if(txt !== undefined) e.textContent = txt; return e; };
   zoomPop.textContent = '';
   const row = mk('div', 'zp-row');
-  const minus = mk('button', 'zp-btn', '-'); minus.title = 'Zoom out (Ctrl+-)'; minus.onclick = () => send('exec', 'zoomout');
+  const minus = mk('button', 'zp-btn', '-'); minus.title = withKey('Zoom out', 'zoomout'); minus.onclick = () => send('exec', 'zoomout');
   const val = mk('span', 'zp-val', z + '%');
-  const plus = mk('button', 'zp-btn', '+'); plus.title = 'Zoom in (Ctrl++)'; plus.onclick = () => send('exec', 'zoomin');
+  const plus = mk('button', 'zp-btn', '+'); plus.title = withKey('Zoom in', 'zoomin'); plus.onclick = () => send('exec', 'zoomin');
   row.append(minus, val, plus);
   const rst = mk('button', 'zp-rst', 'RESET TO 100%'); rst.onclick = () => { send('exec', 'zoomreset'); closeZoom(); };
   zoomPop.append(row, rst);
@@ -1731,7 +1748,7 @@ function ensureDlShell(){
   const dirBtn = mk('button', 'dir', 'DOWNLOAD FOLDER');
   dirBtn.onclick = () => { fetch('/api/downloads/folder?id=0', {cache:'no-store'}); closeDl(); };
   ft.appendChild(dirBtn);
-  const all = mk('button', '', 'ALL DOWNLOADS (Ctrl+J)');
+  const all = mk('button', '', withKey('ALL DOWNLOADS', 'downloads'));
   all.onclick = () => { closeDl(); send('exec', 'downloads'); };
   ft.appendChild(all);
   dlPop.appendChild(ft);
@@ -1893,7 +1910,7 @@ function buildPalCommands(d){
     (d.forceDark && d.darkHost) ? { kind:'CMD', title: d.darkExempt ? ('Force Dark: Re-enable for ' + d.darkHost) : ('Force Dark: Exclude ' + d.darkHost), sub:'Per-site exception for Force Dark Mode', aliases:'exclude whitelist exception dark mode situs kecualikan', badge: d.darkExempt ? 'EXCLUDED' : 'ACTIVE', badgeOn: !d.darkExempt, run:() => send('exec', 'darkexempt') } : null,
     { kind:'CMD', title:'Toggle Proxy Tunnel', sub: d.proxyName ? ('Profile: ' + d.proxyName) : 'Route NeonNet traffic via configured proxy', aliases:'vpn socks5 https tunnel proxy switch', badge: d.proxyOn ? 'ON' : (k('proxy','') || 'OFF'), badgeOn: !!d.proxyOn, run:() => send('exec', 'proxy') },
     { kind:'CMD', title:'Toggle Ad Blocker', sub:'Block banner & video ads across websites', aliases:'adblock adblocker ublock filter iklan', badge: d.blockAds ? 'ON' : (k('blockads','') || 'OFF'), badgeOn: !!d.blockAds, run:() => send('exec', 'blockads') },
-    { kind:'CMD', title:'Toggle Tracker Blocker', sub:'Block analytics, telemetry & tracking scripts', aliases:'tracker privacy analytics telemetry pelacak', badge: k('blocktrackers',''), run:() => send('exec', 'blocktrackers') },
+    { kind:'CMD', title:'Toggle Tracker Blocker', sub:'Block analytics, telemetry & tracking scripts', aliases:'tracker privacy analytics telemetry pelacak', badge: d.blockTrackers ? 'ON' : (k('blocktrackers','') || 'OFF'), badgeOn: !!d.blockTrackers, run:() => send('exec', 'blocktrackers') },
     { kind:'CMD', title:'Copy clean page URL', sub:'Copy current address without tracking parameters (utm_*, fbclid, gclid...)', aliases:'copy clean link strip utm tracker url', badge: k('copyclean',''), run:() => send('exec', 'copyclean') },
     { kind:'CMD', title:'Toggle Scanlines', sub:'CRT visual overlay effect', aliases:'crt retro effect', badge: d.scan ? 'ON' : (k('scan','') || 'OFF'), badgeOn: !!d.scan, run:() => send('exec', 'scan') },
     { kind:'CMD', title:'Toggle Bookmarks bar', sub:'Show or hide bookmarks strip', aliases:'favorites strip', badge:k('bookmarks_bar','Ctrl+Shift+B'), badgeOn: !!d.bookmarksBar, run:() => send('exec', 'bookmarks_bar') },

@@ -4,6 +4,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/), and versions
 
 ## [Unreleased]
 
+### Fixes
+- Resetting one keyboard shortcut no longer gives two commands the same keys: the reset is refused and names the command that holds them.
+- Toolbar tooltips and **About NeonNet** show your own shortcuts instead of the default ones.
+- The command palette shows whether the tracker blocker is on.
+
 ## [1.11.0] - 2026-11-28
 
 ### Features

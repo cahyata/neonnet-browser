@@ -2210,6 +2210,20 @@ static std::string KeybindsJson() {
     return o + "]}";
 }
 
+// Whether another command already holds this combination, with the reason to show if so. A combination
+// has one owner: of two commands on the same keys, only the first would ever run.
+static bool KeybindTakenLocked(const ParsedKey& pk, int target, std::string& errOut) {
+    if (!pk.vk) return false;
+    for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
+        if (i != target && g_kbList[i].vk == pk.vk && g_kbList[i].ctrl == pk.ctrl &&
+            g_kbList[i].shift == pk.shift && g_kbList[i].alt == pk.alt) {
+            errOut = "Shortcut " + Utf8(pk.norm) + " is already assigned to " + Utf8(KEY_DEFS[i].label) + ".";
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool KeybindSetFromJson(const std::string& body, std::string& errOut) {
     CefRefPtr<CefValue> v = CefParseJSON(body, JSON_PARSER_RFC);
     if (!v || v->GetType() != VTYPE_DICTIONARY) { errOut = "Invalid JSON payload."; return false; }
@@ -2223,32 +2237,30 @@ static bool KeybindSetFromJson(const std::string& body, std::string& errOut) {
     if (!pk.valid) { errOut = "Use Ctrl/Alt + key or F1-F12."; return false; }
 
     std::lock_guard<std::mutex> lk(g_kbMu);
-    if (pk.vk) {
-        for (int i = 0; i < KEY_DEF_COUNT && i < (int)g_kbList.size(); i++) {
-            if (i != target && g_kbList[i].vk == pk.vk && g_kbList[i].ctrl == pk.ctrl &&
-                g_kbList[i].shift == pk.shift && g_kbList[i].alt == pk.alt) {
-                errOut = "Shortcut " + Utf8(pk.norm) + " is already assigned to " + Utf8(KEY_DEFS[i].label) + ".";
-                return false;
-            }
-        }
-    }
+    if (KeybindTakenLocked(pk, target, errOut)) return false;
     if ((int)g_kbList.size() < KEY_DEF_COUNT) KeybindsSeedDefaultsLocked();
     g_kbList[target] = std::move(pk);
     KeybindsSaveLocked();
     return true;
 }
 
-static void KeybindReset(const std::string& id) {
+// Gives one command (or, with an empty id, every command) its default shortcut back.
+static bool KeybindReset(const std::string& id, std::string& errOut) {
     std::lock_guard<std::mutex> lk(g_kbMu);
     if ((int)g_kbList.size() < KEY_DEF_COUNT) KeybindsSeedDefaultsLocked();
     if (id.empty()) {
         KeybindsSeedDefaultsLocked();
     } else {
         for (int i = 0; i < KEY_DEF_COUNT; i++) {
-            if (id == KEY_DEFS[i].id) { g_kbList[i] = ParseKeyCombo(KEY_DEFS[i].defCombo); break; }
+            if (id != KEY_DEFS[i].id) continue;
+            ParsedKey pk = ParseKeyCombo(KEY_DEFS[i].defCombo);
+            if (KeybindTakenLocked(pk, i, errOut)) return false;
+            g_kbList[i] = std::move(pk);
+            break;
         }
     }
     KeybindsSaveLocked();
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -4973,8 +4985,10 @@ static CefRefPtr<CefResourceHandler> ServeApi(const std::wstring& path, const st
     }
     else if (path == L"api/keybindings/reset") {
         if (g.incognito) return new StringResource("{\"error\":\"incognito cannot modify keybindings\"}", "application/json", 403);
-        std::string kid = Utf8(QueryParam(query, L"id"));
-        KeybindReset(kid);
+        std::string kid = Utf8(QueryParam(query, L"id")), err;
+        if (!KeybindReset(kid, err)) {
+            return new StringResource("{\"error\":" + JsonUtf8(Wide(err)) + "}", "application/json", 400);
+        }
         PostMessageW(g.hwnd, WM_APP_THEME, 1, 0);
         out = KeybindsJson();
     }
@@ -5485,17 +5499,33 @@ static void ShowAbout() {
         L"Chromium " + std::to_wstring(cef_version_info(4)) + L"." + std::to_wstring(cef_version_info(5)) + L"." +
         std::to_wstring(cef_version_info(6)) + L"." + std::to_wstring(cef_version_info(7)) +
         L" (bundled, via the Chromium Embedded Framework).\nThird-party licenses: CREDITS.html in the install folder.\n\n"
-        L"Shortcuts\n"
-        L"  Ctrl+T  new tab          Ctrl+W  close tab\n"
-        L"  Ctrl+Shift+T  reopen closed tab\n"
-        L"  Ctrl+F  find in page     F3  find next\n"
-        L"  Ctrl+D  bookmark page    Ctrl+Shift+O  bookmarks\n"
-        L"  Ctrl+H  history          Ctrl+Shift+E  extensions\n"
-        L"  Ctrl+L  address bar      Ctrl+Tab  next tab\n"
-        L"  F5      reload           Alt+Left/Right  back/forward\n"
-        L"  Ctrl +/-/0  zoom         F11  fullscreen\n"
-        L"  Ctrl+P  print            F12  developer tools\n"
-        L"  F1      user guide";
+        L"Shortcuts";
+    // the user's own shortcuts; what has none is left out. `fixed` is a key that cannot be changed.
+    auto line = [&](std::initializer_list<int> cmds, const wchar_t* what, const wchar_t* fixed = L"") {
+        std::wstring keys;
+        auto add = [&](const std::wstring& k) { if (!k.empty()) keys += (keys.empty() ? L"" : L" / ") + k; };
+        for (int cmd : cmds) add(KeybindDisplay(cmd));
+        add(fixed);
+        if (!keys.empty()) v += L"\n  " + keys + L"    " + what;
+    };
+    line({ CMD_NEWTAB }, L"new tab");
+    line({ CMD_CLOSETAB }, L"close tab");
+    line({ CMD_REOPEN }, L"reopen closed tab");
+    line({ CMD_NEXTTAB }, L"next tab");
+    line({ CMD_FOCUSURL }, L"address bar");
+    line({ CMD_RELOAD }, L"reload", L"F5");
+    line({ CMD_BACK, CMD_FWD }, L"back / forward");
+    line({ CMD_FIND }, L"find in page");
+    line({ CMD_FINDNEXT }, L"find next");
+    line({ CMD_BOOKMARK }, L"bookmark page");
+    line({ CMD_BOOKMARKS }, L"bookmarks");
+    line({ CMD_HISTORY }, L"history");
+    line({ CMD_EXTENSIONS }, L"extensions");
+    line({ CMD_ZOOMIN, CMD_ZOOMOUT, CMD_ZOOMRESET }, L"zoom in / out / reset");
+    line({ CMD_PRINT }, L"print");
+    line({ CMD_FULLSCREEN }, L"fullscreen");
+    line({ CMD_DEVTOOLS }, L"developer tools");
+    line({ CMD_HELP }, L"user guide");
     MessageBoxW(g.hwnd, v.c_str(), L"About NeonNet", MB_OK | MB_ICONINFORMATION);
 }
 
@@ -6175,6 +6205,7 @@ static void OpenPalette() {
          L",\"darkHost\":" + JsonStr(Wide(sites::EntryFor(sites::List::ForceDark, WebHost(curUrl)))) +
          L",\"darkExempt\":" + std::wstring(sites::Excepted(sites::List::ForceDark, WebHost(curUrl)) ? L"true" : L"false") +
          L",\"blockAds\":" + std::wstring(On(Setting::BlockAds) ? L"true" : L"false") +
+         L",\"blockTrackers\":" + std::wstring(On(Setting::BlockTrackers) ? L"true" : L"false") +
          L",\"proxyOn\":" + std::wstring(proxyOn ? L"true" : L"false") +
          L",\"proxyName\":" + JsonStr(proxyName) +
          L",\"scan\":" + std::wstring(On(Setting::Scanlines) ? L"true" : L"false") +
